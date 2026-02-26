@@ -7,7 +7,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY apps/api/package.json ./apps/api/
 COPY apps/api/prisma ./apps/api/prisma/
-RUN npm ci --workspace=api --omit=dev
+RUN npm ci --workspace=api
 
 COPY apps/api ./apps/api
 RUN npm run build --workspace=api
