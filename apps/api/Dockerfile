@@ -3,13 +3,15 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-COPY apps/api/package*.json ./
-COPY apps/api/prisma ./prisma/
-RUN npm ci --omit=dev
+# Монорепо: lock-файл в корне
+COPY package.json package-lock.json ./
+COPY apps/api/package.json ./apps/api/
+COPY apps/api/prisma ./apps/api/prisma/
+RUN npm ci --workspace=api --omit=dev
 
-COPY apps/api .
-RUN npm run build
-RUN npx prisma generate
+COPY apps/api ./apps/api
+RUN npm run build --workspace=api
+RUN npx prisma generate --schema=./apps/api/prisma/schema.prisma
 
 FROM node:20-alpine AS runner
 
@@ -19,12 +21,11 @@ ENV NODE_ENV=production
 ENV PORT=4000
 
 COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/scripts ./scripts
+COPY --from=builder /app/apps/api/dist ./dist
+COPY --from=builder /app/apps/api/prisma ./prisma
 COPY --from=builder /app/package*.json ./
 
-RUN npx prisma generate
+RUN npx prisma generate --schema=./prisma/schema.prisma
 
 EXPOSE 4000
 
