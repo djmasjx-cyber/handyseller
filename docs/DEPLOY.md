@@ -1,123 +1,55 @@
-# Деплой HandySeller
+# HandySeller: деплой и восстановление
 
-## VM (рекомендуемый способ)
+## Схема
+
+```
+Internet → Nginx (80/443) → /api/* → API :4000
+                            /*     → Web :3001
+         Redis :6379 ← API
+         Yandex Managed PG ← API
+```
+
+## Одноразовая настройка VM
 
 ```bash
-npm run deploy
+# На своей машине: скопировать скрипты на VM и запустить
+scp -r scripts nginx docker-compose.* ubuntu@VM_IP:/tmp/handyseller-setup/
+ssh ubuntu@VM_IP "cd /tmp/handyseller-setup && sudo mkdir -p /opt/handyseller && sudo chown ubuntu:ubuntu /opt/handyseller"
+
+# Создать .env.production на VM (DATABASE_URL, JWT_SECRET, ENCRYPTION_KEY, CORS_ORIGIN, ADMIN_EMAIL, ADMIN_PASSWORD)
+# Затем:
+ssh ubuntu@VM_IP "bash -s" < scripts/vm-setup-once.sh
 ```
 
-Разворачивает полный стек на handyseller-vm: Web + API + PostgreSQL + Redis + nginx. Подробнее: [docs/DEPLOY-VM.md](./DEPLOY-VM.md).
+## CI/CD (GitHub Actions)
 
----
+Push в `main` → сборка образов → push в ghcr.io → деплой на VM.
 
-## Альтернативные варианты (legacy / другой стек)
+**Секреты:** VM_HOST, VM_SSH_KEY, VM_USER (опционально), CR_PAT (если образы приватные).
 
-### Обзор
-
-- **Фронтенд**: статический экспорт Next.js → Object Storage → CDN
-- **API**: NestJS → Docker → Compute Instance / Serverless Container
-- **БД**: Yandex Managed PostgreSQL (Terraform)
-
-## API
-
-### Переменные окружения
-
-```env
-DATABASE_URL=postgresql://handyseller_user:PASSWORD@c-xxx.rw.mdb.yandexcloud.net:6432/handyseller?sslmode=require
-PORT=4000
-NODE_ENV=production
-CORS_ORIGIN=https://handyseller.ru,https://www.handyseller.ru
-```
-
-### Сборка Docker (из корня репозитория)
+## Ручной деплой (когда CI упал)
 
 ```bash
-docker build -f apps/api/Dockerfile -t handyseller-api .
+VM_HOST=158.160.x.x bash scripts/deploy-manual-ssh.sh
 ```
 
-### Запуск
+Требуется: образы уже в ghcr.io (собранные ранее или локально запушенные).
+
+## Восстановление при падении
+
+1. **Watchdog** (cron каждые 2 мин): проверяет /health API и / Web, перезапускает контейнеры при падении.
+2. **Systemd**: при перезагрузке VM автоматически поднимает стек.
+3. **Ручной перезапуск:**
+   ```bash
+   ssh ubuntu@VM_IP "cd /opt/handyseller && docker compose -f docker-compose.ci.yml --env-file .env.production up -d"
+   ```
+
+## Диагностика
 
 ```bash
-docker run -p 4000:4000 -e DATABASE_URL="..." handyseller-api
+bash scripts/diagnose-site.sh   # через SSH если DEPLOY_SSH_KEY задан
+# или на VM:
+curl -s http://127.0.0.1:4000/health
+curl -s http://127.0.0.1:3001/
+docker compose -f /opt/handyseller/docker-compose.ci.yml ps
 ```
-
-### Миграции
-
-Миграции применяются отдельно (не в Docker):
-
-```bash
-cd apps/api && npx prisma migrate deploy
-```
-
-## Фронтенд
-
-### Сборка статики
-
-```bash
-npm run build:static
-```
-
-### Загрузка в Object Storage
-
-```bash
-npm run deploy:storage
-```
-
-Бакет: `handyseller-frontend-prod`, префикс `static/`.
-
-## Прокси /api
-
-Статический фронт делает запросы на `/api/*`. Варианты:
-
-1. **Тот же домен**: nginx / API Gateway проксирует `handyseller.ru/api` → NestJS (порт 4000)
-2. **Отдельный домен**: API на `api.handyseller.ru`, фронт с `NEXT_PUBLIC_API_URL=https://api.handyseller.ru`
-
-NestJS слушает на префиксе `/api` (кроме `/health`, `/health/ready`).
-
-## API на VM (handyseller-vm)
-
-VM: `158.160.209.158` (ubuntu).
-
-### Автоматический деплой (при наличии SSH)
-
-```bash
-# На VM должен быть Docker и SSH-доступ по ключу
-npm run deploy:api
-```
-
-Или вручную: `./scripts/deploy-api.sh`
-
-### SSH
-
-VM использует OS Login. Для входа по ключу добавлен ключ в метаданные. Если `Permission denied`:
-- используйте Serial Console в [консоли Yandex Cloud](https://console.cloud.yandex.ru);
-- либо задайте `HS_VM_USER` и `HS_VM_HOST`, если подключаетесь с другого пользователя/хоста.
-
-Подробная инструкция: `scripts/deploy-api-manual.md`.
-
-### Защита персональных данных (PII)
-
-- Email, name, phone пользователей хранятся в зашифрованном виде (AES-256-GCM).
-- `ENCRYPTION_KEY` в `.env` — минимум 32 символа. Не коммитить!
-- Токены маркетплейсов шифруются тем же ключом.
-
-### .env на VM
-
-В `~/handyseller/.env`:
-```env
-DATABASE_URL=postgresql://...
-JWT_SECRET=...
-ENCRYPTION_KEY=...
-CORS_ORIGIN=https://handyseller.ru,https://www.handyseller.ru
-```
-
-## Terraform
-
-```bash
-cd infra/terraform
-terraform init
-terraform plan
-terraform apply
-```
-
-После apply — обновить `DATABASE_URL` в `.env` API из вывода Terraform.

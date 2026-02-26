@@ -100,13 +100,13 @@ jobs:
           key: ${{ secrets.VM_SSH_KEY }}
           script: "sudo mkdir -p /opt/handyseller && sudo chown $(whoami):$(whoami) /opt/handyseller"
 
-      - name: Copy compose to VM
+      - name: Copy compose and scripts to VM
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USER }}
           key: ${{ secrets.VM_SSH_KEY }}
-          source: "docker-compose.ci.yml"
+          source: "docker-compose.ci.yml,scripts/vm-watchdog.sh,scripts/handyseller-start.sh"
           target: "/opt/handyseller/"
 
       - name: Deploy to VM
@@ -118,15 +118,28 @@ jobs:
           script: |
             set -e
             cd /opt/handyseller
-            export IMAGE_API="ghcr.io/${{ github.repository_owner }}/handyseller-api:latest"
-            export IMAGE_WEB="ghcr.io/${{ github.repository_owner }}/handyseller-web:latest"
+            IMAGE_API="ghcr.io/${{ github.repository_owner }}/handyseller-api:latest"
+            IMAGE_WEB="ghcr.io/${{ github.repository_owner }}/handyseller-web:latest"
+
+            # Сохраняем IMAGE_* для автозапуска и watchdog
+            grep -v '^IMAGE_API=' .env.production 2>/dev/null | grep -v '^IMAGE_WEB=' > .env.production.tmp || true
+            echo "IMAGE_API=$IMAGE_API" >> .env.production.tmp
+            echo "IMAGE_WEB=$IMAGE_WEB" >> .env.production.tmp
+            mv .env.production.tmp .env.production
 
             if [ -n "${{ secrets.CR_PAT }}" ]; then
               echo "${{ secrets.CR_PAT }}" | docker login ghcr.io -u ${{ github.repository_owner }} --password-stdin
             fi
 
+            export IMAGE_API IMAGE_WEB
+            chmod +x vm-watchdog.sh handyseller-start.sh 2>/dev/null || true
             docker compose -f docker-compose.ci.yml pull
             docker compose -f docker-compose.ci.yml --env-file .env.production up -d
+
+            # Watchdog cron (если ещё не установлен)
+            [ -f /etc/cron.d/handyseller-watchdog ] || \
+              echo "*/2 * * * * root /opt/handyseller/vm-watchdog.sh" | sudo tee /etc/cron.d/handyseller-watchdog
+            sudo chmod 644 /etc/cron.d/handyseller-watchdog 2>/dev/null || true
 
             sudo systemctl reload nginx 2>/dev/null || true
             echo "Deploy complete: https://app.handyseller.ru"
