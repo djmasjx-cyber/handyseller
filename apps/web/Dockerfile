@@ -7,7 +7,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY packages/ui packages/ui
 COPY apps/web/package*.json apps/web/
-RUN npm ci --workspace=web --workspace=@handyseller/ui --omit=dev
+RUN npm ci --workspace=web --workspace=@handyseller/ui
 
 COPY apps/web apps/web
 COPY packages packages
