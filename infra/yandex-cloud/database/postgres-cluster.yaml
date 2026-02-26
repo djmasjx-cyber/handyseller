@@ -1,0 +1,24 @@
+# Yandex Managed Service for PostgreSQL
+# Docs: https://cloud.yandex.ru/docs/managed-postgresql/
+# Use Terraform or yc CLI to create the cluster
+
+# Example Terraform resource:
+# resource "yandex_mdb_postgresql_cluster" "handyseller" {
+#   name        = "handyseller-db"
+#   environment = "PRODUCTION"
+#   network_id  = yandex_vpc_network.main.id
+#
+#   config {
+#     version = 15
+#     resources {
+#       resource_preset_id = "s2.small"
+#       disk_size        = 10
+#       disk_type_id     = "network-ssd"
+#     }
+#   }
+#
+#   host {
+#     zone      = "ru-central1-a"
+#     subnet_id = yandex_vpc_subnet.main.id
+#   }
+# }

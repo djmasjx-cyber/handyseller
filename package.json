@@ -2,25 +2,29 @@
   "name": "handyseller",
   "version": "0.1.0",
   "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
+    "dev": "npm run dev --workspace=web",
+    "dev:api": "npm run dev --workspace=api",
+    "build": "npm run build --workspaces",
+    "build:web": "npm run build --workspace=web",
+    "build:web:standalone": "OUTPUT_MODE=standalone npm run build --workspace=web",
+    "build:api": "npm run build --workspace=api",
+    "build:static": "node scripts/build-static.js",
+    "deploy:storage": "yc storage s3 cp ./apps/web/out s3://handyseller-frontend-prod/static/ --recursive",
+    "deploy:api": "./scripts/deploy-api.sh",
+    "start": "npm run start --workspace=web",
+    "lint": "npm run lint --workspaces --if-present",
+    "db:tunnel": "./scripts/db-tunnel.sh",
+    "db:connect": "./scripts/connect-db.sh",
+    "setup:cloud": "./scripts/setup-cloud-dev.sh",
+    "dev:api:mdb": "./scripts/start-api-mdb.sh",
+    "deploy": "bash scripts/run-deploy.sh"
   },
-  "dependencies": {
-    "next": "16.1.6",
-    "react": "19.2.3",
-    "react-dom": "19.2.3"
-  },
-  "devDependencies": {
-    "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "16.1.6",
-    "tailwindcss": "^4",
-    "typescript": "^5"
+  "engines": {
+    "node": ">=18"
   }
 }

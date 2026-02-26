@@ -1,0 +1,12 @@
+# Yandex Cloud Functions - Auth function
+# Deploy: yc serverless function create/update
+# Docs: https://cloud.yandex.ru/docs/functions/
+
+runtime: nodejs20
+memory: 128
+timeout: 10s
+
+# Environment variables (set during deployment)
+# env:
+#   DATABASE_URL: ${DATABASE_URL}
+#   JWT_SECRET: ${JWT_SECRET}

@@ -1,0 +1,15 @@
+# Yandex Object Storage bucket
+# Docs: https://cloud.yandex.ru/docs/storage/
+# Use Terraform or yc CLI to create the bucket
+
+# Example Terraform resource:
+# resource "yandex_storage_bucket" "handyseller" {
+#   bucket     = "handyseller-storage"
+#   access_key = yandex_iam_service_account_static_access_key.sa.key_id
+#   secret_key = yandex_iam_service_account_static_access_key.sa.secret
+#
+#   anonymous_access_flags {
+#     read = false
+#     list = false
+#   }
+# }

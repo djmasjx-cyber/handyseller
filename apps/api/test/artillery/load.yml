@@ -1,0 +1,31 @@
+# Artillery load test — HandySeller API
+# Запуск: npm run test:load (API на localhost:4000)
+# Цель: 1000+ req/sec на health endpoint
+config:
+  target: "http://localhost:4000"
+  phases:
+    - duration: 30
+      arrivalRate: 50
+      name: "Warm up"
+    - duration: 60
+      arrivalRate: 100
+      rampTo: 200
+      name: "Ramp to 200 concurrent"
+    - duration: 120
+      arrivalRate: 200
+      name: "Sustained load"
+
+scenarios:
+  - name: "Health check"
+    flow:
+      - get:
+          url: "/health"
+  - name: "Auth register (light)"
+    weight: 5
+    flow:
+      - post:
+          url: "/auth/register"
+          json:
+            email: "load-{{ $randomNumber() }}@test.com"
+            password: "LoadTest123!"
+            name: "Load User"

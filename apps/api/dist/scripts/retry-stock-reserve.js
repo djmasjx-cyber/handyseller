@@ -1,0 +1,51 @@
+#!/usr/bin/env node
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const dotenv = require("dotenv");
+const path = require("path");
+const core_1 = require("@nestjs/core");
+const client_1 = require("@prisma/client");
+const app_module_1 = require("../src/app.module");
+const orders_service_1 = require("../src/modules/orders/orders.service");
+dotenv.config({ path: path.join(__dirname, '../.env') });
+dotenv.config({ path: path.resolve(__dirname, '../../../.env.secrets'), override: true });
+const EXTERNAL_ID = process.env.EXTERNAL_ID?.trim();
+const ORDER_ID = process.env.ORDER_ID?.trim();
+const ID = ORDER_ID ?? EXTERNAL_ID;
+async function main() {
+    if (!ID) {
+        console.error('Укажите EXTERNAL_ID или ORDER_ID, например: EXTERNAL_ID=4686579129 node scripts/retry-stock-reserve.js');
+        process.exit(1);
+    }
+    const prisma = new client_1.PrismaClient();
+    const order = await prisma.order.findFirst({
+        where: { OR: [{ id: ID }, { externalId: ID }] },
+        select: { userId: true, externalId: true },
+    });
+    await prisma.$disconnect();
+    if (!order) {
+        console.error('Заказ не найден:', ID);
+        process.exit(1);
+    }
+    const app = await core_1.NestFactory.createApplicationContext(app_module_1.AppModule, { logger: ['error'] });
+    const ordersService = app.get(orders_service_1.OrdersService);
+    try {
+        const result = await ordersService.retryStockReserve(order.userId, ID);
+        console.log(JSON.stringify(result, null, 2));
+        if (result.ok) {
+            console.log('Остатки обновлены. StockSyncListener отправит на WB/Ozon.');
+        }
+        else {
+            console.error(result.message);
+            process.exit(1);
+        }
+    }
+    finally {
+        await app.close();
+    }
+}
+main().catch((e) => {
+    console.error(e);
+    process.exit(1);
+});
+//# sourceMappingURL=retry-stock-reserve.js.map

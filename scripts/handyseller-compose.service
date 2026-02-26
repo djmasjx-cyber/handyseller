@@ -1,0 +1,19 @@
+# Systemd unit: автозапуск HandySeller после перезагрузки.
+# Установка на VM: sudo cp /opt/handyseller/scripts/handyseller-compose.service /etc/systemd/system/
+#                 sudo systemctl daemon-reload && sudo systemctl enable handyseller-compose
+# Контейнеры имеют restart: unless-stopped — Docker поднимет их сам. Этот unit — запасной вариант.
+
+[Unit]
+Description=HandySeller Docker Compose
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/handyseller
+ExecStart=/usr/bin/docker compose -f docker-compose.prod.yml --env-file .env.production up -d
+ExecStop=/usr/bin/docker compose -f docker-compose.prod.yml down
+
+[Install]
+WantedBy=multi-user.target

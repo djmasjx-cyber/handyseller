@@ -1,0 +1,40 @@
+# HandySeller: PostgreSQL для разработки и деплоя на VM
+# Запуск: docker compose up -d
+# Остановка: docker compose down
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: handyseller-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: handyseller
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-handyseller_secret_change_me}
+      POSTGRES_DB: handyseller
+    ports:
+      - "5432:5432"
+    volumes:
+      - handyseller_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U handyseller -d handyseller"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: handyseller-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - handyseller_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  handyseller_pgdata:
+  handyseller_redis:

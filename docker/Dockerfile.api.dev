@@ -1,0 +1,21 @@
+# HandySeller API - Development (hot reload, full deps)
+# Используется с docker-compose при volume mount исходников
+FROM node:18-alpine
+
+WORKDIR /app
+
+COPY package*.json ./
+COPY apps/api/package*.json ./apps/api/
+COPY packages/ui/package.json ./packages/ui/
+
+RUN npm ci
+
+COPY apps/api ./apps/api
+
+WORKDIR /app/apps/api
+RUN npx prisma generate
+WORKDIR /app
+
+EXPOSE 4000
+
+CMD ["npm", "run", "start:dev", "--workspace=api"]

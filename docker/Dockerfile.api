@@ -1,0 +1,58 @@
+# HandySeller API - Production Dockerfile
+# Build: docker build -f docker/Dockerfile.api -t handyseller-api:latest .
+# Run from monorepo root
+
+# Stage 1: Build
+FROM node:18-alpine AS builder
+
+WORKDIR /app
+
+# Копируем package файлы (monorepo + api)
+COPY package*.json ./
+COPY apps/api/package*.json ./apps/api/
+COPY tsconfig.json ./
+
+# Устанавливаем все зависимости (включая dev для сборки)
+RUN npm ci
+
+# Копируем исходный код API
+COPY apps/api ./apps/api
+
+# Prisma generate + сборка
+WORKDIR /app/apps/api
+RUN npx prisma generate
+RUN npm run build
+
+# Stage 2: Production
+FROM node:18-alpine
+
+WORKDIR /app
+
+# Копируем package файлы
+COPY package*.json ./
+COPY apps/api/package*.json ./apps/api/
+
+# Копируем собранное приложение, prisma, node_modules
+COPY --from=builder /app/apps/api/dist ./apps/api/dist
+COPY --from=builder /app/apps/api/prisma ./apps/api/prisma
+COPY --from=builder /app/node_modules ./node_modules
+
+# Удаляем dev-зависимости
+RUN npm prune --omit=dev
+
+# .env из примера (переопределяется через env при запуске)
+COPY apps/api/.env.example apps/api/.env
+
+RUN addgroup -g 1001 -S nodejs && adduser -S node -u 1001 -G nodejs
+RUN chown -R node:node /app
+USER node
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
+  CMD node -e "require('http').get('http://localhost:4000/health', (r)=>process.exit(r.statusCode===200?0:1))"
+
+EXPOSE 4000
+
+ENV PORT=4000
+ENV NODE_ENV=production
+
+CMD ["node", "apps/api/dist/main.js"]

@@ -1,0 +1,22 @@
+# Yandex API Gateway configuration
+# Docs: https://cloud.yandex.ru/docs/api-gateway/
+openapi: 3.0.0
+info:
+  title: HandySeller API
+  version: 1.0.0
+
+paths:
+  /api/auth:
+    post:
+      x-yc-apigateway-integration:
+        type: cloud_functions
+        function_id: ${AUTH_FUNCTION_ID}
+        service_account_id: ${SERVICE_ACCOUNT_ID}
+      summary: Auth endpoint
+  /api/health:
+    get:
+      x-yc-apigateway-integration:
+        type: cloud_functions
+        function_id: ${HEALTH_FUNCTION_ID}
+        service_account_id: ${SERVICE_ACCOUNT_ID}
+      summary: Health check

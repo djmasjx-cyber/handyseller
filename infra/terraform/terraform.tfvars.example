@@ -1,0 +1,9 @@
+# Copy to terraform.tfvars and fill in your values
+# tfvars is gitignored for security
+
+yandex_cloud_id  = "your-yandex-cloud-id"
+yandex_folder_id = "your-yandex-cloud-folder-id"
+environment      = "prod"
+
+# Сгенерировать пароль: openssl rand -base64 24
+db_password = "your-secure-postgres-password"

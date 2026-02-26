@@ -1,0 +1,66 @@
+# Для CI: образы из ghcr.io. IMAGE_API и IMAGE_WEB задаются при деплое.
+# Использование: IMAGE_API=... IMAGE_WEB=... docker compose -f docker-compose.ci.yml up -d
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: handyseller-redis
+    restart: unless-stopped
+    volumes:
+      - handyseller_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - handyseller
+
+  api:
+    image: ${IMAGE_API}
+    container_name: handyseller-api
+    restart: unless-stopped
+    env_file: .env.production
+    environment:
+      NODE_ENV: production
+      PORT: "4000"
+      REDIS_HOST: redis
+    ports:
+      - "127.0.0.1:4000:4000"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:4000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - handyseller
+
+  web:
+    image: ${IMAGE_WEB}
+    container_name: handyseller-web
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: "3001"
+      HOSTNAME: "0.0.0.0"
+    ports:
+      - "127.0.0.1:3001:3001"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:3001/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - handyseller
+
+networks:
+  handyseller:
+    driver: bridge
+
+volumes:
+  handyseller_redis:

@@ -1,0 +1,452 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id             String   @id @default(uuid())
+  email          String?  @unique // переходный период; новые пользователи — только emailHash/emailEncrypted
+  emailHash      String?  @unique @map("email_hash")   // HMAC для поиска при логине
+  emailEncrypted String?  @map("email_encrypted")      // AES-256-GCM шифрованный email
+  passwordHash   String   @map("password_hash")
+  name           String?  // зашифровано
+  phone          String?  // зашифровано
+  role          Role     @default(USER)
+  isActive      Boolean  @default(true) @map("is_active")
+  twoFactorSecret String? @map("two_factor_secret") @db.Text
+  linkedToUserId  String?  @map("linked_to_user_id") // Привязка к другому аккаунту — использовать его маркетплейсы (Ozon, WB)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  linkedToUser   User?   @relation("UserLink", fields: [linkedToUserId], references: [id])
+  linkedAccounts User[]  @relation("UserLink")
+  products         Product[]
+  materials        Material[]
+  marketplaceConns MarketplaceConnection[]
+  orders           Order[]
+  wbSupplies       WbSupply[]
+  subscription     Subscription?
+  refreshTokens    RefreshToken[]
+  authAuditLogs   AuthAuditLog[]
+  stockLogs       StockLog[]
+  productFieldLogs ProductFieldLog[]
+  productChangeLogs ProductChangeLog[]
+  payments        Payment[]
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  token     String   @unique
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@index([userId])
+}
+
+model AuthAuditLog {
+  id        String   @id @default(uuid())
+  userId    String?  @map("user_id")
+  action    String
+  ip        String?
+  userAgent String?  @map("user_agent")
+  success   Boolean
+  metadata  Json?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model LoginAttempt {
+  id            String   @id @default(uuid())
+  ip            String
+  email         String?  // переходный период
+  emailEncrypted String? @map("email_encrypted")  // зашифрованный email
+  success       Boolean
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([ip])
+  @@index([createdAt])
+}
+
+/// Коды подтверждения email при регистрации. TTL 15 минут.
+model EmailVerification {
+  id            String   @id @default(uuid())
+  emailHash     String   @unique @map("email_hash")   // HMAC для поиска
+  code          String   // 6-значный код (хранится, истекает быстро)
+  passwordHash  String   @map("password_hash")
+  nameEncrypted String?  @map("name_encrypted")
+  phoneEncrypted String? @map("phone_encrypted")
+  expiresAt     DateTime @map("expires_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([emailHash])
+  @@index([expiresAt])
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+model Product {
+  id          String   @id @default(uuid())
+  displayId   Int      @unique @default(dbgenerated("nextval('product_display_id_seq'::regclass)")) @map("display_id") // Сквозной ID: 0001, 0002...
+  userId      String   @map("user_id")
+  title       String
+  description String?  @db.Text
+  price       Decimal  @db.Decimal(10, 2)
+  imageUrl    String?  @map("image_url")
+  sku         String?  @unique // Legacy: WB-xxx-nmId. Связка через ProductMarketplaceMapping.
+  article     String?  // Артикул продавца (только отображение, редактируемый)
+  stock       Int      @default(0)
+  seoTitle    String?  @map("seo_title") @db.VarChar(255)   // SEO-заголовок
+  seoKeywords String?  @map("seo_keywords") @db.VarChar(500) // Ключевые слова через запятую
+  seoDescription String? @map("seo_description") @db.VarChar(500) // SEO-описание
+  barcodeWb     String? @map("barcode_wb")   // Штрих-код товара WB (из sizes[].skus)
+  barcodeOzon   String? @map("barcode_ozon") // Штрих-код товара Ozon
+  brand         String? @db.VarChar(200)     // Бренд (обяз. на WB, vendor на Яндексе)
+  weight        Int?    @map("weight")       // Вес в граммах
+  width         Int?    @map("width")       // Ширина в мм
+  length        Int?    @map("length")      // Длина в мм
+  height        Int?    @map("height")      // Высота в мм
+  productUrl    String? @map("product_url") @db.VarChar(512) // URL страницы товара (обяз. на Яндексе)
+  color         String? @db.VarChar(100)     // Цвет (WB: characteristics, Ozon: attributes, Яндекс: param)
+  itemsPerPack  Int?    @map("items_per_pack")   // Количество предметов в упаковке (WB, Ozon, Яндекс)
+  material      String? @db.VarChar(200)     // Материал изделия
+  craftType     String? @map("craft_type") @db.VarChar(200) // Вид творчества
+  countryOfOrigin String? @map("country_of_origin") @db.VarChar(100) // Страна производства
+  packageContents String? @map("package_contents") @db.Text // Комплектация
+  richContent   String? @map("rich_content") @db.Text // Рич-контент (HTML): WB/Ozon/Яндекс
+  ozonCategoryId   Int?    @map("ozon_category_id")   // Ozon: description_category_id из справочника
+  ozonTypeId       Int?    @map("ozon_type_id")       // Ozon: type_id из справочника
+  ozonCategoryPath String? @map("ozon_category_path") @db.VarChar(500) // Путь для отображения: "Хобби > Материал > Бусина"
+  archivedAt   DateTime? @map("archived_at") // Архивированный — не показывается в основном списке
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user                    User                          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  materials                ProductMaterial[]
+  orders                   OrderItem[]
+  stockLogs                StockLog[]
+  fieldLogs                ProductFieldLog[]
+  changeLogs               ProductChangeLog[]
+  marketplaceMappings      ProductMarketplaceMapping[]
+
+  @@index([userId, article])
+}
+
+/// Унифицированная история изменений товаров (триггер на Product + явные записи).
+/// Ловит ВСЕ изменения — stock, поля, archive/restore.
+model ProductChangeLog {
+  id         String   @id @default(uuid())
+  productId  String   @map("product_id")
+  userId     String   @map("user_id")
+  changeType String   @map("change_type")
+  fieldName  String?  @map("field_name")
+  oldValue   String?  @map("old_value") @db.Text
+  newValue   String?  @map("new_value") @db.Text
+  delta      Int?
+  source     String?
+  note       String?  @db.Text
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("product_change_log")
+  @@index([productId])
+  @@index([createdAt])
+}
+
+/// Связка товара с маркетплейсом по СИСТЕМНОМУ ID (не по артикулу!).
+/// WB: externalSystemId = nm_id. Ozon: product_id. Amazon: ASIN.
+model ProductMarketplaceMapping {
+  id               String          @id @default(uuid())
+  productId        String          @map("product_id")
+  userId           String          @map("user_id")
+  marketplace      MarketplaceType
+
+  externalSystemId String          @map("external_system_id") // nm_id (WB), product_id (Ozon), ASIN
+  externalGroupId  String?         @map("external_group_id")  // imt_id (WB) — опционально
+  externalArticle  String?         @map("external_article")  // vendorCode, offer_id — только для UI
+
+  syncStock        Boolean         @default(true) @map("sync_stock")
+  isActive         Boolean         @default(true) @map("is_active")
+
+  product          Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, marketplace, externalSystemId])
+  @@index([productId])
+  @@index([userId, marketplace])
+}
+
+model StockLog {
+  id              String        @id @default(uuid())
+  productId       String        @map("product_id")
+  userId          String        @map("user_id")
+  delta           Int           // + пополнение, - списание (продажа)
+  quantityBefore  Int           @map("quantity_before")
+  quantityAfter   Int           @map("quantity_after")
+  source          StockLogSource @default(MANUAL)
+  note            String?       @db.Text
+  createdAt       DateTime     @default(now()) @map("created_at")
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+/// История изменений полей товара (название, цена, описание, артикул).
+model ProductFieldLog {
+  id        String   @id @default(uuid())
+  productId String   @map("product_id")
+  userId    String   @map("user_id")
+  field     String   // title | price | description | article
+  oldValue  String?  @map("old_value") @db.Text
+  newValue  String?  @map("new_value") @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("product_field_log")
+  @@index([productId])
+  @@index([createdAt])
+}
+
+enum StockLogSource {
+  MANUAL       // Ручное пополнение/списание
+  SALE         // Продажа на маркетплейсе
+  IMPORT       // Импорт с маркетплейса
+  SYNC         // Синхронизация
+}
+
+model Material {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  name      String
+  cost      Decimal  @db.Decimal(10, 2)
+  unit      String   @default("шт")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user     User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  products ProductMaterial[]
+}
+
+model ProductMaterial {
+  productId   String   @map("product_id")
+  materialId  String   @map("material_id")
+  quantity    Decimal  @db.Decimal(10, 2)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  material Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
+
+  @@id([productId, materialId])
+}
+
+model MarketplaceConnection {
+  id           String    @id @default(uuid())
+  userId       String    @map("user_id")
+  marketplace  MarketplaceType
+  token        String?   @db.Text
+  statsToken   String?   @map("stats_token") @db.Text
+  refreshToken String?   @map("refresh_token") @db.Text
+  sellerId     String?   @map("seller_id")
+  warehouseId  String?   @map("warehouse_id")
+  expiresAt    DateTime? @map("expires_at")
+  lastSyncAt   DateTime? @map("last_sync_at")
+  lastError    String?   @map("last_error") @db.Text
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+enum MarketplaceType {
+  WILDBERRIES
+  OZON
+  YANDEX
+  AVITO
+}
+
+model Order {
+  id                   String      @id @default(uuid())
+  userId               String      @map("user_id")
+  marketplace          MarketplaceType
+  externalId           String      @map("external_id")
+  status               OrderStatus @default(NEW)
+  totalAmount          Decimal     @map("total_amount") @db.Decimal(10, 2)
+  warehouseName        String?     @map("warehouse_name")
+  rawStatus            String?     @map("raw_status")
+  processingTimeMin    Int?        @map("processing_time_min")
+  holdUntil            DateTime?   @map("hold_until")
+  createdAt            DateTime    @default(now()) @map("created_at")
+  updatedAt            DateTime    @updatedAt @map("updated_at")
+
+  /// WB: id заказа (числовой) для QR-этикетки. Не srid! API /api/v3/orders/stickers принимает orders: [id]
+  wbStickerNumber      String?     @map("wb_sticker_number")
+  /// Ozon: posting_number для этикетки заказа
+  ozonPostingNumber    String?     @map("ozon_posting_number")
+  /// WB: тип фулфилмента заказа (FBS/DBS/DBW)
+  wbFulfillmentType    WbFulfillmentType? @map("wb_fulfillment_type")
+
+  /// Логистика и комиссия (из API WB reportDetailByPeriod, Ozon finance/transaction/list)
+  logisticsCost        Decimal?   @map("logistics_cost") @db.Decimal(10, 2)
+  commissionAmount     Decimal?   @map("commission_amount") @db.Decimal(10, 2)
+  costsSyncedAt        DateTime?  @map("costs_synced_at")
+
+  user                User                  @relation(fields: [userId], references: [id])
+  items               OrderItem[]
+  processingTime      OrderProcessingTime?  // источник истины для времени обработки
+
+  @@unique([userId, marketplace, externalId])
+  @@index([userId, marketplace])
+}
+
+enum WbFulfillmentType {
+  FBS
+  DBS
+  DBW
+}
+
+model OrderProcessingTime {
+  id                 String   @id @default(uuid())
+  orderId            String   @unique @map("order_id")
+  processingTimeMin   Int      @map("processing_time_min")
+  source             String   @default("sync_proxy") // sync_proxy | webhook | manual
+  calculatedAt       DateTime @default(now()) @map("calculated_at")
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+}
+
+model OrderItem {
+  id        String   @id @default(uuid())
+  orderId   String   @map("order_id")
+  productId String   @map("product_id")
+  quantity  Int
+  price     Decimal  @db.Decimal(10, 2)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  /// Штрих-код товара WB (для печати этикетки товара)
+  productBarcodeWb   String? @map("product_barcode_wb")
+  /// Штрих-код товара Ozon (для печати этикетки товара)
+  productBarcodeOzon String? @map("product_barcode_ozon")
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+}
+
+enum OrderStatus {
+  NEW
+  IN_PROGRESS
+  SHIPPED
+  READY_FOR_PICKUP  // товар в ПВЗ, ждёт клиента (WB: ready_for_pickup, waiting)
+  DELIVERED         // получен клиентом (WB: sold, receive, delivered)
+  CANCELLED
+}
+
+model WbSupply {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  wbSupplyId String   @map("wb_supply_id")
+  status     String   @default("ACTIVE") @map("status")
+  warehouseId String? @map("warehouse_id")
+  name       String?  @map("name")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, wbSupplyId])
+}
+
+model Subscription {
+  id             String   @id @default(uuid())
+  userId         String   @unique @map("user_id")
+  plan           SubscriptionPlan @default(FREE)
+  externalId     String?  @map("external_id")
+  expiresAt      DateTime? @map("expires_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+enum SubscriptionPlan {
+  FREE
+  PROFESSIONAL
+  BUSINESS
+}
+
+model Payment {
+  id              String        @id @default(uuid())
+  userId          String        @map("user_id")
+  amount          Decimal       @db.Decimal(10, 2)
+  currency        String        @default("RUB")
+  status          PaymentStatus @default(PENDING)
+  subjectType     String        @map("subject_type")
+  subjectId       String        @map("subject_id")
+  vtbOrderId      String?       @unique @map("vtb_order_id")
+  paymentMethod   String?       @map("payment_method")
+  refundable      Boolean       @default(true)
+  refundedAmount  Decimal       @default(0) @map("refunded_amount") @db.Decimal(10, 2)
+  idempotencyKey  String?       @unique @map("idempotency_key")
+  metadata        Json?
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  user     User         @relation(fields: [userId], references: [id])
+  webhooks VtbWebhook[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([vtbOrderId])
+  @@index([subjectType, subjectId])
+  @@index([createdAt])
+}
+
+enum PaymentStatus {
+  PENDING
+  PROCESSING
+  SUCCEEDED
+  FAILED
+  REFUNDED
+  CANCELLED
+}
+
+model VtbWebhook {
+  id              String   @id @default(uuid())
+  paymentId       String?  @map("payment_id")
+  eventType       String   @map("event_type")
+  vtbOrderId      String?  @map("vtb_order_id")
+  payload         Json
+  signature       String?  @db.VarChar(512)
+  ipAddress       String?  @map("ip_address") @db.VarChar(45)
+  processed       Boolean  @default(false)
+  processingError String?  @map("processing_error") @db.Text
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  payment Payment? @relation(fields: [paymentId], references: [id])
+
+  @@index([vtbOrderId])
+  @@index([processed])
+  @@index([createdAt])
+}

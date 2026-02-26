@@ -1,0 +1,19 @@
+# Меньше контекста = быстрее сборка в CI
+.git
+.github
+.next
+node_modules
+**/node_modules
+out
+.deploy-tmp
+*.log
+.env
+.env.*
+!.env.example
+!.env.secrets.example
+coverage
+.vercel
+infra/terraform/.terraform
+infra/terraform/*.tfstate*
+*.tsbuildinfo
+.cursor

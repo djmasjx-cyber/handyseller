@@ -1,0 +1,10 @@
+# Yandex CDN resource
+# Docs: https://cloud.yandex.ru/docs/cdn/
+# Use Terraform or yc CLI to create the CDN resource
+
+# Example Terraform resource:
+# resource "yandex_cdn_resource" "handyseller" {
+#   cname       = "cdn.handyseller.ru"
+#   origin_group_id = yandex_cdn_origin_group.handyseller.id
+#   active      = true
+# }

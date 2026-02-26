@@ -1,0 +1,67 @@
+# HandySeller Production: API + Web + Redis. БД — Yandex Managed PostgreSQL (вне контейнеров).
+# Запуск на VM: docker compose -f docker-compose.prod.yml --env-file .env.production up -d
+# Секреты — из .env.production (не коммитить). JWT_SECRET, ENCRYPTION_KEY, DATABASE_URL задаются при деплое.
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: handyseller-redis
+    restart: unless-stopped
+    volumes:
+      - handyseller_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - handyseller
+
+  api:
+    image: handyseller-api:latest
+    container_name: handyseller-api
+    restart: unless-stopped
+    env_file: .env.production
+    environment:
+      NODE_ENV: production
+      PORT: "4000"
+      REDIS_HOST: redis
+    ports:
+      - "127.0.0.1:4000:4000"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:4000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - handyseller
+
+  web:
+    image: handyseller-web:latest
+    container_name: handyseller-web
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: "3001"
+      HOSTNAME: "0.0.0.0"
+    ports:
+      - "127.0.0.1:3001:3001"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:3001/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - handyseller
+
+networks:
+  handyseller:
+    driver: bridge
+
+volumes:
+  handyseller_redis:
