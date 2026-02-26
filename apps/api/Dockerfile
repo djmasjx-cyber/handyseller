@@ -13,7 +13,9 @@ COPY apps/api ./apps/api
 RUN npx prisma generate --schema=./apps/api/prisma/schema.prisma
 RUN npm run build --workspace=api
 
-FROM node:20-alpine AS runner
+FROM node:20-slim AS runner
+
+RUN apt-get update -qq && apt-get install -y -qq openssl ca-certificates && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 

@@ -32,4 +32,5 @@ COPY --from=builder /app/apps/web/public ./apps/web/public
 
 EXPOSE 3001
 
-CMD ["node", "server.js"]
+# Standalone: server.js в корне или apps/web (outputFileTracingRoot)
+CMD ["sh", "-c", "if [ -f apps/web/server.js ]; then node apps/web/server.js; else node server.js; fi"]
