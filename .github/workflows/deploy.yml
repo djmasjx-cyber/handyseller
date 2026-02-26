@@ -144,8 +144,8 @@ jobs:
 
             export IMAGE_API IMAGE_WEB
             chmod +x vm-watchdog.sh handyseller-start.sh 2>/dev/null || true
-            docker compose -f docker-compose.ci.yml pull
-            docker compose -f docker-compose.ci.yml --env-file .env.production up -d
+            docker compose -f docker-compose.ci.yml pull || docker-compose -f docker-compose.ci.yml pull
+            docker compose -f docker-compose.ci.yml --env-file .env.production up -d || docker-compose -f docker-compose.ci.yml --env-file .env.production up -d
 
             [ -f /etc/cron.d/handyseller-watchdog ] || \
               echo "*/2 * * * * root /opt/handyseller/vm-watchdog.sh" | sudo tee /etc/cron.d/handyseller-watchdog
