@@ -11,6 +11,7 @@ RUN npm ci --workspace=web --workspace=@handyseller/ui
 
 COPY apps/web apps/web
 COPY packages packages
+RUN mkdir -p apps/web/public
 # Сборка Next.js standalone (то же, что при деплое: webpack, OUTPUT_MODE=standalone)
 ENV OUTPUT_MODE=standalone
 ENV API_URL=http://localhost:4000
@@ -27,7 +28,7 @@ ENV HOSTNAME=0.0.0.0
 
 COPY --from=builder /app/apps/web/.next/standalone ./
 COPY --from=builder /app/apps/web/.next/static ./apps/web/.next/static
-COPY --from=builder /app/apps/web/public ./apps/web/public 2>/dev/null || true
+COPY --from=builder /app/apps/web/public ./apps/web/public
 
 EXPOSE 3001
 
