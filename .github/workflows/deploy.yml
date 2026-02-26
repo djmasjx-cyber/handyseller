@@ -3,7 +3,7 @@
 #
 # Секреты в Settings → Secrets and variables → Actions:
 #   VM_HOST        — IP или hostname VM (158.160.x.x)
-#   VM_SSH_KEY     — приватный SSH-ключ (содержимое, без пароля)
+#   VM_SSH_KEY     — приватный ключ в base64: cat ~/.ssh/yandex_vm | base64
 #   VM_USER        — (опционально) пользователь SSH, по умолчанию ubuntu
 #
 # Одноразовая настройка VM: /opt/handyseller/.env.production, nginx, Docker
@@ -97,12 +97,17 @@ jobs:
           if [ -z "${{ secrets.VM_HOST }}" ]; then echo "::error::VM_HOST secret is empty"; exit 1; fi
           if [ -z "${{ secrets.VM_SSH_KEY }}" ]; then echo "::error::VM_SSH_KEY secret is empty"; exit 1; fi
 
+      - name: Prepare SSH key
+        run: |
+          echo "${{ secrets.VM_SSH_KEY }}" | base64 -d > deploy_key.pem
+          chmod 600 deploy_key.pem
+
       - name: Prepare VM directory
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USER || 'ubuntu' }}
-          key: ${{ secrets.VM_SSH_KEY }}
+          key_path: deploy_key.pem
           script: "sudo mkdir -p /opt/handyseller && sudo chown $(whoami):$(whoami) /opt/handyseller"
 
       - name: Copy compose and scripts to VM
@@ -110,7 +115,7 @@ jobs:
         with:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USER || 'ubuntu' }}
-          key: ${{ secrets.VM_SSH_KEY }}
+          key_path: deploy_key.pem
           source: "docker-compose.ci.yml,scripts/vm-watchdog.sh,scripts/handyseller-start.sh"
           target: "/opt/handyseller/"
 
@@ -119,7 +124,7 @@ jobs:
         with:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USER || 'ubuntu' }}
-          key: ${{ secrets.VM_SSH_KEY }}
+          key_path: deploy_key.pem
           script: |
             set -e
             cd /opt/handyseller

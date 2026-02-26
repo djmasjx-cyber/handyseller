@@ -1,6 +1,11 @@
 # Исправление SSH-ошибки деплоя
 
-Ошибка: `ssh: unable to authenticate, attempted methods [none publickey]`
+## Типичные ошибки
+
+| Ошибка | Причина |
+|--------|---------|
+| `ssh.ParsePrivateKey: ssh: no key found` | Секрет VM_SSH_KEY пустой, обрезан или скопирован с ошибкой |
+| `ssh: unable to authenticate, attempted methods [none]` | Публичный ключ не добавлен на VM или не совпадает с приватным |
 
 ## Причина
 GitHub Actions не может подключиться к VM — неверный или отсутствующий SSH-ключ.
@@ -13,33 +18,29 @@ GitHub Actions не может подключиться к VM — неверны
 
 ```bash
 # Тест подключения
-ssh -i ~/.ssh/yandex_vm ubuntu@158.160.209.158 "echo OK"
+ssh -i ~/.ssh/handyseller-deploy ubuntu@51.250.119.224 "echo OK"
 ```
 
 Если `OK` — ключ рабочий. Если ошибка — ключ не подходит к VM.
 
 ### 2. Добавить ключ в GitHub Secrets
 
-**Важно:** `VM_SSH_KEY` должен содержать **полное содержимое** приватного ключа.
+**Важно:** `VM_SSH_KEY` должен содержать ключ в **base64** (из‑за потери переводов строк в GitHub Secrets):
 
 ```bash
-# Скопировать ключ в буфер (для вставки в GitHub)
-cat ~/.ssh/yandex_vm
+# На Mac/Linux — скопировать в буфер
+cat ~/.ssh/yandex_vm | base64 | pbcopy   # Mac
+cat ~/.ssh/yandex_vm | base64 | xclip     # Linux
 ```
 
-Скопируйте **всё** — включая строки:
-```
------BEGIN OPENSSH PRIVATE KEY-----
-...содержимое...
------END OPENSSH PRIVATE KEY-----
-```
+Вставьте результат в GitHub Secrets → VM_SSH_KEY (одна длинная строка).
 
 ### 3. Настройка в GitHub
 
 1. Откройте: https://github.com/djmasjx-cyber/handyseller/settings/secrets/actions
 2. Проверьте/создайте секреты:
-   - **VM_HOST** = `158.160.209.158` — только IP, без пробелов и переносов
-   - **VM_SSH_KEY** = содержимое `~/.ssh/yandex_vm` (полный текст)
+   - **VM_HOST** = `51.250.119.224` — только IP, без пробелов и переносов
+   - **VM_SSH_KEY** = содержимое приватного ключа (полный текст, с BEGIN/END)
    - **VM_USER** = `ubuntu` (опционально)
 
    **Важно для VM_HOST:** если ошибка "no such host" — удалите секрет и создайте заново, вставив только IP.
@@ -58,7 +59,7 @@ cat ~/.ssh/yandex_vm
 
 ```bash
 # С локальной машины
-ssh-copy-id -i ~/.ssh/yandex_vm.pub ubuntu@158.160.209.158
+ssh-copy-id -i ~/.ssh/handyseller-deploy.pub ubuntu@51.250.119.224
 ```
 
 Или вручную:
@@ -71,3 +72,19 @@ chmod 600 ~/.ssh/authorized_keys
 ### 6. Перезапустить workflow
 
 После исправления секретов: Actions → Build and Deploy → Re-run jobs
+
+---
+
+## Замена ключа (если «no key found» или ключ утерян)
+
+Если `VM_SSH_KEY` не парсится или ключ не подходит — сгенерируйте новую пару и замените публичный ключ на VM:
+
+```bash
+bash scripts/generate-deploy-key.sh
+```
+
+Скрипт выведет:
+1. **Публичный ключ** — добавьте в метаданные VM (Yandex Cloud → VM → Метаданные → ssh-keys: `ubuntu:ssh-ed25519 AAAA...`)
+2. **Приватный ключ** — вставьте в GitHub Secrets → VM_SSH_KEY (полностью, с BEGIN/END)
+
+**Важно для VM_SSH_KEY:** копируйте ключ без лишних пробелов в начале/конце, с переводом строки после `-----END OPENSSH PRIVATE KEY-----`.
