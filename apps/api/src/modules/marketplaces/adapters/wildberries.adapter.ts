@@ -1161,9 +1161,14 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
 
   private extractWbErrorMessage(error: unknown): string {
     if (error && typeof error === 'object' && 'response' in error) {
-      const res = (error as { response?: { data?: unknown; status?: number } }).response;
-      if (res?.data && typeof res.data === 'object' && 'message' in res.data) {
-        return String((res.data as { message: unknown }).message);
+      const res = (error as { response?: { data?: Record<string, unknown>; status?: number } }).response;
+      const data = res?.data;
+      if (data && typeof data === 'object') {
+        const d = data as Record<string, unknown>;
+        if (d.message) return String(d.message);
+        if (d.errorText) return String(d.errorText);
+        if (d.detail) return String(d.detail);
+        if (Array.isArray(d.errors) && d.errors.length > 0) return String(d.errors[0]);
       }
       if (res?.status) return `WB API ответ: ${res.status}`;
     }
@@ -1177,14 +1182,20 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
 
   /** Добавить грузоместа (коробки) в поставку. POST /api/v3/supplies/{supplyId}/trbx */
   async addTrbxToSupply(supplyId: string, amount: number): Promise<string[]> {
-    const { data } = await firstValueFrom(
-      this.httpService.post<{ trbxIds?: string[] }>(
-        `${this.MARKETPLACE_API}/api/v3/supplies/${encodeURIComponent(supplyId)}/trbx`,
-        { amount },
-        { headers: { ...this.authHeader(), 'Content-Type': 'application/json' } },
-      ),
-    );
-    return data?.trbxIds ?? [];
+    try {
+      const { data } = await firstValueFrom(
+        this.httpService.post<{ trbxIds?: string[] }>(
+          `${this.MARKETPLACE_API}/api/v3/supplies/${encodeURIComponent(supplyId)}/trbx`,
+          { amount },
+          { headers: { ...this.authHeader(), 'Content-Type': 'application/json' } },
+        ),
+      );
+      return data?.trbxIds ?? [];
+    } catch (error) {
+      this.logError(error, 'addTrbxToSupply');
+      const msg = this.extractWbErrorMessage(error);
+      throw new Error(msg || 'WB API: не удалось добавить коробку в поставку');
+    }
   }
 
   /** Получить стикеры грузомест. POST /api/v3/supplies/{supplyId}/trbx/stickers */

@@ -552,9 +552,14 @@ export class MarketplacesService {
 
   /** WB FBS: добавить грузоместа (коробки). */
   async addWbTrbx(userId: string, amount: number): Promise<{ trbxIds: string[] }> {
-    const { adapter, supplyId } = await this.getWbAdapterAndSupply(userId);
-    const trbxIds = await adapter.addTrbxToSupply(supplyId, Math.min(Math.max(1, amount), 1000));
-    return { trbxIds };
+    try {
+      const { adapter, supplyId } = await this.getWbAdapterAndSupply(userId);
+      const trbxIds = await adapter.addTrbxToSupply(supplyId, Math.min(Math.max(1, amount), 1000));
+      return { trbxIds };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new BadRequestException(msg);
+    }
   }
 
   /** WB FBS: стикеры грузомест для печати. */

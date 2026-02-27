@@ -433,7 +433,8 @@ export default function OrdersAssemblyPage() {
                         })
                         const data = await res.json().catch(() => ({}))
                         if (!res.ok) {
-                          setWbSupplyError(data.message ?? "Ошибка")
+                          const msg = Array.isArray(data.message) ? data.message.join(", ") : data.message
+                          setWbSupplyError(msg ?? "Ошибка")
                           return
                         }
                         fetchWbSupply()
