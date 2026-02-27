@@ -157,4 +157,6 @@ jobs:
             sudo chmod 644 /etc/cron.d/handyseller-watchdog 2>/dev/null || true
 
             sudo systemctl reload nginx 2>/dev/null || true
+            sleep 10
+            docker exec handyseller-api node dist/scripts/seed-database.js 2>/dev/null || true
             echo "Deploy complete: https://app.handyseller.ru"

@@ -1,22 +1,14 @@
 import { Module } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
-import { PrometheusModule } from '@willsoto/nestjs-prometheus';
 import { SentryService } from './sentry.service';
 import { TelegramAlertService } from './telegram-alert.service';
 import { AllExceptionsFilter } from './http-exception.filter';
 import { LoggerModule } from '../logger/logger.module';
 import { LoggerService } from '../logger/logger.service';
 
+// Prometheus отключён — вызывает MODULE_NOT_FOUND в Docker
 @Module({
-  imports: [
-    PrometheusModule.register({
-      path: '/metrics',
-      defaultMetrics: {
-        enabled: true,
-      },
-    }),
-    LoggerModule,
-  ],
+  imports: [LoggerModule],
   providers: [
     SentryService,
     TelegramAlertService,
