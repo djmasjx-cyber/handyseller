@@ -77,13 +77,10 @@ const MARKETPLACES: MarketplaceMeta[] = [
       "Войдите в личный кабинет продавца Ozon (seller.ozon.ru)",
       "Настройки → API-ключи → Seller API",
       "Client ID — числовой идентификатор (например 1234567). API Key — длинная строка, появляется после «Сгенерировать ключ»",
-      "Создайте склад: Склад → Добавить склад. ID склада нужен для выгрузки остатков.",
     ],
     settingsUrl: "https://seller.ozon.ru/app/settings/api-keys",
     requiresSellerId: true,
     sellerIdLabel: "Client ID (числовой)",
-    optionalWarehouseId: true,
-    warehouseIdLabel: "ID склада (ЛК Ozon → Склад, для остатков)",
     apiKeyLabel: "API Key",
   },
   {
