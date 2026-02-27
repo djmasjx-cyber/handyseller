@@ -469,6 +469,20 @@ export class OrdersService {
             where: { id: existing.id },
             data: updateData,
           });
+          // WB: при переходе в «На сборке» — всегда отправляем статус на WB (иначе «Добавить коробку» не сработает)
+          if (updateData.status === OrderStatus.IN_PROGRESS && marketplace === 'WILDBERRIES') {
+            try {
+              await this.marketplacesService.pushOrderStatus(userId, marketplace, {
+                marketplaceOrderId: externalId,
+                status: OrderStatus.IN_PROGRESS,
+                wbStickerNumber: existing.wbStickerNumber ?? undefined,
+                wbFulfillmentType: (existing as { wbFulfillmentType?: 'FBS' | 'DBS' | 'DBW' | null }).wbFulfillmentType ?? undefined,
+              });
+            } catch (pushErr) {
+              const msg = pushErr instanceof Error ? pushErr.message : String(pushErr);
+              errors.push(`Заказ ${externalId}: статус не передан на WB — ${msg}. Нажмите «Отправить на WB» вручную.`);
+            }
+          }
         }
         // Время обработки: только при переходе в «сдан», только если ещё нет записи. Валидация: >72ч = ненадёжно
         if (
@@ -619,7 +633,7 @@ export class OrdersService {
         status: { in: [OrderStatus.NEW, OrderStatus.IN_PROGRESS, OrderStatus.SHIPPED, OrderStatus.READY_FOR_PICKUP] },
         rawStatus: { not: null },
       },
-      select: { id: true, status: true, rawStatus: true },
+      select: { id: true, externalId: true, status: true, rawStatus: true, wbStickerNumber: true, wbFulfillmentType: true },
     });
     for (const o of toReconcile) {
       const targetStatus = this.mapStatus(o.rawStatus!);
@@ -631,6 +645,19 @@ export class OrdersService {
           where: { id: o.id },
           data: { status: targetStatus },
         });
+        // WB: при переходе в «На сборке» — отправляем статус на WB
+        if (targetStatus === OrderStatus.IN_PROGRESS) {
+          try {
+            await this.marketplacesService.pushOrderStatus(userId, 'WILDBERRIES', {
+              marketplaceOrderId: o.externalId,
+              status: OrderStatus.IN_PROGRESS,
+              wbStickerNumber: o.wbStickerNumber ?? undefined,
+              wbFulfillmentType: o.wbFulfillmentType ?? undefined,
+            });
+          } catch {
+            /* тихо — пользователь может нажать «Отправить на WB» вручную */
+          }
+        }
       }
     }
 
