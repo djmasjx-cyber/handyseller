@@ -95,11 +95,11 @@ function formatProcessingTime(min?: number | null): string {
   return m > 0 ? `${h} ч ${m} мин` : `${h} ч`
 }
 
-/** Финальные статусы — не показывать на странице «На сборке» */
+/** Финальные статусы — не показывать на странице «На сборке» (должны уходить) */
 const FINAL_STATUSES = new Set(["SHIPPED", "READY_FOR_PICKUP", "DELIVERED", "CANCELLED"])
 const FINAL_RAW_STATUSES = new Set([
   "sold", "canceled", "canceled_by_client", "declined_by_client", "defect", "receive", "reject", "complete", "delivered",
-  "ready_for_pickup",
+  "deliver", "sorted", "shipped", "ready_for_pickup",
 ])
 function isFinalOrder(o: Order): boolean {
   if (FINAL_STATUSES.has(o.status)) return true
