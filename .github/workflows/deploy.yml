@@ -23,7 +23,21 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
+  verify-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npx prisma generate --schema=./apps/api/prisma/schema.prisma
+      - run: npm run build --workspace=api
+      - run: npm run build --workspace=web
+
   build-and-push:
+    needs: verify-build
     runs-on: ubuntu-latest
     outputs:
       image_api: ${{ steps.meta-api.outputs.tags }}
@@ -99,7 +113,7 @@ jobs:
       - name: Prepare SSH key
         run: |
           echo "${{ secrets.VM_SSH_KEY }}" | base64 -d > deploy_key.pem
-          chmod 644 deploy_key.pem
+          chmod 600 deploy_key.pem
 
       - name: Prepare VM directory
         uses: appleboy/ssh-action@v1.0.3
