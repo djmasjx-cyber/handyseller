@@ -138,6 +138,7 @@ jobs:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USER || 'ubuntu' }}
           key_path: deploy_key.pem
+          command_timeout: 30m
           script: |
             set -e
             cd /opt/handyseller
