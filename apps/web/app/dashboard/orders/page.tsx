@@ -51,7 +51,7 @@ const WB_RAW_STATUS_LABELS: Record<string, string> = {
   sold: "Получен клиентом",
   receive: "Получен клиентом",
   delivered: "Получен клиентом",
-  waiting: "Ожидание",
+  waiting: "На сборке",
   ready_for_pickup: "Готов к выдаче",
   postponed_delivery: "Доставка отложена",
   canceled: "Отменён",

@@ -53,7 +53,7 @@ const WB_RAW_STATUS_LABELS: Record<string, string> = {
   sold: "Получен клиентом",
   receive: "Получен клиентом",
   delivered: "Получен клиентом",
-  waiting: "Ожидание",
+  waiting: "На сборке",
   ready_for_pickup: "Готов к выдаче",
   postponed_delivery: "Доставка отложена",
   canceled: "Отменён",
@@ -99,7 +99,7 @@ function formatProcessingTime(min?: number | null): string {
 const FINAL_STATUSES = new Set(["SHIPPED", "READY_FOR_PICKUP", "DELIVERED", "CANCELLED"])
 const FINAL_RAW_STATUSES = new Set([
   "sold", "canceled", "canceled_by_client", "declined_by_client", "defect", "receive", "reject", "complete", "delivered",
-  "ready_for_pickup", "waiting",
+  "ready_for_pickup",
 ])
 function isFinalOrder(o: Order): boolean {
   if (FINAL_STATUSES.has(o.status)) return true

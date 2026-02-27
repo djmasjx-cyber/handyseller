@@ -18,7 +18,7 @@ const MARKETPLACE_STATUS_TO_ORDER: Record<string, OrderStatus> = {
   sorted: OrderStatus.SHIPPED,   // WB отсортировало, в пути
   shipped: OrderStatus.SHIPPED,
   ready_for_pickup: OrderStatus.READY_FOR_PICKUP, // товар в ПВЗ, ждёт клиента
-  waiting: OrderStatus.READY_FOR_PICKUP,
+  waiting: OrderStatus.IN_PROGRESS, // WB может возвращать "waiting" для заказов, ожидающих подтверждения продавцом
   sold: OrderStatus.DELIVERED,   // получен клиентом (выкуплен)
   receive: OrderStatus.DELIVERED,
   delivered: OrderStatus.DELIVERED,
@@ -436,9 +436,13 @@ export class OrdersService {
         }
         // Синхронизация статуса: только при наличии rawStatus/rawSupplierStatus (fetchStatuses).
         // Единое правило — статус только вперёд (pickResolvedStatus), без понижения.
+        // Исключение: rawStatus "waiting" ранее ошибочно маппился в READY_FOR_PICKUP — корректируем на IN_PROGRESS.
         const hasFreshStatus = od.rawStatus != null || od.rawSupplierStatus != null;
         if (hasFreshStatus) {
-          const resolved = pickResolvedStatus(existing.status, newStatus);
+          const rawLower = (od.rawStatus ?? od.rawSupplierStatus ?? '').toString().toLowerCase();
+          const correctWaiting =
+            rawLower === 'waiting' && existing.status === OrderStatus.READY_FOR_PICKUP && newStatus === OrderStatus.IN_PROGRESS;
+          const resolved = correctWaiting ? OrderStatus.IN_PROGRESS : pickResolvedStatus(existing.status, newStatus);
           if (resolved !== existing.status) updateData.status = resolved;
         }
         if (od.warehouseName != null || od.rawStatus != null) {
@@ -620,7 +624,9 @@ export class OrdersService {
     for (const o of toReconcile) {
       const targetStatus = this.mapStatus(o.rawStatus!);
       if (targetStatus === OrderStatus.CANCELLED) continue;
-      if (STATUS_RANK[targetStatus] > STATUS_RANK[o.status]) {
+      const rawLower = (o.rawStatus ?? '').toString().toLowerCase();
+      const correctWaiting = rawLower === 'waiting' && o.status === OrderStatus.READY_FOR_PICKUP && targetStatus === OrderStatus.IN_PROGRESS;
+      if (correctWaiting || STATUS_RANK[targetStatus] > STATUS_RANK[o.status]) {
         await this.prisma.order.update({
           where: { id: o.id },
           data: { status: targetStatus },

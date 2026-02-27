@@ -12,7 +12,7 @@ function mapWbStatusToOurs(s: string): string {
     sorted: 'SHIPPED',
     shipped: 'SHIPPED',
     ready_for_pickup: 'READY_FOR_PICKUP',
-    waiting: 'READY_FOR_PICKUP',
+    waiting: 'IN_PROGRESS',
     delivered: 'DELIVERED',
     sold: 'DELIVERED',
     receive: 'DELIVERED',
