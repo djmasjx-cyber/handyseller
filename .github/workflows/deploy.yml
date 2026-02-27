@@ -86,7 +86,6 @@ jobs:
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
-    # environment: production  # опционально: создать в Settings → Environments для защиты
 
     steps:
       - name: Checkout
@@ -100,7 +99,7 @@ jobs:
       - name: Prepare SSH key
         run: |
           echo "${{ secrets.VM_SSH_KEY }}" | base64 -d > deploy_key.pem
-          chmod 600 deploy_key.pem
+          chmod 644 deploy_key.pem
 
       - name: Prepare VM directory
         uses: appleboy/ssh-action@v1.0.3
@@ -137,7 +136,6 @@ jobs:
             IMAGE_API="ghcr.io/${{ github.repository_owner }}/handyseller-api:latest"
             IMAGE_WEB="ghcr.io/${{ github.repository_owner }}/handyseller-web:latest"
 
-            # Обновляем только IMAGE_* в .env.production
             grep -v '^IMAGE_API=' .env.production | grep -v '^IMAGE_WEB=' > .env.production.tmp
             echo "IMAGE_API=$IMAGE_API" >> .env.production.tmp
             echo "IMAGE_WEB=$IMAGE_WEB" >> .env.production.tmp
