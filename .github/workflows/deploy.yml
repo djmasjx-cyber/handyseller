@@ -102,7 +102,7 @@ jobs:
       - name: Prepare SSH key
         run: |
           echo "${{ secrets.VM_SSH_KEY }}" | base64 -d > deploy_key.pem
-          chmod 600 deploy_key.pem
+          chmod 644 deploy_key.pem
 
       - name: Prepare VM directory
         uses: appleboy/ssh-action@v1.0.3
