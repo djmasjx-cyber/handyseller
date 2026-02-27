@@ -243,6 +243,12 @@ export class MarketplacesController {
     return this.marketplacesService.getOzonWarehouseList(userId);
   }
 
+  /** Список складов WB (ID + название) — для выбора склада для остатков */
+  @Get('wb/warehouses')
+  async getWbWarehouses(@CurrentUser('userId') userId: string) {
+    return this.marketplacesService.getWbWarehouseList(userId);
+  }
+
   /** Атрибуты категории Ozon (по categoryId и typeId) */
   @Get('ozon/categories/attributes')
   async getOzonCategoryAttributes(

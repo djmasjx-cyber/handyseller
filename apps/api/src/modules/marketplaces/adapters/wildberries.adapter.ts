@@ -465,6 +465,36 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
   }
 
   /**
+   * Список складов WB (ID + название) для выбора в настройках.
+   * GET /api/v3/warehouses или /api/v2/warehouses
+   */
+  async getWarehouseList(): Promise<Array<{ id: string; name?: string }>> {
+    for (const path of ['/api/v3/warehouses', '/api/v2/warehouses']) {
+      try {
+        const { data } = await firstValueFrom(
+          this.httpService.get(`${this.MARKETPLACE_API}${path}`, {
+            headers: this.authHeader(),
+            timeout: 5000,
+          }),
+        );
+        const list = data?.warehouses ?? (Array.isArray(data) ? data : []);
+        const result = (list as Array<{ id?: number | string; warehouseId?: number | string; name?: string }>[])
+          .map((w) => {
+            const id = w.id ?? w.warehouseId;
+            return id != null ? { id: String(id), name: w.name ?? `Склад ${id}` } : null;
+          })
+          .filter((r): r is { id: string; name?: string } => r != null);
+        if (result.length > 0) return result;
+      } catch (err) {
+        if ((err as { response?: { status?: number } })?.response?.status !== 404) {
+          this.logError(err, `getWarehouseList ${path}`);
+        }
+      }
+    }
+    return [];
+  }
+
+  /**
    * Получить warehouseId для работы с остатками.
    * WB требует ID склада (ЛК → Маркетплейс → Мои склады). Если не задан — получаем первый через API.
    */

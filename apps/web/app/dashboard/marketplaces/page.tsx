@@ -45,6 +45,7 @@ interface Connection {
   marketplace: string
   createdAt: string
   updatedAt: string
+  warehouseId?: string | null
 }
 
 const MARKETPLACES: MarketplaceMeta[] = [
@@ -59,12 +60,15 @@ const MARKETPLACES: MarketplaceMeta[] = [
       "Перейдите в личный кабинет продавца Wildberries",
       "Откройте «Настройки» → «Доступ к API» — создайте основной токен",
       "Откройте «API» → «Статистика и Аналитика» — создайте доп. токен для заказов ФБО",
+      "ID склада: ЛК WB → Маркетплейс → Мои склады. Остатки синхронизируются только с указанного склада.",
     ],
     settingsUrl: "https://seller.wildberries.ru/settings/access-token",
     requiresStatsToken: true,
     statsTokenLabel: "Токен «Статистика и Аналитика»",
     apiKeyLabel: "Основной токен",
     apiKeyPlaceholder: "Токен из раздела «Доступ к API»",
+    optionalWarehouseId: true,
+    warehouseIdLabel: "ID склада WB (остатки только с этого склада)",
   },
   {
     id: "2",
@@ -150,6 +154,10 @@ export default function MarketplacesPage() {
   const [ozonWarehouseSaving, setOzonWarehouseSaving] = useState(false)
   const [ozonWarehouses, setOzonWarehouses] = useState<Array<{ warehouse_id: number; name?: string }> | null>(null)
   const [ozonWarehousesLoading, setOzonWarehousesLoading] = useState(false)
+  const [wbWarehouseId, setWbWarehouseId] = useState("")
+  const [wbWarehouseSaving, setWbWarehouseSaving] = useState(false)
+  const [wbWarehouses, setWbWarehouses] = useState<Array<{ id: string; name?: string }> | null>(null)
+  const [wbWarehousesLoading, setWbWarehousesLoading] = useState(false)
 
   const token = typeof window !== "undefined" ? localStorage.getItem("accessToken") : null
 
@@ -185,6 +193,11 @@ export default function MarketplacesPage() {
   useEffect(() => {
     const ozonConn = connections.find((c) => c.marketplace === "OZON") as { warehouseId?: string } | undefined
     if (ozonConn?.warehouseId) setOzonWarehouseId(ozonConn.warehouseId)
+  }, [connections])
+
+  useEffect(() => {
+    const wbConn = connections.find((c) => c.marketplace === "WILDBERRIES") as { warehouseId?: string } | undefined
+    if (wbConn?.warehouseId) setWbWarehouseId(wbConn.warehouseId)
   }, [connections])
 
   const handleOzonLoadWarehouses = async () => {
@@ -228,6 +241,50 @@ export default function MarketplacesPage() {
       alert(err instanceof Error ? err.message : "Ошибка")
     } finally {
       setOzonWarehouseSaving(false)
+    }
+  }
+
+  const handleWbLoadWarehouses = async () => {
+    if (!token) return
+    setWbWarehousesLoading(true)
+    setWbWarehouses(null)
+    try {
+      const res = await fetch("/api/marketplaces/wb/warehouses", {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.message ?? data.error ?? "Ошибка загрузки")
+      setWbWarehouses(Array.isArray(data) ? data : [])
+    } catch (err) {
+      setWbWarehouses([])
+      alert(err instanceof Error ? err.message : "Ошибка загрузки складов")
+    } finally {
+      setWbWarehousesLoading(false)
+    }
+  }
+
+  const handleWbWarehouseSave = async () => {
+    if (!token) return
+    setWbWarehouseSaving(true)
+    try {
+      const res = await fetch("/api/marketplaces/WILDBERRIES/warehouse", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ warehouseId: wbWarehouseId.trim() || undefined }),
+      })
+      if (!res.ok) throw new Error("Не удалось сохранить")
+      setConnections((prev) =>
+        prev.map((c) =>
+          c.marketplace === "WILDBERRIES" ? { ...c, warehouseId: wbWarehouseId.trim() || null } : c
+        )
+      )
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Ошибка")
+    } finally {
+      setWbWarehouseSaving(false)
     }
   }
 
@@ -485,6 +542,74 @@ export default function MarketplacesPage() {
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                  {marketplace.slug === "wildberries" && (
+                    <div className="space-y-3">
+                      {!wbWarehouseId && (
+                        <div className="rounded-lg bg-amber-500/10 text-amber-700 dark:text-amber-400 p-3 text-sm">
+                          ⚠️ Укажите ID склада — остатки будут синхронизироваться только с этого склада WB. ЛК WB → Маркетплейс → Мои склады.
+                        </div>
+                      )}
+                      <div className="flex flex-wrap gap-2 items-end">
+                        <div className="flex-1 min-w-[140px]">
+                          <label className="text-xs text-muted-foreground block mb-1">ID склада WB (остатки только с этого склада)</label>
+                          <input
+                            type="text"
+                            placeholder="1526287"
+                            value={wbWarehouseId}
+                            onChange={(e) => setWbWarehouseId(e.target.value)}
+                            className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm"
+                          />
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleWbWarehouseSave}
+                          disabled={wbWarehouseSaving}
+                          className="border-[#CB11AB] text-[#CB11AB] hover:bg-[#CB11AB]/10"
+                        >
+                          {wbWarehouseSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Сохранить"}
+                        </Button>
+                      </div>
+                      <div className="space-y-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleWbLoadWarehouses}
+                          disabled={wbWarehousesLoading}
+                          className="border-[#CB11AB] text-[#CB11AB] hover:bg-[#CB11AB]/10"
+                        >
+                          {wbWarehousesLoading ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <RefreshCw className="mr-2 h-4 w-4" />
+                          )}
+                          Загрузить склады
+                        </Button>
+                        {wbWarehouses !== null && (
+                          <div className="rounded-lg border border-input p-2 text-sm max-h-32 overflow-y-auto">
+                            {wbWarehouses.length === 0 ? (
+                              <p className="text-muted-foreground">Склады не найдены</p>
+                            ) : (
+                              <ul className="space-y-1">
+                                {wbWarehouses.map((w) => (
+                                  <li key={w.id} className="flex justify-between gap-2">
+                                    <span>{w.name || `Склад ${w.id}`}</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => setWbWarehouseId(w.id)}
+                                      className="text-[#CB11AB] hover:underline font-mono text-xs"
+                                    >
+                                      ID {w.id}
+                                    </button>
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                   {marketplace.slug === "ozon" && (
                     <div className="space-y-3">
                       {!ozonWarehouseId && (
