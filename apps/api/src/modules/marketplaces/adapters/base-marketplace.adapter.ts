@@ -17,7 +17,7 @@ export interface ProductData {
   id: string;
   name: string;
   description?: string;
-  price: number;
+  price?: number;
   stock: number;
   images: string[];
   /** Ozon: штрих-код (обязателен для v3 import) */
