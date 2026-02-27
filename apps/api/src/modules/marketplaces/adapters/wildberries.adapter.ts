@@ -478,12 +478,13 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
           }),
         );
         const list = data?.warehouses ?? (Array.isArray(data) ? data : []);
-        const result = (list as Array<{ id?: number | string; warehouseId?: number | string; name?: string }>[])
-          .map((w) => {
-            const id = w.id ?? w.warehouseId;
-            return id != null ? { id: String(id), name: w.name ?? `Склад ${id}` } : null;
-          })
-          .filter((r): r is { id: string; name?: string } => r != null);
+        type WbWarehouse = { id?: number | string; warehouseId?: number | string; name?: string };
+        const items = list as WbWarehouse[];
+        const result: Array<{ id: string; name?: string }> = [];
+        for (const w of items) {
+          const id = w?.id ?? w?.warehouseId;
+          if (id != null) result.push({ id: String(id), name: w?.name ?? `Склад ${id}` });
+        }
         if (result.length > 0) return result;
       } catch (err) {
         if ((err as { response?: { status?: number } })?.response?.status !== 404) {
