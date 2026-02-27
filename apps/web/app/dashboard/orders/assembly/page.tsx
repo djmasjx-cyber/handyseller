@@ -521,6 +521,7 @@ export default function OrdersAssemblyPage() {
                         if (data.ok) {
                           setWbSupplyBarcode("ready")
                           fetchWbSupply()
+                          fetchOrders()
                         } else {
                           setWbSupplyError(data.message ?? "Не удалось сдать")
                         }

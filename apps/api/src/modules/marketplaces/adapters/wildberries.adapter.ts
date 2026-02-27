@@ -1213,6 +1213,22 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
     return data?.stickers ?? [];
   }
 
+  /** Получить ID заказов в поставке. GET /api/marketplace/v3/supplies/{supplyId}/order-ids */
+  async getSupplyOrderIds(supplyId: string): Promise<string[]> {
+    try {
+      const { data } = await firstValueFrom(
+        this.httpService.get<{ orderIds?: number[] }>(
+          `${this.MARKETPLACE_API}/api/marketplace/v3/supplies/${encodeURIComponent(supplyId)}/order-ids`,
+          { headers: this.authHeader() },
+        ),
+      );
+      const ids = data?.orderIds ?? [];
+      return ids.map((n) => String(n));
+    } catch {
+      return [];
+    }
+  }
+
   /** Сдать поставку в доставку. PATCH /api/v3/supplies/{supplyId}/deliver */
   async deliverSupply(supplyId: string): Promise<boolean> {
     try {

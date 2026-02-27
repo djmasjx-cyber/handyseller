@@ -586,6 +586,30 @@ export class MarketplacesService {
         where: { userId, wbSupplyId: supplyId },
         data: { status: 'DELIVERED', updatedAt: new Date() },
       });
+      // Переводим заказы из поставки в статус «Доставляется» — убираем со страницы «На сборке»
+      const orderIds = adapter instanceof WildberriesAdapter
+        ? await adapter.getSupplyOrderIds(supplyId)
+        : [];
+      if (orderIds.length > 0) {
+        await this.prisma.order.updateMany({
+          where: {
+            userId,
+            marketplace: 'WILDBERRIES',
+            status: 'IN_PROGRESS',
+            OR: [
+              { wbStickerNumber: { in: orderIds } },
+              { externalId: { in: orderIds } },
+            ],
+          },
+          data: { status: 'SHIPPED' },
+        });
+      } else {
+        // Fallback: все WB IN_PROGRESS → SHIPPED (типичный случай: одна активная поставка)
+        await this.prisma.order.updateMany({
+          where: { userId, marketplace: 'WILDBERRIES', status: 'IN_PROGRESS' },
+          data: { status: 'SHIPPED' },
+        });
+      }
       return { ok: true };
     }
     return { ok: false, message: 'Не удалось сдать поставку в доставку' };
