@@ -5,6 +5,7 @@
 #   VM_HOST        — IP или hostname VM (158.160.x.x)
 #   VM_SSH_KEY     — приватный ключ в base64: cat ~/.ssh/yandex_vm | base64
 #   VM_USER        — (опционально) пользователь SSH, по умолчанию ubuntu
+#   CR_PAT         — (опционально) GitHub PAT с read:packages для pull из ghcr.io
 #
 # Одноразовая настройка VM: /opt/handyseller/.env.production, nginx, Docker
 
@@ -134,11 +135,14 @@ jobs:
 
       - name: Deploy to VM
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          CR_PAT: ${{ secrets.CR_PAT }}
         with:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USER || 'ubuntu' }}
           key_path: deploy_key.pem
           command_timeout: 30m
+          envs: CR_PAT
           script: |
             set -e
             cd /opt/handyseller
@@ -156,17 +160,25 @@ jobs:
             echo "IMAGE_WEB=$IMAGE_WEB" >> .env.production.tmp
             mv .env.production.tmp .env.production
 
-            if [ -n "${{ secrets.CR_PAT }}" ]; then
-              echo "${{ secrets.CR_PAT }}" | docker login ghcr.io -u ${{ github.repository_owner }} --password-stdin
+            if [ -n "$CR_PAT" ]; then
+              echo "$CR_PAT" | docker login ghcr.io -u ${{ github.repository_owner }} --password-stdin
             fi
 
             export IMAGE_API IMAGE_WEB
             chmod +x vm-watchdog.sh handyseller-start.sh 2>/dev/null || true
             DC="docker compose"
             command -v docker-compose >/dev/null 2>&1 && DC="docker-compose"
-            # Останавливаем контейнеры, чистим место, затем pull (no space left on device)
+
+            echo "=== Disk before prune ==="
+            df -h /
+
             $DC -f docker-compose.ci.yml --env-file .env.production down --remove-orphans 2>/dev/null || true
-            docker system prune -af 2>/dev/null || true
+            docker system prune -af || true
+
+            echo "=== Disk after prune ==="
+            df -h /
+
+            echo "=== Pulling images ==="
             $DC -f docker-compose.ci.yml pull
             $DC -f docker-compose.ci.yml --env-file .env.production up -d
 
