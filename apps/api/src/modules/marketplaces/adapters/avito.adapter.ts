@@ -92,7 +92,7 @@ export class AvitoAdapter extends BaseMarketplaceAdapter {
 
       const avitoProduct = {
         category_id: 1070,
-        price: product.price,
+        price: product.price ?? 1,
         title: product.name,
         description: product.description || '',
         address: { region_id: 1, city_id: 621540 },
@@ -130,7 +130,6 @@ export class AvitoAdapter extends BaseMarketplaceAdapter {
       const token = await this.getAccessToken();
       const updateData: Record<string, unknown> = {};
 
-      if (product.price !== undefined) updateData.price = product.price;
       if (product.name !== undefined) updateData.title = product.name;
       if (product.description !== undefined) updateData.description = product.description;
       if (product.images?.length) {
@@ -228,7 +227,6 @@ export class AvitoAdapter extends BaseMarketplaceAdapter {
       try {
         if (product.avitoProductId) {
           const ok = await this.updateProduct(product.avitoProductId, {
-            price: product.price,
             name: product.name,
             description: product.description,
             images: product.images,

@@ -12,7 +12,7 @@ interface Product {
   displayId?: number
   title: string
   description?: string
-  price: string | number
+  cost: string | number
   imageUrl?: string
   article?: string
   stock?: number
@@ -61,7 +61,7 @@ export default function ProductCardPage() {
   const [form, setForm] = useState({
     title: "",
     description: "",
-    price: "",
+    cost: "",
     article: "",
     imageUrl: "",
     stock: "",
@@ -114,7 +114,7 @@ export default function ProductCardPage() {
         setForm({
           title: p.title ?? "",
           description: p.description ?? "",
-          price: String(p.price ?? ""),
+          cost: String(p.cost ?? ""),
           article: p.article ?? "",
           imageUrl: p.imageUrl ?? "",
           stock: String(p.stock ?? 0),
@@ -158,8 +158,7 @@ export default function ProductCardPage() {
     const hasOzonCategory = form.ozonCategoryId && form.ozonTypeId
     if (!hasOzonCategory) ozonMissingFields.push("Категория")
     if (!form.imageUrl?.trim() || !form.imageUrl.startsWith("http")) ozonMissingFields.push("Фото (URL)")
-    const priceVal = parseFloat(form.price)
-    if (isNaN(priceVal) || priceVal <= 0) ozonMissingFields.push("Цена (больше 0)")
+    // Цена задаётся на Ozon — не требуем себестоимость
     const weightVal = form.weight ? parseInt(form.weight, 10) : NaN
     if (isNaN(weightVal) || weightVal <= 0) ozonMissingFields.push("Вес (г)")
     const widthVal = form.width ? parseInt(form.width, 10) : NaN
@@ -440,10 +439,10 @@ export default function ProductCardPage() {
 
   const handleSave = async () => {
     if (!token || !product) return
-    const price = parseFloat(form.price)
+    const costVal = form.cost ? parseFloat(form.cost) : 0
     const stock = parseInt(form.stock, 10)
-    if (isNaN(price) || price < 0) {
-      setError("Укажите корректную цену")
+    if (!isNaN(costVal) && costVal < 0) {
+      setError("Себестоимость не может быть отрицательной")
       return
     }
     if (!form.title.trim()) {
@@ -460,7 +459,7 @@ export default function ProductCardPage() {
       const payload: Record<string, unknown> = {
         title: form.title.trim(),
         description: form.description.trim() || "",
-        price,
+        cost: isNaN(costVal) ? 0 : costVal,
         article: form.article.trim() || "",
         seoTitle: form.seoTitle.trim() || "",
         seoKeywords: form.seoKeywords.trim() || "",
@@ -1153,8 +1152,8 @@ export default function ProductCardPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Цена, остаток, фото</CardTitle>
-            <CardDescription>Ценообразование и наличие. WB/Ozon: price, stocks.</CardDescription>
+            <CardTitle className="text-base">Себестоимость, остаток, фото</CardTitle>
+            <CardDescription>Себестоимость для аналитики. Остаток синхронизируется с WB, Ozon.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
@@ -1185,15 +1184,14 @@ export default function ProductCardPage() {
               </div>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="price">Цена (₽) *</Label>
+              <Label htmlFor="cost">Себестоимость (₽)</Label>
               <Input
-                id="price"
+                id="cost"
                 type="number"
                 step="0.01"
                 min="0"
-                value={form.price}
-                onChange={(e) => setForm((f) => ({ ...f, price: e.target.value }))}
-                className={ozonMissingFields.includes("Цена (больше 0)") ? "border-destructive ring-destructive" : undefined}
+                value={form.cost}
+                onChange={(e) => setForm((f) => ({ ...f, cost: e.target.value }))}
               />
             </div>
             <div className="space-y-2">

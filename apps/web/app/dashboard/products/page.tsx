@@ -30,7 +30,8 @@ type HistoryEntry =
 
 const FIELD_LABELS: Record<string, string> = {
   title: "Название",
-  price: "Цена",
+  cost: "Себестоимость",
+  price: "Себестоимость", // legacy
   article: "Артикул",
   description: "Описание",
   seoTitle: "SEO заголовок",
@@ -78,7 +79,7 @@ interface Product {
   displayId?: number
   title: string
   description?: string
-  price: string | number
+  cost: string | number
   imageUrl?: string
   sku?: string
   article?: string
@@ -275,8 +276,8 @@ export default function ProductsPage() {
     }
   }
 
-  // Inline-редактирование полей: title, price, article, description, seoTitle, seoKeywords, seoDescription
-  type EditableField = "title" | "price" | "article" | "description" | "seo"
+  // Inline-редактирование полей: title, cost, article, description, seoTitle, seoKeywords, seoDescription
+  type EditableField = "title" | "cost" | "article" | "description" | "seo"
   const [editingFieldId, setEditingFieldId] = useState<string | null>(null)
   const [editingField, setEditingField] = useState<EditableField | null>(null)
   const [editingFieldValue, setEditingFieldValue] = useState("")
@@ -294,10 +295,10 @@ export default function ProductsPage() {
     if (field === "title") {
       if (!trimmed) return
       payload = { title: trimmed }
-    } else if (field === "price") {
+    } else if (field === "cost") {
       const num = parseFloat(trimmed.replace(",", "."))
       if (isNaN(num) || num < 0) return
-      payload = { price: num }
+      payload = { cost: num }
     } else if (field === "article") {
       payload = { article: trimmed || "" }
     } else if (field === "description") {
@@ -344,7 +345,7 @@ export default function ProductsPage() {
     setEditingFieldId(product.id)
     setEditingField(field)
     if (field === "title") setEditingFieldValue(product.title ?? "")
-    else if (field === "price") setEditingFieldValue(String(product.price ?? ""))
+    else if (field === "cost") setEditingFieldValue(String(product.cost ?? ""))
     else if (field === "article") setEditingFieldValue(product.article ?? "")
     else if (field === "description") setEditingFieldValue(product.description ?? "")
     else if (field === "seo") {
@@ -364,10 +365,10 @@ export default function ProductsPage() {
         setEditingFieldId(null)
         setEditingField(null)
       }
-    } else if (editingField === "price") {
+    } else if (editingField === "cost") {
       const num = parseFloat(editingFieldValue.replace(",", "."))
-      if (!isNaN(num) && num >= 0 && num !== Number(product.price)) {
-        saveField(product, "price", editingFieldValue)
+      if (!isNaN(num) && num >= 0 && num !== Number(product.cost)) {
+        saveField(product, "cost", editingFieldValue)
       } else {
         setEditingFieldId(null)
         setEditingField(null)
@@ -802,7 +803,7 @@ export default function ProductsPage() {
                   {/* {warehouseFilter !== "local" && <th className="text-left font-medium p-3">Описание</th>} */}
                   <th className="text-left font-medium p-3" title="Клик для редактирования">Остаток</th>
                   <th className="text-left font-medium p-3">Резерв</th>
-                  <th className="text-left font-medium p-3">Цена</th>
+                  <th className="text-left font-medium p-3">Себестоимость</th>
                   {warehouseFilter !== "local" && <th className="text-left font-medium p-3">SEO</th>}
                   <th className="text-left font-medium p-3">Маркетплейс</th>
                   <th className="text-right font-medium p-3"></th>
@@ -896,7 +897,7 @@ export default function ProductsPage() {
                       </td>
                       <td className="p-3 text-muted-foreground">0</td>
                       <td className="p-3">
-                        {canEdit && isEditingF && editingField === "price" ? (
+                        {canEdit && isEditingF && editingField === "cost" ? (
                           <Input
                             type="number"
                             min={0}
@@ -915,21 +916,21 @@ export default function ProductsPage() {
                         ) : canEdit ? (
                           <button
                             type="button"
-                            onClick={(e) => { e.stopPropagation(); startEditField(product, "price") }}
+                            onClick={(e) => { e.stopPropagation(); startEditField(product, "cost") }}
                             disabled={isSavingF}
                             className="flex items-center gap-1.5 rounded-md border border-dashed border-muted-foreground/30 bg-muted/30 px-2.5 py-1.5 min-w-[4rem] text-left hover:border-primary/50 hover:bg-muted/60 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                           >
-                            {isSavingF && editingField === "price" ? (
+                            {isSavingF && editingField === "cost" ? (
                               <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
                             ) : (
                               <>
-                                <span className="font-medium tabular-nums">{Number(product.price).toLocaleString("ru-RU")} ₽</span>
+                                <span className="font-medium tabular-nums">{Number(product.cost).toLocaleString("ru-RU")} ₽</span>
                                 <Pencil className="h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-60" />
                               </>
                             )}
                           </button>
                         ) : (
-                          <span className="font-medium tabular-nums">{Number(product.price).toLocaleString("ru-RU")} ₽</span>
+                          <span className="font-medium tabular-nums">{Number(product.cost).toLocaleString("ru-RU")} ₽</span>
                         )}
                       </td>
                       {warehouseFilter !== "local" && (

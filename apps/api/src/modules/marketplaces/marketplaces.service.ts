@@ -1092,7 +1092,6 @@ export class MarketplacesService {
       {
         id: product.id,
         name: product.title,
-        price: Number(product.price),
         stock: product.stock,
         images: product.imageUrl ? [product.imageUrl] : [],
         wbNmId: nmId,
@@ -1264,7 +1263,7 @@ export class MarketplacesService {
   validateProductForOzon(product: {
     title?: string | null;
     imageUrl?: string | null;
-    price?: unknown;
+    cost?: unknown;
     article?: string | null;
     sku?: string | null;
     weight?: number | null;
@@ -1278,8 +1277,7 @@ export class MarketplacesService {
     if (!product.title?.trim()) errors.push('Укажите название товара');
     if (!product.imageUrl?.trim() || !product.imageUrl.startsWith('http'))
       errors.push('Добавьте URL фото товара (Ozon требует хотя бы одно изображение)');
-    const price = typeof product.price === 'number' ? product.price : Number(product.price);
-    if (isNaN(price) || price <= 0) errors.push('Укажите цену больше 0 (Ozon не принимает нулевую цену)');
+    // Цена задаётся клиентом на Ozon; при создании используем placeholder
     const article = (product.article ?? product.sku ?? '').toString().trim();
     if (!article) errors.push('Укажите артикул (offer_id) — обязателен для Ozon');
     const catId = product.ozonCategoryId != null ? Number(product.ozonCategoryId) : NaN;
@@ -1533,7 +1531,6 @@ export class MarketplacesService {
         {
           id: product.id,
           name: product.title,
-          price: Number(product.price),
           stock: product.stock,
           images: product.imageUrl ? [product.imageUrl] : [],
           ozonProductId,
@@ -2029,7 +2026,6 @@ export class MarketplacesService {
         if (newTitle && existing.title !== newTitle) updates.title = newTitle;
         if (typeof p.description === 'string' && p.description.trim() && existing.description !== p.description.slice(0, 5000))
           updates.description = p.description.slice(0, 5000);
-        if (p.price != null && Number(existing.price) !== p.price) updates.price = p.price;
         if (p.imageUrl != null && existing.imageUrl !== p.imageUrl) updates.imageUrl = p.imageUrl;
         if (p.brand != null && (existing as { brand?: string | null }).brand !== p.brand) updates.brand = p.brand;
         if (p.color != null && (existing as { color?: string | null }).color !== p.color) updates.color = p.color;
@@ -2066,7 +2062,7 @@ export class MarketplacesService {
         const created = await this.productsService.create(userId, {
           title,
           description: p.description?.slice(0, 5000),
-          price: p.price ?? 0,
+          cost: 0,
           imageUrl: p.imageUrl,
           sku,
           article: p.vendorCode || undefined,
@@ -2122,13 +2118,12 @@ export class MarketplacesService {
         (await this.productMappingService.findProductByExternalId(userId, 'OZON', String(p.productId))) ??
         (await this.productsService.findByArticle(userId, p.offerId));
       if (existing) {
-        const updates: { article?: string; title?: string; description?: string; price?: number; imageUrl?: string; barcodeOzon?: string; weight?: number; width?: number; height?: number; length?: number } = {};
+        const updates: { article?: string; title?: string; description?: string; imageUrl?: string; barcodeOzon?: string; weight?: number; width?: number; height?: number; length?: number } = {};
         const ex = existing as { weight?: number | null; width?: number | null; height?: number | null; length?: number | null };
         if (p.offerId && existing.article !== p.offerId) updates.article = p.offerId;
         if (p.name && existing.title !== p.name) updates.title = p.name.slice(0, 500);
         if (typeof p.description === 'string' && p.description.trim() && existing.description !== p.description.slice(0, 5000))
           updates.description = p.description.slice(0, 5000);
-        if (p.price != null && Number(existing.price) !== p.price) updates.price = p.price;
         if (p.imageUrl != null && existing.imageUrl !== p.imageUrl) updates.imageUrl = p.imageUrl;
         if (p.barcode != null && existing.barcodeOzon !== p.barcode) updates.barcodeOzon = p.barcode;
         if (p.weight != null && ex.weight !== p.weight) updates.weight = p.weight;
@@ -2154,7 +2149,7 @@ export class MarketplacesService {
         const created = await this.productsService.create(userId, {
           title,
           description: p.description?.slice(0, 5000),
-          price: p.price ?? 0,
+          cost: 0,
           imageUrl: p.imageUrl,
           article: p.offerId,
           barcodeOzon: p.barcode,

@@ -176,7 +176,7 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       long_description_html: product.richContent,
       attributes: undefined,
       images: product.images.map((url) => ({ url })),
-      price: product.price,
+      price: product.price ?? 1,
       stock_quantity: product.stock,
     };
     return this.uploadFromCanonical(canonical);
@@ -202,7 +202,6 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
         const nmId = Number(data.cards[0].nmID);
         const imageUrls = canonical.images?.map((i) => i.url) ?? [];
         await this.uploadImages(nmId, imageUrls);
-        await this.setPrice(nmId, canonical.price);
         if (this.config.sellerId) {
           await this.setStock(nmId, canonical.stock_quantity);
         }
@@ -594,7 +593,6 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
     try {
       const nmId = Number(marketplaceProductId);
       if (isNaN(nmId)) return false;
-      if (product.price !== undefined) await this.setPrice(nmId, product.price);
       if (product.stock !== undefined) await this.setStock(nmId, product.stock);
 
       // Обновление описания, названия и характеристик через WB Content API

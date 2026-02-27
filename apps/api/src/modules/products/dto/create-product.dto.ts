@@ -8,8 +8,9 @@ export class CreateProductDto {
   @IsString()
   description?: string;
 
+  @IsOptional()
   @IsNumber()
-  price: number;
+  cost?: number;
 
   @IsOptional()
   @IsString()

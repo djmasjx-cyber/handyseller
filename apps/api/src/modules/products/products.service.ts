@@ -59,7 +59,7 @@ export class ProductsService {
     data: {
       title: string;
       description?: string;
-      price: number;
+      cost?: number;
       article?: string;
       imageUrl?: string;
       sku?: string;
@@ -91,7 +91,7 @@ export class ProductsService {
       );
     }
     return this.prisma.product.create({
-      data: { ...data, userId, price: data.price },
+      data: { ...data, userId, cost: data.cost ?? 0 },
     });
   }
 
@@ -276,7 +276,7 @@ export class ProductsService {
     productIdOrArticle: string,
     data: {
       title?: string;
-      price?: number;
+      cost?: number;
       article?: string;
       description?: string;
       seoTitle?: string;
@@ -316,7 +316,7 @@ export class ProductsService {
       if (value === undefined || readOnlyFields.has(field)) continue;
       const current = (product as Record<string, unknown>)[field];
       let newVal: string | number | null = value as string | number | null;
-      if (field === 'price') {
+      if (field === 'cost') {
         const num = Number(value);
         if (isNaN(num) || num < 0) continue;
         newVal = num;
@@ -358,7 +358,7 @@ export class ProductsService {
     if (Object.keys(updates).length === 0) return product;
     // Синхронизация на маркеты при изменении любых полей карточки (описание, название, цена, габариты и т.д.)
     const syncRelevantFields = new Set([
-      'title', 'description', 'price', 'imageUrl', 'brand', 'weight', 'width', 'length', 'height',
+      'title', 'description', 'cost', 'imageUrl', 'brand', 'weight', 'width', 'length', 'height',
       'color', 'material', 'craftType', 'countryOfOrigin', 'packageContents', 'richContent',
       'itemsPerPack', 'ozonCategoryId', 'ozonTypeId', 'seoTitle', 'seoKeywords', 'seoDescription',
     ]);

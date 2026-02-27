@@ -105,7 +105,7 @@ model Product {
   userId      String   @map("user_id")
   title       String
   description String?  @db.Text
-  price       Decimal  @db.Decimal(10, 2)
+  cost        Decimal  @default(0) @db.Decimal(10, 2)
   imageUrl    String?  @map("image_url")
   sku         String?  @unique // Legacy: WB-xxx-nmId. Связка через ProductMarketplaceMapping.
   article     String?  // Артикул продавца (только отображение, редактируемый)
@@ -215,7 +215,7 @@ model ProductFieldLog {
   id        String   @id @default(uuid())
   productId String   @map("product_id")
   userId    String   @map("user_id")
-  field     String   // title | price | description | article
+  field     String   // title | cost | description | article
   oldValue  String?  @map("old_value") @db.Text
   newValue  String?  @map("new_value") @db.Text
   createdAt DateTime @default(now()) @map("created_at")

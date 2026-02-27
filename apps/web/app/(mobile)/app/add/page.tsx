@@ -26,7 +26,7 @@ export default function AddProductPage() {
   const [images, setImages] = useState<string[]>([])
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
-  const [price, setPrice] = useState('')
+  const [cost, setCost] = useState('')
   const [materials, setMaterials] = useState<{ name: string; amount: string }[]>([
     { name: 'Чешский бисер', amount: '50 г' },
     { name: 'Леска', amount: '2 м' },
@@ -239,22 +239,22 @@ export default function AddProductPage() {
               <div className="mx-auto h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center mb-4">
                 <Package className="h-6 w-6 text-primary" />
               </div>
-              <h1 className="text-2xl font-bold mb-2">Цена и площадки</h1>
+              <h1 className="text-2xl font-bold mb-2">Себестоимость и площадки</h1>
               <p className="text-muted-foreground">
-                Укажите цену и выберите маркетплейсы для продажи
+                Укажите себестоимость и выберите маркетплейсы для продажи
               </p>
             </div>
 
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="price">Цена продажи</Label>
+                <Label htmlFor="cost">Себестоимость (₽)</Label>
                 <div className="relative">
                   <Input
-                    id="price"
+                    id="cost"
                     type="number"
-                    value={price}
-                    onChange={(e) => setPrice(e.target.value)}
-                    placeholder="1200"
+                    value={cost}
+                    onChange={(e) => setCost(e.target.value)}
+                    placeholder="Для аналитики"
                     className="pl-8 text-2xl font-bold"
                   />
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₽</span>

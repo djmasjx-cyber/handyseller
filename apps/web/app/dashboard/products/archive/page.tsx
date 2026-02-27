@@ -12,7 +12,7 @@ interface Product {
   title: string
   article?: string
   sku?: string
-  price: string | number
+  cost: string | number
   stock?: number
   archivedAt?: string | null
   marketplaceMappings?: { marketplace: string }[]
@@ -140,7 +140,7 @@ export default function ProductsArchivePage() {
                     <th className="text-left font-medium p-3">Артикул</th>
                     <th className="text-left font-medium p-3">Название</th>
                     <th className="text-left font-medium p-3">Остаток</th>
-                    <th className="text-left font-medium p-3">Цена</th>
+                    <th className="text-left font-medium p-3">Себестоимость</th>
                     <th className="text-left font-medium p-3">Маркетплейс</th>
                     <th className="text-left font-medium p-3">Дата архива</th>
                     <th className="text-right font-medium p-3"></th>
@@ -163,7 +163,7 @@ export default function ProductsArchivePage() {
                         <td className="p-3">{product.article || product.sku || "—"}</td>
                         <td className="p-3 font-medium">{product.title || "—"}</td>
                         <td className="p-3">{product.stock ?? 0}</td>
-                        <td className="p-3">{String(product.price ?? "—")}</td>
+                        <td className="p-3">{String(product.cost ?? "—")}</td>
                         <td className="p-3">
                           <div className="flex flex-wrap gap-1">
                             {linkedMarketplaces.length > 0 ? (

@@ -73,7 +73,7 @@ export function productToCanonical(product: ProductWithRelations): CanonicalProd
     long_description_html: p.richContent ?? undefined,
     attributes: attributes.length > 0 ? attributes : undefined,
     images: images.length > 0 ? images : undefined,
-    price: Number(product.price),
+    price: 1,
     stock_quantity: product.stock ?? 0,
   };
 }

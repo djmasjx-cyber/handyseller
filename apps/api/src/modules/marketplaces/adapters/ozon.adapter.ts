@@ -281,14 +281,14 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
     typeId: number;
     attributeIds: number[];
   } {
-    const priceNum = Math.round(Number(product.price));
+    const priceNum = Math.round(Number(product.price ?? 1));
     const offerId = this.sanitizeOfferId(product.vendorCode ?? `HS_${product.id.slice(0, 8)}`);
     // Ozon требует barcode. Приоритет: barcodeOzon (из прошлой выгрузки) → barcode → EAN-13.
     const barcode =
       (product.barcodeOzon ?? product.barcode)?.trim() ||
       this.generateEan13(product.vendorCode ?? product.id);
     const priceStr = String(priceNum);
-    const oldPriceNum = Math.max(priceNum + 1, Math.round(product.price * 1.25));
+    const oldPriceNum = Math.max(priceNum + 1, Math.round((product.price ?? 1) * 1.25));
     const oldPriceStr = String(oldPriceNum);
 
     const validImages = product.images?.filter((u) => typeof u === 'string' && u.startsWith('http')) ?? [];
@@ -359,7 +359,7 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
       name: { our: product.name, ozon: item.name },
       offer_id: { our: product.vendorCode ?? product.id, ozon: offerId },
       barcode: { our: product.barcodeOzon ?? product.barcode ?? '(EAN-13)', ozon: barcode },
-      price: { our: product.price, ozon: priceStr },
+      price: { our: product.price ?? 1, ozon: priceStr },
       images: { our: product.images?.length ?? 0, ozon: validImages.length },
       weight: { our: product.weight ?? weight, ozon: weight },
       width: { our: product.width ?? width, ozon: width },
@@ -408,9 +408,10 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
           'Ozon не подключён или данные устарели. Подключите Ozon заново в разделе Маркетплейсы (Client ID и API Key).',
         );
       }
-      const priceNum = Math.round(Number(product.price));
+      // Цена задаётся на Ozon клиентом; при создании используем placeholder 1
+      const priceNum = Math.round(Number(product.price ?? 1));
       if (priceNum <= 0) {
-        throw new Error('Ozon не принимает цену 0 или отрицательную. Укажите цену больше 0 в карточке товара.');
+        throw new Error('Ozon не принимает цену 0 или отрицательную.');
       }
 
       const validImages = product.images?.filter((u) => typeof u === 'string' && u.startsWith('http')) ?? [];
@@ -756,25 +757,6 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
         'Content-Type': 'application/json',
       };
 
-      // Цена: v1/product/import/prices — по product_id, не зависит от offer_id
-      if (product.price !== undefined) {
-        await firstValueFrom(
-          this.httpService.post(
-            `${this.API_BASE}/v1/product/import/prices`,
-            {
-              prices: [
-                {
-                  product_id: productIdNum,
-                  price: String(Math.round(product.price)),
-                  old_price: String(Math.round(product.price * 1.1)),
-                },
-              ],
-            },
-            { headers },
-          ),
-        );
-      }
-
       // Остаток: по product_id и offer_id (offer_id нужен для склада)
       if (product.stock !== undefined) {
         if (!this.config.warehouseId || !this.config.sellerId) {
@@ -812,7 +794,7 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
               id: product.id ?? '',
               name: product.name,
               description: product.description ?? '',
-              price: product.price ?? 0,
+              price: product.price ?? 1,
               stock: product.stock ?? 0,
               images: validImages,
               vendorCode: product.vendorCode,

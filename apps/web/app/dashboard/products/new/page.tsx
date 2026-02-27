@@ -15,7 +15,7 @@ export default function NewProductPage() {
   const [form, setForm] = useState({
     title: "",
     description: "",
-    price: "",
+    cost: "",
     article: "",
     imageUrl: "",
     brand: "",
@@ -56,9 +56,9 @@ export default function NewProductPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!token) return
-    const price = parseFloat(form.price)
-    if (isNaN(price) || price < 0) {
-      setError("Укажите корректную цену")
+    const costVal = form.cost ? parseFloat(form.cost) : 0
+    if (!isNaN(costVal) && costVal < 0) {
+      setError("Себестоимость не может быть отрицательной")
       return
     }
     if (!form.title.trim()) {
@@ -77,7 +77,7 @@ export default function NewProductPage() {
         body: JSON.stringify({
           title: form.title.trim(),
           description: form.description.trim() || undefined,
-          price,
+          cost: isNaN(costVal) ? undefined : costVal,
           article: form.article.trim() || undefined,
           imageUrl: form.imageUrl.trim() || undefined,
           brand: form.brand.trim() || undefined,
@@ -209,16 +209,15 @@ export default function NewProductPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="price">Цена (₽) *</Label>
+              <Label htmlFor="cost">Себестоимость (₽)</Label>
               <Input
-                id="price"
+                id="cost"
                 type="number"
                 step="0.01"
                 min="0"
-                required
-                value={form.price}
-                onChange={(e) => setForm((f) => ({ ...f, price: e.target.value }))}
-                placeholder="299"
+                value={form.cost}
+                onChange={(e) => setForm((f) => ({ ...f, cost: e.target.value }))}
+                placeholder="Для аналитики"
               />
             </div>
             <div className="space-y-2">

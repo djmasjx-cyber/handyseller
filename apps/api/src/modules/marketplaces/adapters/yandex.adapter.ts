@@ -102,7 +102,7 @@ export class YandexAdapter extends BaseMarketplaceAdapter {
       const offer: Record<string, unknown> = {
         id: offerId,
         name: product.name,
-        price: { value: product.price, currencyId: 'RUR' },
+        price: { value: product.price ?? 1, currencyId: 'RUR' },
         categoryId: 90483,
         vendor: product.brand ?? 'Ручная работа',
         vendorCode: product.vendorCode ?? product.id,
@@ -165,9 +165,6 @@ export class YandexAdapter extends BaseMarketplaceAdapter {
         };
       } = { offer: { id: marketplaceProductId } };
 
-      if (product.price !== undefined) {
-        updateData.offer.price = { value: product.price, currencyId: 'RUR' };
-      }
       if (product.stock !== undefined) {
         updateData.offer.available = product.stock > 0;
         updateData.offer.quantity = product.stock;

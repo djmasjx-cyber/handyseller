@@ -27,7 +27,6 @@ export class StockSyncListener {
         id: product.id,
         name: product.title,
         description: product.description ?? undefined,
-        price: Number(product.price),
         stock: product.stock,
         images: product.imageUrl ? [product.imageUrl] : [],
         sku: product.sku ?? undefined,
