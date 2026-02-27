@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { BaseMarketplaceAdapter, MarketplaceConfig } from './base-marketplace.adapter';
 import { CryptoService } from '../../../common/crypto/crypto.service';
@@ -24,10 +24,20 @@ export class MarketplaceAdapterFactory {
     private readonly httpService: HttpService,
   ) {}
 
+  private safeDecrypt(value: string, marketplace: string): string {
+    try {
+      return this.crypto.decrypt(value);
+    } catch {
+      throw new BadRequestException(
+        `Токен ${marketplace} повреждён после миграции. Переподключите маркетплейс в настройках.`,
+      );
+    }
+  }
+
   createWildberriesAdapter(connection: ConnectionConfig): WildberriesAdapter {
-    const apiKey = this.crypto.decrypt(connection.encryptedToken);
+    const apiKey = this.safeDecrypt(connection.encryptedToken, 'Wildberries');
     const statsToken = connection.encryptedStatsToken
-      ? this.crypto.decrypt(connection.encryptedStatsToken)
+      ? this.safeDecrypt(connection.encryptedStatsToken, 'Wildberries')
       : undefined;
     const config: MarketplaceConfig = {
       apiKey,
@@ -40,7 +50,7 @@ export class MarketplaceAdapterFactory {
   }
 
   createOzonAdapter(connection: ConnectionConfig): OzonAdapter {
-    const apiKey = this.crypto.decrypt(connection.encryptedToken);
+    const apiKey = this.safeDecrypt(connection.encryptedToken, 'Ozon');
     const config: MarketplaceConfig = {
       apiKey,
       sellerId: connection.sellerId, // Client-Id для Ozon
@@ -51,7 +61,7 @@ export class MarketplaceAdapterFactory {
   }
 
   createYandexAdapter(connection: ConnectionConfig): YandexAdapter {
-    const apiKey = this.crypto.decrypt(connection.encryptedToken);
+    const apiKey = this.safeDecrypt(connection.encryptedToken, 'Yandex');
     const config: MarketplaceConfig = {
       apiKey,
       sellerId: connection.sellerId, // Campaign ID (businessId) для Яндекса
@@ -61,7 +71,7 @@ export class MarketplaceAdapterFactory {
   }
 
   createAvitoAdapter(connection: ConnectionConfig): AvitoAdapter {
-    const apiKey = this.crypto.decrypt(connection.encryptedToken);
+    const apiKey = this.safeDecrypt(connection.encryptedToken, 'Avito');
     const config: MarketplaceConfig = {
       apiKey,
       sellerId: connection.sellerId, // Client-Id для Avito
