@@ -164,8 +164,10 @@ jobs:
             chmod +x vm-watchdog.sh handyseller-start.sh 2>/dev/null || true
             DC="docker compose"
             command -v docker-compose >/dev/null 2>&1 && DC="docker-compose"
-            $DC -f docker-compose.ci.yml pull
+            # Останавливаем контейнеры, чистим место, затем pull (no space left on device)
             $DC -f docker-compose.ci.yml --env-file .env.production down --remove-orphans 2>/dev/null || true
+            docker system prune -af 2>/dev/null || true
+            $DC -f docker-compose.ci.yml pull
             $DC -f docker-compose.ci.yml --env-file .env.production up -d
 
             [ -f /etc/cron.d/handyseller-watchdog ] || \
