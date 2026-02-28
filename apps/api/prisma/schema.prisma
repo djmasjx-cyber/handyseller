@@ -28,6 +28,7 @@ model User {
   materials        Material[]
   marketplaceConns MarketplaceConnection[]
   orders           Order[]
+  salesSources     SalesSource[]
   wbSupplies       WbSupply[]
   subscription     Subscription?
   refreshTokens    RefreshToken[]
@@ -283,6 +284,7 @@ enum MarketplaceType {
   OZON
   YANDEX
   AVITO
+  MANUAL
 }
 
 model Order {
@@ -310,6 +312,9 @@ model Order {
   logisticsCost        Decimal?   @map("logistics_cost") @db.Decimal(10, 2)
   commissionAmount     Decimal?   @map("commission_amount") @db.Decimal(10, 2)
   costsSyncedAt        DateTime?  @map("costs_synced_at")
+
+  /// Источник продажи для ручных заказов (MANUAL): "Авито", "Инстаграм" и т.д.
+  salesSource          String?    @map("sales_source")
 
   user                User                  @relation(fields: [userId], references: [id])
   items               OrderItem[]
@@ -361,6 +366,18 @@ enum OrderStatus {
   READY_FOR_PICKUP  // товар в ПВЗ, ждёт клиента (WB: ready_for_pickup, waiting)
   DELIVERED         // получен клиентом (WB: sold, receive, delivered)
   CANCELLED
+}
+
+model SalesSource {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  name      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, name])
+  @@index([userId])
 }
 
 model WbSupply {
