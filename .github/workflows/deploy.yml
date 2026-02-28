@@ -191,6 +191,12 @@ jobs:
 
             docker rm -f handyseller-api handyseller-web handyseller-redis 2>/dev/null || true
             docker network rm handyseller_handyseller 2>/dev/null || true
+            if docker network inspect handyseller_handyseller >/dev/null 2>&1; then
+              for c in $(docker network inspect handyseller_handyseller --format '{{range .Containers}}{{.Name}} {{end}}' 2>/dev/null); do
+                docker network disconnect -f handyseller_handyseller "$c" 2>/dev/null || true
+              done
+              docker network rm handyseller_handyseller 2>/dev/null || true
+            fi
             docker network prune -f
             $DC -f docker-compose.ci.yml --env-file .env.production down --remove-orphans 2>/dev/null || true
             docker rm -f handyseller-api handyseller-web handyseller-redis 2>/dev/null || true
