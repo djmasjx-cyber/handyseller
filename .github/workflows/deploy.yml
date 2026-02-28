@@ -198,7 +198,10 @@ jobs:
             echo "=== Pulling images ==="
             $DC -f docker-compose.ci.yml pull
 
-            # 4. Запуск
+            # 4. Удаляем контейнеры по имени (watchdog мог создать между down и up)
+            docker rm -f handyseller-api handyseller-web handyseller-redis 2>/dev/null || true
+
+            # 5. Запуск
             $DC -f docker-compose.ci.yml --env-file .env.production up -d
 
             [ -f /etc/cron.d/handyseller-watchdog ] || \
