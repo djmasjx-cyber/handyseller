@@ -63,8 +63,8 @@ services:
 
 networks:
   handyseller:
-    name: handyseller_handyseller
-    external: true
+    name: handyseller_net
+    driver: bridge
 
 volumes:
   handyseller_redis:
