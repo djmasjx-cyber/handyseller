@@ -152,6 +152,7 @@ jobs:
           command_timeout: 30m
           envs: CR_PAT
           script: |
+            # Деплой: down → prune (образы+контейнеры) → pull → up. Сеть external — создаётся один раз.
             set -e
             cd /opt/handyseller
 
@@ -177,18 +178,27 @@ jobs:
             DC="docker compose"
             command -v docker-compose >/dev/null 2>&1 && DC="docker-compose"
 
+            # Сеть external — создаём один раз, compose её не создаёт (нет конфликтов с watchdog)
+            docker network create handyseller_handyseller 2>/dev/null || true
+
             echo "=== Disk before ==="
             df -h /
 
+            # 1. Останавливаем и удаляем контейнеры (сеть external — остаётся)
             $DC -f docker-compose.ci.yml --env-file .env.production down --remove-orphans
-            docker network rm handyseller_handyseller 2>/dev/null || true
+
+            # 2. Очистка: только образы и остановленные контейнеры (сети не трогаем)
+            docker container prune -f
             docker image prune -af
-            echo "=== Disk after image prune ==="
+
+            echo "=== Disk after prune ==="
             df -h /
 
+            # 3. Pull новых образов
             echo "=== Pulling images ==="
             $DC -f docker-compose.ci.yml pull
 
+            # 4. Запуск
             $DC -f docker-compose.ci.yml --env-file .env.production up -d
 
             [ -f /etc/cron.d/handyseller-watchdog ] || \

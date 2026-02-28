@@ -3,4 +3,5 @@
 set -e
 cd /opt/handyseller
 . .env.production 2>/dev/null || true
+docker network create handyseller_handyseller 2>/dev/null || true
 docker compose -f docker-compose.ci.yml --env-file .env.production up -d

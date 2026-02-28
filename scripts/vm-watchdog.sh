@@ -34,6 +34,7 @@ fi
 
 if [ "$need_restart" = "1" ]; then
   echo "$(date -Iseconds) [WATCHDOG] Restarting stack..."
+  docker network create handyseller_handyseller 2>/dev/null || true
   docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d 2>/dev/null || true
   sleep 5
   sudo systemctl reload nginx 2>/dev/null || true
