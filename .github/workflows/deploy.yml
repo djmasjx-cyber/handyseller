@@ -130,7 +130,15 @@ jobs:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USER || 'ubuntu' }}
           key_path: deploy_key.pem
-          source: "docker-compose.ci.yml,scripts/vm-watchdog.sh,scripts/handyseller-start.sh"
+          source: "docker-compose.ci.yml,scripts/vm-watchdog.sh,scripts/handyseller-start.sh,scripts/vm-diagnose.sh"
+          target: "/opt/handyseller/"
+      - name: Copy nginx configs to VM
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER || 'ubuntu' }}
+          key_path: deploy_key.pem
+          source: "nginx"
           target: "/opt/handyseller/"
 
       - name: Deploy to VM
@@ -189,7 +197,32 @@ jobs:
               echo "*/2 * * * * root /opt/handyseller/vm-watchdog.sh" | sudo tee /etc/cron.d/handyseller-watchdog
             sudo chmod 644 /etc/cron.d/handyseller-watchdog 2>/dev/null || true
 
-            sudo systemctl reload nginx 2>/dev/null || true
-            sleep 10
+            if [ -d /opt/handyseller/nginx ]; then
+              if sudo test -f /etc/letsencrypt/live/handyseller.ru/fullchain.pem 2>/dev/null; then
+                sudo cp /opt/handyseller/nginx/handyseller-domain.conf /etc/nginx/sites-available/handyseller
+              elif [ -f /opt/handyseller/nginx/handyseller-bootstrap.conf ]; then
+                sudo cp /opt/handyseller/nginx/handyseller-bootstrap.conf /etc/nginx/sites-available/handyseller
+              else
+                sudo cp /opt/handyseller/nginx/handyseller.conf /etc/nginx/sites-available/handyseller
+              fi
+              sudo ln -sf /etc/nginx/sites-available/handyseller /etc/nginx/sites-enabled/
+            fi
+            sudo nginx -t 2>/dev/null && sudo systemctl reload nginx 2>/dev/null || true
+
+            echo "=== Waiting for containers (up to 90s) ==="
+            for i in $(seq 1 30); do
+              if curl -sf --connect-timeout 2 http://127.0.0.1:4000/health >/dev/null 2>&1; then
+                echo "API healthy after ${i}x3s"
+                break
+              fi
+              [ $i -eq 30 ] && { echo "API not ready after 90s"; docker ps -a; docker logs handyseller-api --tail 80 2>&1; exit 1; }
+              sleep 3
+            done
+
+            sleep 5
             docker exec handyseller-api node dist/scripts/seed-database.js 2>/dev/null || true
+
+            echo "=== Verify Web ==="
+            curl -sf --connect-timeout 5 http://127.0.0.1:3001/ >/dev/null || { echo "Web not responding"; docker logs handyseller-web --tail 30 2>&1; exit 1; }
+
             echo "Deploy complete: https://app.handyseller.ru"
