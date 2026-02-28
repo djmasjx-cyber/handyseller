@@ -182,6 +182,7 @@ jobs:
             $DC -f docker-compose.ci.yml pull
 
             docker rm -f handyseller-api handyseller-web handyseller-redis 2>/dev/null || true
+            docker network rm handyseller_handyseller 2>/dev/null || true
             $DC -f docker-compose.ci.yml --env-file .env.production up -d
 
             [ -f /etc/cron.d/handyseller-watchdog ] || \
