@@ -7,7 +7,7 @@ import { OzonAdapter } from './ozon.adapter';
 import { YandexAdapter } from './yandex.adapter';
 import { AvitoAdapter } from './avito.adapter';
 
-export type MarketplaceType = 'WILDBERRIES' | 'OZON' | 'YANDEX' | 'AVITO';
+export type MarketplaceType = 'WILDBERRIES' | 'OZON' | 'YANDEX' | 'AVITO' | 'MANUAL';
 
 export interface ConnectionConfig {
   encryptedToken: string;
@@ -81,6 +81,7 @@ export class MarketplaceAdapterFactory {
   }
 
   createAdapter(marketplace: MarketplaceType, connection: ConnectionConfig): BaseMarketplaceAdapter | null {
+    if (marketplace === 'MANUAL') return null;
     if (marketplace === 'WILDBERRIES') return this.createWildberriesAdapter(connection);
     if (marketplace === 'OZON') return this.createOzonAdapter(connection);
     if (marketplace === 'YANDEX') return this.createYandexAdapter(connection);

@@ -317,6 +317,7 @@ export class MarketplacesService {
 
     for (const conn of connections) {
       if (!conn.token) continue;
+      if (conn.marketplace === 'MANUAL') continue;
 
       const adapter = this.adapterFactory.createAdapter(conn.marketplace, {
         encryptedToken: conn.token,
@@ -664,6 +665,7 @@ export class MarketplacesService {
 
     for (const conn of connections_merged) {
       if (!conn.token) continue;
+      if (conn.marketplace === 'MANUAL') continue;
 
       const adapter = this.adapterFactory.createAdapter(conn.marketplace, {
         encryptedToken: conn.token,
@@ -947,7 +949,7 @@ export class MarketplacesService {
         select: { productId: true, marketplace: true },
       }),
       ...connections
-        .filter((conn) => conn.token)
+        .filter((conn) => conn.token && conn.marketplace !== 'MANUAL')
         .map(async (conn) => {
           const adapter = this.adapterFactory.createAdapter(conn.marketplace, {
             encryptedToken: conn.token!,

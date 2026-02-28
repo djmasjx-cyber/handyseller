@@ -200,8 +200,8 @@ export class OrdersService {
       }
     }
 
-    // Сначала передаём статус на маркетплейс — при ошибке пользователь получит сообщение
-    if (order.status === OrderStatus.NEW && status === OrderStatus.IN_PROGRESS) {
+    // Сначала передаём статус на маркетплейс — при ошибке пользователь получит сообщение (MANUAL — не пушим)
+    if (order.status === OrderStatus.NEW && status === OrderStatus.IN_PROGRESS && order.marketplace !== 'MANUAL') {
       await this.marketplacesService.pushOrderStatus(userId, order.marketplace, {
         marketplaceOrderId: order.externalId,
         status: status, // IN_PROGRESS → адаптеры маппят в CONFIRMED/awaiting_deliver и т.д.
@@ -354,13 +354,15 @@ export class OrdersService {
             allowNegative: false,
           });
         }
-        // 2. Отправляем статус на маркетплейс
-        await this.marketplacesService.pushOrderStatus(uid, order.marketplace, {
-          marketplaceOrderId: order.externalId,
-          status: OrderStatus.IN_PROGRESS,
-          wbStickerNumber: order.wbStickerNumber ?? undefined,
-          wbFulfillmentType: order.marketplace === 'WILDBERRIES' ? (order as { wbFulfillmentType?: 'FBS' | 'DBS' | 'DBW' }).wbFulfillmentType ?? undefined : undefined,
-        });
+        // 2. Отправляем статус на маркетплейс (MANUAL — не пушим)
+        if (order.marketplace !== 'MANUAL') {
+          await this.marketplacesService.pushOrderStatus(uid, order.marketplace, {
+            marketplaceOrderId: order.externalId,
+            status: OrderStatus.IN_PROGRESS,
+            wbStickerNumber: order.wbStickerNumber ?? undefined,
+            wbFulfillmentType: order.marketplace === 'WILDBERRIES' ? (order as { wbFulfillmentType?: 'FBS' | 'DBS' | 'DBW' }).wbFulfillmentType ?? undefined : undefined,
+          });
+        }
         // 3. Обновляем статус заказа
         await this.prisma.order.update({
           where: { id: order.id },
