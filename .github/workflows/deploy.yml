@@ -177,23 +177,18 @@ jobs:
             DC="docker compose"
             command -v docker-compose >/dev/null 2>&1 && DC="docker-compose"
 
-            echo "=== Disk before prune ==="
+            echo "=== Disk before ==="
             df -h /
 
-            $DC -f docker-compose.ci.yml --env-file .env.production down --remove-orphans 2>/dev/null || true
-            docker system prune -af || true
-
-            echo "=== Disk after prune ==="
+            $DC -f docker-compose.ci.yml --env-file .env.production down --remove-orphans
+            docker network rm handyseller_handyseller 2>/dev/null || true
+            docker image prune -af
+            echo "=== Disk after image prune ==="
             df -h /
 
             echo "=== Pulling images ==="
             $DC -f docker-compose.ci.yml pull
 
-            docker rm -f handyseller-api handyseller-web handyseller-redis 2>/dev/null || true
-            docker network prune -f
-            $DC -f docker-compose.ci.yml --env-file .env.production down --remove-orphans 2>/dev/null || true
-            docker rm -f handyseller-api handyseller-web handyseller-redis 2>/dev/null || true
-            sed -i 's/handyseller_handyseller/handyseller_net/g' docker-compose.ci.yml
             $DC -f docker-compose.ci.yml --env-file .env.production up -d
 
             [ -f /etc/cron.d/handyseller-watchdog ] || \

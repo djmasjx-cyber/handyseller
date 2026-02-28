@@ -63,7 +63,6 @@ services:
 
 networks:
   handyseller:
-    name: handyseller_net
     driver: bridge
 
 volumes:
