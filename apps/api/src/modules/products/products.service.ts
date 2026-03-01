@@ -58,9 +58,7 @@ export class ProductsService {
           status: { in: this.RESERVE_STATUSES },
         },
       },
-      select: {
-        productId: true,
-        quantity: true,
+      include: {
         order: { select: { isFbo: true } },
       },
     });
