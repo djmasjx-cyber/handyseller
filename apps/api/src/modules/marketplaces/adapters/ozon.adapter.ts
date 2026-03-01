@@ -885,7 +885,7 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
       created_at: string;
     };
 
-    const toOrderData = (posting: Posting): OrderData => ({
+    const toOrderData = (posting: Posting, isFbo = false): OrderData => ({
       id: posting.posting_number,
       marketplaceOrderId: posting.posting_number,
       productId: posting.products?.[0]?.product_id?.toString() ?? '',
@@ -896,6 +896,7 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
       rawStatus: posting.status, // для подсчёта «отказ покупателя» vs «отмена продавца»
       amount: posting.products?.reduce((sum: number, p) => sum + (p.price ?? 0), 0) ?? 0,
       createdAt: new Date(posting.created_at),
+      isFbo,
     });
 
     const seen = new Set<string>();
@@ -920,14 +921,14 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
         const posting = p as Posting;
         if (!seen.has(posting.posting_number)) {
           seen.add(posting.posting_number);
-          result.push(toOrderData(posting));
+          result.push(toOrderData(posting, false));
         }
       }
     } catch (error) {
       this.logError(error, 'getOrders FBS');
     }
 
-    // FBO — склады Ozon (Fulfillment by Ozon)
+    // FBO — склады Ozon (Fulfillment by Ozon). Товар со склада Ozon — не списывать «Мой склад».
     try {
       const { data } = await firstValueFrom(
         this.httpService.post(
@@ -945,7 +946,7 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
         const posting = p as Posting;
         if (!seen.has(posting.posting_number)) {
           seen.add(posting.posting_number);
-          result.push(toOrderData(posting));
+          result.push(toOrderData(posting, true));
         }
       }
     } catch (error) {

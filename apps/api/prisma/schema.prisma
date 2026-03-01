@@ -315,6 +315,8 @@ model Order {
 
   /// Источник продажи для ручных заказов (MANUAL): "Авито", "Инстаграм" и т.д.
   salesSource          String?    @map("sales_source")
+  /// FBO: товар со склада маркетплейса (WB: DBW, Ozon: FBO) — не списывать остаток «Мой склад»
+  isFbo                Boolean?   @map("is_fbo")
 
   user                User                  @relation(fields: [userId], references: [id])
   items               OrderItem[]

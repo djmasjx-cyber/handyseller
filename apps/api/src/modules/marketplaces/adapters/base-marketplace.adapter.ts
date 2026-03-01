@@ -89,6 +89,8 @@ export interface OrderData {
   processingTimeMin?: number;
   /** WB: тип фулфилмента заказа (FBS/DBS/DBW). Для других маркетплейсов не используется. */
   wbFulfillmentType?: 'FBS' | 'DBS' | 'DBW';
+  /** FBO (Fulfillment by Operator): товар со склада маркетплейса — не списывать остаток «Мой склад». WB: DBW. Ozon: из fbo/list. */
+  isFbo?: boolean;
 }
 
 export interface SyncResult {

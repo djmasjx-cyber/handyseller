@@ -92,6 +92,17 @@ function calcProcessingTimeMin(createdAt: Date, deliveredAtProxy: Date = new Dat
 /** Макс. надёжный интервал для sync_proxy: если > 72ч, оценка ненадёжна (заказ мог быть сдан давно) */
 const MAX_TRUSTED_PROCESSING_MIN = 72 * 60;
 
+/** FBO: товар со склада маркетплейса — не списывать остаток «Мой склад». WB: DBW. Ozon: isFbo. */
+function isFboOrder(order: {
+  marketplace: string;
+  wbFulfillmentType?: string | null;
+  isFbo?: boolean | null;
+}): boolean {
+  if (order.marketplace === 'WILDBERRIES' && order.wbFulfillmentType === 'DBW') return true;
+  if (order.marketplace === 'OZON' && order.isFbo) return true;
+  return false;
+}
+
 @Injectable()
 export class OrdersService {
   constructor(
@@ -312,6 +323,9 @@ export class OrdersService {
     if (order.status === OrderStatus.CANCELLED) {
       return { ok: false, reserved: 0, message: 'Заказ отменён, резерв не нужен' };
     }
+    if (isFboOrder(order)) {
+      return { ok: true, reserved: 0, message: 'FBO-заказ: товар со склада маркетплейса, резерв «Мой склад» не требуется' };
+    }
     let reserved = 0;
     for (const item of order.items) {
       if (!item.product) continue;
@@ -407,14 +421,16 @@ export class OrdersService {
       }
 
       try {
-        // 1. Резервируем остаток (StockSyncListener отправит -1 на маркеты)
-        for (const item of order.items) {
-          if (!item.product) continue;
-          await this.stockService.reserve(item.productId, item.product.userId, item.quantity, {
-            source: 'SALE' as const,
-            note: `Заказ ${externalId} (${order.marketplace}) — авто после холда`,
-            allowNegative: false,
-          });
+        // 1. Резервируем остаток только для FBS (не FBO). FBO — товар со склада маркета, «Мой склад» не трогаем.
+        if (!isFboOrder(order)) {
+          for (const item of order.items) {
+            if (!item.product) continue;
+            await this.stockService.reserve(item.productId, item.product.userId, item.quantity, {
+              source: 'SALE' as const,
+              note: `Заказ ${externalId} (${order.marketplace}) — авто после холда`,
+              allowNegative: false,
+            });
+          }
         }
         // 2. Отправляем статус на маркетплейс (MANUAL — не пушим)
         if (order.marketplace !== 'MANUAL') {
@@ -480,12 +496,13 @@ export class OrdersService {
           rawStatus?: string | null;
           createdAt?: Date;
           wbFulfillmentType?: 'FBS' | 'DBS' | 'DBW' | null;
+          isFbo?: boolean | null;
         } = {};
         if (od.createdAt) updateData.createdAt = od.createdAt;
         if (existing.status !== OrderStatus.CANCELLED && isCancelled) {
           try {
-            // Резерв делается только при переходе NEW→IN_PROGRESS. Release — только если заказ был на сборке.
-            if (existing.status === OrderStatus.IN_PROGRESS) {
+            // Release только если заказ был на сборке и мы резервировали (не FBO).
+            if (existing.status === OrderStatus.IN_PROGRESS && !isFboOrder(existing)) {
               for (const item of existing.items) {
                 await this.stockService.release(item.productId, userId, item.quantity, {
                   source: 'SALE' as const,
@@ -523,7 +540,11 @@ export class OrdersService {
           if (needFix) (updateData as Record<string, unknown>).wbStickerNumber = od.id;
           if (od.wbFulfillmentType && existing.marketplace === 'WILDBERRIES') {
             updateData.wbFulfillmentType = od.wbFulfillmentType;
+            if (od.wbFulfillmentType === 'DBW') updateData.isFbo = true;
           }
+        }
+        if (marketplace === 'OZON' && (od as { isFbo?: boolean }).isFbo) {
+          updateData.isFbo = true;
         }
         if (existing.ozonPostingNumber == null && marketplace === 'OZON') {
           (updateData as Record<string, unknown>).ozonPostingNumber = externalId;
@@ -595,6 +616,7 @@ export class OrdersService {
         const ozonPostingNumber = marketplace === 'OZON' ? externalId : null;
 
         // При создании НЕ пишем время обработки: заказы из «completed» API — момент сдачи неизвестен
+        const odIsFbo = (od as { isFbo?: boolean }).isFbo ?? (marketplace === 'WILDBERRIES' && (od as { wbFulfillmentType?: string }).wbFulfillmentType === 'DBW');
         const order = await this.prisma.$transaction(async (tx) => {
           const o = await tx.order.create({
             data: {
@@ -613,6 +635,7 @@ export class OrdersService {
                 marketplace === 'WILDBERRIES' && (od as { wbFulfillmentType?: 'FBS' | 'DBS' | 'DBW' }).wbFulfillmentType
                   ? (od as { wbFulfillmentType?: 'FBS' | 'DBS' | 'DBW' }).wbFulfillmentType!
                   : null,
+              isFbo: odIsFbo || undefined,
             },
           });
           await tx.orderItem.create({
@@ -628,8 +651,8 @@ export class OrdersService {
           return o;
         });
 
-        // Резерв при создании — только для заказов не в холде (IN_PROGRESS и выше). NEW — резерв после холда (cron).
-        if (status !== OrderStatus.NEW) {
+        // Резерв при создании — только для FBS (не FBO) и не в холде. FBO — товар со склада маркета.
+        if (status !== OrderStatus.NEW && !odIsFbo) {
           await this.stockService.reserve(product.id, product.userId, quantity, {
             source: 'SALE' as const,
             note: `Заказ ${externalId} (${marketplace})`,

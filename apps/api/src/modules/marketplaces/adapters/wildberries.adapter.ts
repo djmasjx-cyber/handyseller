@@ -897,6 +897,7 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
         warehouseName,
         rawStatus: wbStatus,
         wbFulfillmentType: fulfillmentType,
+        isFbo: fulfillmentType === 'DBW',
       });
     };
 
