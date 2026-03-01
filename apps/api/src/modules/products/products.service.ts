@@ -142,6 +142,39 @@ export class ProductsService {
     });
   }
 
+  /** Поиск товаров для autocomplete: id (точное), displayId, article (ILIKE), title (ILIKE). Лимит 10, без архива. */
+  async search(userId: string, q: string, limit = 10) {
+    const trimmed = q?.trim() ?? '';
+    if (!trimmed) return [];
+    const orConditions: object[] = [
+      { article: { contains: trimmed, mode: 'insensitive' } },
+      { title: { contains: trimmed, mode: 'insensitive' } },
+    ];
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(trimmed)) {
+      orConditions.push({ id: trimmed });
+    }
+    const numId = parseInt(trimmed.replace(/^0+/, '') || '0', 10);
+    if (!isNaN(numId) && numId > 0) {
+      orConditions.push({ displayId: numId });
+    }
+    const products = await this.prisma.product.findMany({
+      where: {
+        userId,
+        archivedAt: null,
+        OR: orConditions,
+      },
+      select: { id: true, article: true, title: true, displayId: true },
+      take: limit,
+      orderBy: { displayId: 'asc' },
+    });
+    return products.map((p) => ({
+      id: p.id,
+      article: p.article,
+      title: p.title,
+      displayId: String(p.displayId).padStart(4, '0'),
+    }));
+  }
+
   /** Поиск по ID (0001, displayId), UUID или артикулу — для пополнения остатков */
   async findByArticleOrId(userId: string, value: string) {
     const trimmed = value.trim();

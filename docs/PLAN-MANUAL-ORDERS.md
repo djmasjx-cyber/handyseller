@@ -57,9 +57,9 @@ SalesSource (новая таблица)
 - Миграция Prisma
 - **Пуш в main** — обратная совместимость, старый код работает
 
-### Шаг 2. API: поиск товаров
+### Шаг 2. API: поиск товаров ✅
 - `GET /api/products/search?q=0001` — поиск по `id`, `article`, `title` (ILIKE)
-- Возврат: `[{ id, article, title }]` для autocomplete
+- Возврат: `[{ id, article, title, displayId }]` для autocomplete
 - **Пуш в main**
 
 ### Шаг 3. API: источники продаж

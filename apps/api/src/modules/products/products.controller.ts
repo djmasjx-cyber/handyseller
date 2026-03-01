@@ -30,6 +30,16 @@ export class ProductsController {
     return product ?? null;
   }
 
+  /** Поиск товаров для autocomplete: id, article, title. Возврат [{ id, article, title, displayId }]. */
+  @Get('search')
+  async search(
+    @CurrentUser('userId') userId: string,
+    @Query('q') q: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.productsService.search(userId, q ?? '', limit ? parseInt(limit, 10) || 10 : 10);
+  }
+
   /** Получить товар по ID (UUID), displayId (0001) или артикулу (edc002) — для карточки товара */
   @Get(':id')
   async findOne(
