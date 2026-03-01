@@ -53,7 +53,7 @@ export class ProductsService {
   private async getReservesByProduct(userId: string): Promise<Map<string, { fbs: number; fbo: number }>> {
     const orders = await this.prisma.order.findMany({
       where: { userId, status: { in: this.RESERVE_STATUSES } },
-      select: { isFbo: true, items: { select: { productId: true, quantity: true } } },
+      include: { items: { select: { productId: true, quantity: true } } },
     });
     const map = new Map<string, { fbs: number; fbo: number }>();
     for (const order of orders) {
