@@ -125,11 +125,14 @@ export default function ProductsPage() {
       fetch("/api/products", { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()),
       fetch("/api/marketplaces/wb-fbo-stock", { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.ok ? r.json() : {}),
     ])
-      .then(([data, stockFboMap]) => {
+      .then(([data, stockFboMapRaw]) => {
         const list = Array.isArray(data) ? data : []
+        const stockFboMap = (typeof stockFboMapRaw === "object" && stockFboMapRaw != null && !Array.isArray(stockFboMapRaw))
+          ? (stockFboMapRaw as Record<string, number>)
+          : {}
         const merged = list.map((p: Product) => ({
           ...p,
-          stockFbo: typeof stockFboMap === "object" && stockFboMap != null && p.id in stockFboMap ? stockFboMap[p.id] : undefined,
+          stockFbo: p.id in stockFboMap ? stockFboMap[p.id] : undefined,
         }))
         setProducts(merged)
       })
