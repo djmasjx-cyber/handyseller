@@ -92,6 +92,29 @@ function calcProcessingTimeMin(createdAt: Date, deliveredAtProxy: Date = new Dat
 /** Макс. надёжный интервал для sync_proxy: если > 72ч, оценка ненадёжна (заказ мог быть сдан давно) */
 const MAX_TRUSTED_PROCESSING_MIN = 72 * 60;
 
+/** Проверка: заказ уже резервировал остаток (по StockLog с note, содержащим externalId) */
+async function orderHasReservedStock(prisma: PrismaService, orderId: string, externalId: string): Promise<boolean> {
+  const items = await prisma.orderItem.findMany({
+    where: { orderId },
+    select: { productId: true, quantity: true },
+  });
+  if (items.length === 0) return false;
+  for (const item of items) {
+    const logs = await prisma.stockLog.findMany({
+      where: {
+        productId: item.productId,
+        delta: { lt: 0 },
+        source: 'SALE',
+        note: { contains: externalId },
+      },
+      select: { delta: true },
+    });
+    const reserved = logs.reduce((s, l) => s + Math.abs(l.delta), 0);
+    if (reserved < item.quantity) return false;
+  }
+  return true;
+}
+
 /** FBO: товар со склада маркетплейса — не списывать остаток «Мой склад». WB: DBW. Ozon: isFbo. */
 function isFboOrder(order: {
   marketplace: string;
@@ -451,15 +474,17 @@ export class OrdersService {
       const uid = order.userId;
       const externalId = order.externalId;
 
-      // Проверка остатка: все позиции должны иметь stock >= quantity
+      // Проверка остатка только для FBS: FBO — товар со склада маркета, наш склад не проверяем
       let canProcess = true;
-      for (const item of order.items) {
-        const stock = item.product?.stock ?? 0;
-        if (stock < item.quantity) {
-          canProcess = false;
-          const name = item.product?.title || item.product?.article || 'Товар';
-          errors.push(`Заказ ${externalId}: недостаточно «${name}» (нужно ${item.quantity}, в наличии ${stock})`);
-          break;
+      if (!isFboOrder(order)) {
+        for (const item of order.items) {
+          const stock = item.product?.stock ?? 0;
+          if (stock < item.quantity) {
+            canProcess = false;
+            const name = item.product?.title || item.product?.article || 'Товар';
+            errors.push(`Заказ ${externalId}: недостаточно «${name}» (нужно ${item.quantity}, в наличии ${stock})`);
+            break;
+          }
         }
       }
       if (!canProcess) {
@@ -469,7 +494,10 @@ export class OrdersService {
 
       try {
         // 1. Резервируем остаток только для FBS (не FBO). FBO — товар со склада маркета, «Мой склад» не трогаем.
-        if (!isFboOrder(order)) {
+        // Резерв один раз: проверяем, не резервировали ли уже (идемпотентность).
+        const alreadyReserved = await orderHasReservedStock(this.prisma, order.id, externalId);
+        if (!isFboOrder(order) && !alreadyReserved) {
+          const reservedItems: Array<{ productId: string; userId: string; quantity: number }> = [];
           for (const item of order.items) {
             if (!item.product) continue;
             await this.stockService.reserve(item.productId, item.product.userId, item.quantity, {
@@ -477,16 +505,52 @@ export class OrdersService {
               note: `Заказ ${externalId} (${order.marketplace}) — авто после холда`,
               allowNegative: false,
             });
+            reservedItems.push({
+              productId: item.productId,
+              userId: item.product.userId,
+              quantity: item.quantity,
+            });
           }
-        }
-        // 2. Отправляем статус на маркетплейс (MANUAL — не пушим)
-        if (order.marketplace !== 'MANUAL') {
-          await this.marketplacesService.pushOrderStatus(uid, order.marketplace, {
-            marketplaceOrderId: order.externalId,
-            status: OrderStatus.IN_PROGRESS,
-            wbStickerNumber: order.wbStickerNumber ?? undefined,
-            wbFulfillmentType: order.marketplace === 'WILDBERRIES' ? (order as { wbFulfillmentType?: 'FBS' | 'DBS' | 'DBW' }).wbFulfillmentType ?? undefined : undefined,
-          });
+          // 2. Отправляем статус на маркетплейс (MANUAL — не пушим)
+          if (order.marketplace !== 'MANUAL') {
+            try {
+              await this.marketplacesService.pushOrderStatus(uid, order.marketplace, {
+                marketplaceOrderId: order.externalId,
+                status: OrderStatus.IN_PROGRESS,
+                wbStickerNumber: order.wbStickerNumber ?? undefined,
+                wbFulfillmentType: order.marketplace === 'WILDBERRIES' ? (order as { wbFulfillmentType?: 'FBS' | 'DBS' | 'DBW' }).wbFulfillmentType ?? undefined : undefined,
+              });
+            } catch (pushErr) {
+              // Откат резерва при ошибке push — иначе следующий запуск крона снова зарезервирует
+              for (const r of reservedItems) {
+                await this.stockService.release(r.productId, r.userId, r.quantity, {
+                  source: 'SALE' as const,
+                  note: `Откат: заказ ${externalId} — ошибка отправки статуса`,
+                });
+              }
+              throw pushErr;
+            }
+          }
+        } else if (!isFboOrder(order) && alreadyReserved) {
+          // Резерв уже есть — только обновляем статус и пушим
+          if (order.marketplace !== 'MANUAL') {
+            await this.marketplacesService.pushOrderStatus(uid, order.marketplace, {
+              marketplaceOrderId: order.externalId,
+              status: OrderStatus.IN_PROGRESS,
+              wbStickerNumber: order.wbStickerNumber ?? undefined,
+              wbFulfillmentType: order.marketplace === 'WILDBERRIES' ? (order as { wbFulfillmentType?: 'FBS' | 'DBS' | 'DBW' }).wbFulfillmentType ?? undefined : undefined,
+            });
+          }
+        } else if (isFboOrder(order)) {
+          // FBO — не трогаем наш склад, только обновляем статус
+          if (order.marketplace !== 'MANUAL') {
+            await this.marketplacesService.pushOrderStatus(uid, order.marketplace, {
+              marketplaceOrderId: order.externalId,
+              status: OrderStatus.IN_PROGRESS,
+              wbStickerNumber: order.wbStickerNumber ?? undefined,
+              wbFulfillmentType: order.marketplace === 'WILDBERRIES' ? (order as { wbFulfillmentType?: 'FBS' | 'DBS' | 'DBW' }).wbFulfillmentType ?? undefined : undefined,
+            });
+          }
         }
         // 3. Обновляем статус заказа
         await this.prisma.order.update({
@@ -571,7 +635,23 @@ export class OrdersService {
           const correctWaiting =
             rawLower === 'waiting' && existing.status === OrderStatus.READY_FOR_PICKUP && newStatus === OrderStatus.IN_PROGRESS;
           const resolved = correctWaiting ? OrderStatus.IN_PROGRESS : pickResolvedStatus(existing.status, newStatus);
-          if (resolved !== existing.status) updateData.status = resolved;
+          if (resolved !== existing.status) {
+            updateData.status = resolved;
+            // Снятие резерва при отгрузке (отдали на ПВЗ): IN_PROGRESS → SHIPPED/READY_FOR_PICKUP
+            const toShipped = resolved === OrderStatus.SHIPPED || resolved === OrderStatus.READY_FOR_PICKUP;
+            if (toShipped && existing.status === OrderStatus.IN_PROGRESS && !isFboOrder(existing)) {
+              try {
+                for (const item of existing.items) {
+                  await this.stockService.release(item.productId, userId, item.quantity, {
+                    source: 'SALE' as const,
+                    note: `Заказ ${externalId} (${marketplace}) — отгрузка на ПВЗ`,
+                  });
+                }
+              } catch (err) {
+                errors.push(`Снятие резерва ${externalId}: ${err instanceof Error ? err.message : String(err)}`);
+              }
+            }
+          }
         }
         if (od.warehouseName != null || od.rawStatus != null) {
           if (od.warehouseName != null) updateData.warehouseName = od.warehouseName;
