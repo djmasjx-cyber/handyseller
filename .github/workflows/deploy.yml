@@ -16,6 +16,11 @@ on:
     branches: [main, master]
   workflow_dispatch:
 
+# При новом push — отменять предыдущие ранки (один активный на ветку)
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   packages: write
