@@ -67,6 +67,9 @@ const WB_RAW_STATUS_LABELS: Record<string, string> = {
 /** Временно скрыто: ценообразование WB в разработке */
 const SHOW_ORDER_PRICES = false
 
+/** PLAN-MANUAL-ORDERS step 5: скрыть кнопки «Синхронизировать» и «Все заказы» */
+const HIDE_SYNC_AND_ALL_ORDERS = true
+
 const MARKETPLACE_LABELS: Record<string, { label: string; variant?: "default" | "secondary" | "outline" | "destructive" }> = {
   WILDBERRIES: { label: "WB", variant: "default" },
   OZON: { label: "Ozon", variant: "secondary" },
@@ -330,30 +333,34 @@ export default function OrdersAssemblyPage() {
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 md:gap-4">
         <div className="flex flex-row md:flex-col items-center md:items-start justify-between md:justify-start gap-2 w-full md:w-auto">
           <h1 className="text-2xl md:text-3xl font-bold">Заказы на сборке</h1>
-          <Button
-            variant="outline"
-            size="sm"
-            className="md:hidden h-8 px-2.5 text-xs shrink-0 touch-manipulation"
-            onClick={handleSync}
-            disabled={syncing}
-            title="Синхронизировать"
-          >
-            {syncing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-            <span className="ml-1">Синхр.</span>
-          </Button>
+          {!HIDE_SYNC_AND_ALL_ORDERS && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="md:hidden h-8 px-2.5 text-xs shrink-0 touch-manipulation"
+              onClick={handleSync}
+              disabled={syncing}
+              title="Синхронизировать"
+            >
+              {syncing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+              <span className="ml-1">Синхр.</span>
+            </Button>
+          )}
         </div>
         <p className="text-muted-foreground text-sm w-full md:max-w-md">
           Заказы «Новые» и «На сборке» — можно печатать стикеры и этикетки (для WB/Ozon — при статусе «На сборке»).
         </p>
-        <div className="hidden md:flex gap-2">
-          <Button variant="outline" size="sm" onClick={handleSync} disabled={syncing} title="Обновить сейчас">
-            {syncing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-            Синхронизировать
-          </Button>
-          <Button variant="outline" size="sm" asChild>
-            <Link href="/dashboard/orders">Все заказы</Link>
-          </Button>
-        </div>
+        {!HIDE_SYNC_AND_ALL_ORDERS && (
+          <div className="hidden md:flex gap-2">
+            <Button variant="outline" size="sm" onClick={handleSync} disabled={syncing} title="Обновить сейчас">
+              {syncing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+              Синхронизировать
+            </Button>
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/dashboard/orders">Все заказы</Link>
+            </Button>
+          </div>
+        )}
       </div>
 
       {syncingError && (
@@ -620,11 +627,13 @@ export default function OrdersAssemblyPage() {
                     <td colSpan={SHOW_ORDER_PRICES ? 9 : 8} className="p-8 text-center text-muted-foreground">
                       <Package className="h-12 w-12 mx-auto mb-2 opacity-50" />
                       <p>Нет заказов «Новых» и «На сборке»</p>
-                      <p className="text-xs mt-1">
-                        <Link href="/dashboard/orders" className="text-primary hover:underline">
-                          Все заказы
-                        </Link>
-                      </p>
+                      {!HIDE_SYNC_AND_ALL_ORDERS && (
+                        <p className="text-xs mt-1">
+                          <Link href="/dashboard/orders" className="text-primary hover:underline">
+                            Все заказы
+                          </Link>
+                        </p>
+                      )}
                     </td>
                   </tr>
                 ) : (
