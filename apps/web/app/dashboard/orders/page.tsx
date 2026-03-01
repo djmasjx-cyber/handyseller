@@ -63,8 +63,8 @@ const WB_RAW_STATUS_LABELS: Record<string, string> = {
   rejected: "Покупатель отказался",
 }
 
-/** Временно скрыто: ценообразование WB в разработке */
-const SHOW_ORDER_PRICES = false
+/** Стоимость заказа — реальная цена продажи на маркете (только на странице «Все заказы») */
+const SHOW_ORDER_PRICES = true
 
 const MARKETPLACE_LABELS: Record<string, { label: string; variant?: "default" | "secondary" | "outline" | "destructive" }> = {
   WILDBERRIES: { label: "WB", variant: "default" },
