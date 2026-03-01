@@ -278,9 +278,11 @@ export function CreateOrderModal({ open, onClose, onSuccess, token }: CreateOrde
                 setSalesSourceInput(e.target.value)
                 setShowSalesSourceDropdown(true)
               }}
-              onBlur={handleSalesSourceBlur}
+              onBlur={() => {
+                handleSalesSourceBlur()
+                setTimeout(() => setShowSalesSourceDropdown(false), 150)
+              }}
               onFocus={() => setShowSalesSourceDropdown(true)}
-              onBlur={() => setTimeout(() => setShowSalesSourceDropdown(false), 150)}
               placeholder="Авито, Инстаграм..."
               className="mt-1"
             />
