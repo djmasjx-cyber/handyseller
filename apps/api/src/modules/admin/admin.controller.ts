@@ -1,13 +1,24 @@
-import { Controller, Get, Post, Patch, Body, Param, Query, UseGuards, BadRequestException } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Patch,
+  Post,
+  Body,
+  Param,
+  Query,
+  UseGuards,
+  BadRequestException,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { Role } from '@prisma/client';
 import { UsersService } from '../users/users.service';
 import { PaymentsService } from '../payments/payments.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { MarketplacesService } from '../marketplaces/marketplaces.service';
 import { OrdersService } from '../orders/orders.service';
-import { Role } from '@prisma/client';
+import { PrismaService } from '../../common/database/prisma.service';
 import { RefundPaymentDto } from '../payments/dto/refund-payment.dto';
 import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
 
@@ -16,11 +27,12 @@ import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
 @Roles(Role.ADMIN)
 export class AdminController {
   constructor(
-    private usersService: UsersService,
-    private paymentsService: PaymentsService,
-    private subscriptionsService: SubscriptionsService,
-    private marketplacesService: MarketplacesService,
-    private ordersService: OrdersService,
+    private readonly usersService: UsersService,
+    private readonly paymentsService: PaymentsService,
+    private readonly subscriptionsService: SubscriptionsService,
+    private readonly marketplacesService: MarketplacesService,
+    private readonly ordersService: OrdersService,
+    private readonly prisma: PrismaService,
   ) {}
 
   @Patch('users/:userId/subscription')
@@ -74,22 +86,26 @@ export class AdminController {
     return { payment };
   }
 
-  /** Отладка: проверить WB заказ по email пользователя (например nmanoilo@ya.ru, заказ 4645532575) */
   @Get('debug-wb-order')
   async debugWbOrder(
-    @Query('email') email: string,
-    @Query('orderId') orderId: string,
+    @Query('email') email?: string,
+    @Query('orderId') orderId?: string,
     @Query('sync') doSync?: string,
   ) {
     if (!email?.trim() || !orderId?.trim()) {
-      throw new BadRequestException('Укажите email и orderId, например ?email=nmanoilo@ya.ru&orderId=4645532575');
+      throw new BadRequestException(
+        'Укажите email и orderId, например ?email=nmanoilo@ya.ru&orderId=4645532575',
+      );
     }
     const user = await this.usersService.findByEmail(email.trim());
     if (!user) {
       return { error: 'Пользователь не найден', email: email.trim() };
     }
-    const userId = (user as { id: string }).id;
-    const wbResult = await this.marketplacesService.getWbOrderStatus(userId, orderId.trim());
+    const userId = user.id;
+    const wbResult = await this.marketplacesService.getWbOrderStatus(
+      userId,
+      orderId.trim(),
+    );
     if (doSync === '1' || doSync === 'true') {
       const syncResult = await this.ordersService.syncFromMarketplaces(userId);
       return { ...wbResult, syncResult };
@@ -110,55 +126,16 @@ export class AdminController {
     });
   }
 
-  /** Проверить, есть ли statsToken у подключений WB (админ) */
-  @Get('wb-stats-token-status')
-  async getWbStatsTokenStatus() {
-    const conns = await this.marketplacesService.findAllWbConnections();
-    const withStatus = conns.map((c) => ({
-      userId: c.userId,
-      hasStatsToken: !!c.statsToken,
-    }));
-    return { connections: withStatus, total: withStatus.length };
-  }
-
-  /** Установить statsToken для WB по email или для всех подключений WB (админ) */
-  @Patch('wb-stats-token')
-  async setWbStatsToken(
-    @Body('email') email?: string,
-    @Body('statsToken') statsToken?: string,
-  ) {
-    if (!statsToken?.trim()) {
-      throw new BadRequestException('Укажите statsToken');
-    }
-    const token = statsToken.trim();
-    if (email?.trim()) {
-      const user = await this.usersService.findByEmail(email.trim());
-      if (!user) throw new BadRequestException('Пользователь не найден');
-      const conn = await this.marketplacesService.updateStatsToken((user as { id: string }).id, 'WILDBERRIES', token);
-      return { ok: true, updated: 1, userId: (user as { id: string }).id };
-    }
-    const conns = await this.marketplacesService.findAllWbConnections();
-    let updated = 0;
-    for (const c of conns) {
-      await this.marketplacesService.updateStatsToken(c.userId, 'WILDBERRIES', token);
-      updated++;
-    }
-    return { ok: true, updated };
-  }
-
-  /** Пометить заказ WB как FBO и вернуть ошибочно зарезервированный остаток (админ) */
-  @Post('orders/mark-fbo')
-  async markOrderAsFbo(@Body('externalId') externalId?: string, @Body('orderId') orderId?: string) {
-    const id = (orderId ?? externalId)?.trim();
-    if (!id) throw new BadRequestException('Укажите externalId или orderId (например 4680400358)');
-    return this.ordersService.markOrderAsFbo(id);
-  }
-
-  /** Повторное резервирование остатка для заказа по externalId (для любого пользователя) */
   @Post('orders/retry-stock-reserve')
-  async retryStockReserve(@Body('externalId') externalId?: string, @Body('orderId') orderId?: string) {
+  async retryStockReserve(
+    @Body('externalId') externalId?: string,
+    @Body('orderId') orderId?: string,
+  ) {
     const id = (orderId ?? externalId)?.trim();
-    if (!id) throw new BadRequestException('Укажите externalId или orderId (например 4686579129)');
+    if (!id)
+      throw new BadRequestException(
+        'Укажите externalId или orderId (например 4686579129)',
+      );
     return this.ordersService.retryStockReserveByExternalId(id);
   }
 
@@ -168,5 +145,38 @@ export class AdminController {
     @Body() dto: RefundPaymentDto,
   ) {
     return this.paymentsService.refund(paymentId, dto.amount);
+  }
+
+  /**
+   * FBO-заказы по артикулу товара. Только чтение (SELECT), без нагрузки на пул соединений.
+   * Возвращает: externalId, status, rawStatus, marketplace.
+   */
+  @Get('orders/fbo-by-article')
+  async getFboOrdersByArticle(@Query('article') article?: string) {
+    if (!article?.trim()) {
+      throw new BadRequestException(
+        'Укажите артикул, например ?article=skull01',
+      );
+    }
+    const orders = await this.prisma.order.findMany({
+      where: {
+        isFbo: true,
+        items: {
+          some: {
+            product: {
+              article: article.trim(),
+            },
+          },
+        },
+      },
+      select: {
+        externalId: true,
+        status: true,
+        rawStatus: true,
+        marketplace: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    return { orders };
   }
 }

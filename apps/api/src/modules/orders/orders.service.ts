@@ -36,6 +36,11 @@ const MARKETPLACE_STATUS_TO_ORDER: Record<string, OrderStatus> = {
   delivering: OrderStatus.SHIPPED,
   cancelled_by_seller: OrderStatus.CANCELLED,
   cancelled_by_client: OrderStatus.CANCELLED,
+  // WB возвращает canceled_by_client (амер. орфография) — «Клиент отказался»
+  canceled_by_seller: OrderStatus.CANCELLED,
+  canceled_by_client: OrderStatus.CANCELLED,
+  declined_by_client: OrderStatus.CANCELLED,
+  customer_refused: OrderStatus.CANCELLED,
   // Яндекс Маркет: PROCESSING, DELIVERY, PICKUP, DELIVERED, CANCELLED
   processing: OrderStatus.NEW,
   delivery: OrderStatus.SHIPPED,
