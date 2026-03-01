@@ -194,6 +194,8 @@ jobs:
 
             # 1. Останавливаем и удаляем контейнеры (сеть external — остаётся)
             $DC -f docker-compose.ci.yml --env-file .env.production down --remove-orphans
+            # Принудительно убираем контейнеры на случай конфликта (watchdog, предыдущий деплой)
+            docker rm -f handyseller-web handyseller-api handyseller-redis 2>/dev/null || true
 
             # 2. Очистка: только образы и остановленные контейнеры (сети не трогаем)
             docker container prune -f
