@@ -49,7 +49,7 @@ export class ProductsService {
   /** Резервы FBS (наш склад) и FBO (склад WB) по productId */
   /**
    * Резервы по productId.
-   * FBS: IN_PROGRESS — резерв с нашего склада, снимается при отгрузке (SHIPPED/READY_FOR_PICKUP).
+   * FBS: NEW, IN_PROGRESS — резерв с нашего склада (встаёт при поступлении заказа), снимается при отгрузке.
    * FBO: NEW, IN_PROGRESS — резерв на СЦ маркета, снимается когда заказ покинул склад.
    */
   private async getReservesByProduct(userId: string): Promise<Map<string, { fbs: number; fbo: number }>> {
@@ -60,7 +60,7 @@ export class ProductsService {
         JOIN "Order" o ON o.id = oi.order_id
         WHERE o.user_id = ${userId}
           AND (o.is_fbo IS NULL OR o.is_fbo = false)
-          AND o.status = 'IN_PROGRESS'
+          AND o.status IN ('NEW', 'IN_PROGRESS')
       `,
       this.prisma.$queryRaw<Array<{ product_id: string; quantity: number }>>`
         SELECT oi.product_id, oi.quantity
