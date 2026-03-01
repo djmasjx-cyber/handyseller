@@ -4,8 +4,9 @@ import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Badge, Label } from "@handyseller/ui"
-import { Loader2, RefreshCw, Package, Printer, Send, Box, Truck, QrCode } from "lucide-react"
+import { Loader2, RefreshCw, Package, Printer, Send, Box, Truck, QrCode, Plus } from "lucide-react"
 import { PrintLabelsModal } from "@/components/print-labels-modal"
+import { CreateOrderModal } from "@/components/create-order-modal"
 
 interface OrderItem {
   id: string
@@ -134,6 +135,7 @@ export default function OrdersAssemblyPage() {
   const [syncingError, setSyncingError] = useState<string | null>(null)
   const [printOrder, setPrintOrder] = useState<Order | null>(null)
   const [printLabelType, setPrintLabelType] = useState<"product" | "order">("product")
+  const [createOrderModalOpen, setCreateOrderModalOpen] = useState(false)
 
   const token = typeof window !== "undefined" ? localStorage.getItem("accessToken") : null
   const [statusError, setStatusError] = useState<string | null>(null)
@@ -332,7 +334,17 @@ export default function OrdersAssemblyPage() {
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 md:gap-4">
         <div className="flex flex-row md:flex-col items-center md:items-start justify-between md:justify-start gap-2 w-full md:w-auto">
-          <h1 className="text-2xl md:text-3xl font-bold">Заказы на сборке</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl md:text-3xl font-bold">Заказы на сборке</h1>
+            <Button
+              size="sm"
+              onClick={() => setCreateOrderModalOpen(true)}
+              className="shrink-0"
+            >
+              <Plus className="h-4 w-4 mr-1" />
+              Создать свой заказ
+            </Button>
+          </div>
           {!HIDE_SYNC_AND_ALL_ORDERS && (
             <Button
               variant="outline"
@@ -789,6 +801,13 @@ export default function OrdersAssemblyPage() {
           labelType={printLabelType}
         />
       )}
+
+      <CreateOrderModal
+        open={createOrderModalOpen}
+        onClose={() => setCreateOrderModalOpen(false)}
+        onSuccess={() => fetchOrders()}
+        token={token}
+      />
     </div>
   )
 }
