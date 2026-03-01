@@ -44,5 +44,48 @@ describe('AppController (e2e)', () => {
       .expect(200);
 
     expect(profileRes.body.email).toBe(email);
+
+    const searchRes = await request(app.getHttpServer())
+      .get('/products/search?q=')
+      .set('Authorization', `Bearer ${registerRes.body.accessToken}`)
+      .expect(200);
+    expect(Array.isArray(searchRes.body)).toBe(true);
+    expect(searchRes.body).toHaveLength(0);
+
+    const searchWithQ = await request(app.getHttpServer())
+      .get('/products/search?q=test')
+      .set('Authorization', `Bearer ${registerRes.body.accessToken}`)
+      .expect(200);
+    expect(Array.isArray(searchWithQ.body)).toBe(true);
+
+    // sales-sources: GET empty, POST create, GET list, POST upsert
+    const listRes = await request(app.getHttpServer())
+      .get('/sales-sources')
+      .set('Authorization', `Bearer ${registerRes.body.accessToken}`)
+      .expect(200);
+    expect(Array.isArray(listRes.body)).toBe(true);
+    expect(listRes.body).toHaveLength(0);
+
+    const createRes = await request(app.getHttpServer())
+      .post('/sales-sources')
+      .set('Authorization', `Bearer ${registerRes.body.accessToken}`)
+      .send({ name: 'авито' })
+      .expect(201);
+    expect(createRes.body.id).toBeDefined();
+    expect(createRes.body.name).toBe('Авито');
+
+    const listAfterRes = await request(app.getHttpServer())
+      .get('/sales-sources')
+      .set('Authorization', `Bearer ${registerRes.body.accessToken}`)
+      .expect(200);
+    expect(listAfterRes.body).toHaveLength(1);
+    expect(listAfterRes.body[0].name).toBe('Авито');
+
+    const upsertRes = await request(app.getHttpServer())
+      .post('/sales-sources')
+      .set('Authorization', `Bearer ${registerRes.body.accessToken}`)
+      .send({ name: 'АВИТО' })
+      .expect(201);
+    expect(upsertRes.body.id).toBe(createRes.body.id);
   });
 });

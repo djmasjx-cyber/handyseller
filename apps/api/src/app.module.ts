@@ -21,6 +21,7 @@ import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { PaymentsModule } from './modules/payments/payments.module';
+import { SalesSourcesModule } from './modules/sales-sources/sales-sources.module';
 
 function getTracker(req: { headers?: Record<string, string | string[] | undefined>; ip?: string; socket?: { remoteAddress?: string } }): string {
   const headers = req.headers ?? {};
@@ -72,6 +73,7 @@ function getTracker(req: { headers?: Record<string, string | string[] | undefine
     DashboardModule,
     AdminModule,
     PaymentsModule,
+    SalesSourcesModule,
   ],
   controllers: [AppController],
   providers: [
