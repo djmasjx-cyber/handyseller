@@ -586,6 +586,49 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
   }
 
   /**
+   * Остатки на складах WB (FBO) — через Statistics API.
+   * Требует statsToken. Суммирует quantity по складам, исключая наш FBS-склад.
+   */
+  async getStocksFbo(nmIds: number[]): Promise<Record<number, number>> {
+    const token = this.config.statsToken ?? this.config.apiKey;
+    if (!token || nmIds.length === 0) return {};
+    const ourWarehouseId = this.config.warehouseId || this.config.sellerId || (await this.resolveWarehouseId());
+    let ourWarehouseName: string | null = null;
+    if (ourWarehouseId) {
+      const list = await this.getWarehouseList();
+      const ours = list.find((w) => w.id === ourWarehouseId);
+      if (ours?.name) ourWarehouseName = ours.name.trim();
+    }
+    try {
+      const dateFrom = new Date(2020, 0, 1).toISOString();
+      const { data } = await firstValueFrom(
+        this.httpService.get<Array<{ nmId?: number; quantity?: number; warehouseName?: string }>>(
+          `${this.STATISTICS_API}/api/v1/supplier/stocks`,
+          {
+            headers: this.authHeader(token),
+            params: { dateFrom },
+            timeout: 15000,
+          },
+        ),
+      );
+      const result: Record<number, number> = {};
+      const nmIdSet = new Set(nmIds);
+      for (const row of Array.isArray(data) ? data : []) {
+        const nmId = Number(row.nmId);
+        if (!nmIdSet.has(nmId) || isNaN(nmId)) continue;
+        const whName = String(row.warehouseName ?? '').trim();
+        if (ourWarehouseName && whName === ourWarehouseName) continue;
+        const qty = Number(row.quantity ?? 0);
+        if (qty > 0) result[nmId] = (result[nmId] ?? 0) + qty;
+      }
+      return result;
+    } catch (error) {
+      this.logError(error, 'getStocksFbo');
+      return {};
+    }
+  }
+
+  /**
    * Получить остатки на WB. POST /api/v3/stocks/{warehouseId} с body { skus: [...] }
    */
   async getStocks(nmIds: number[]): Promise<Record<number, number>> {

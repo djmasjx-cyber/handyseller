@@ -24,8 +24,11 @@ export class ProductsService {
     private eventEmitter: EventEmitter2,
   ) {}
 
+  /** Статусы заказов, при которых товар ещё в резерве (не отгружен) */
+  private readonly RESERVE_STATUSES = ['NEW', 'IN_PROGRESS', 'READY_FOR_PICKUP'] as const;
+
   async findAll(userId: string, includeArchived = false) {
-    return this.prisma.product.findMany({
+    const products = await this.prisma.product.findMany({
       where: {
         userId,
         ...(includeArchived ? {} : { archivedAt: null }),
@@ -38,6 +41,38 @@ export class ProductsService {
         },
       },
     });
+    const reserves = await this.getReservesByProduct(userId);
+    return products.map((p) => ({
+      ...p,
+      reservedFbs: reserves.get(p.id)?.fbs ?? 0,
+      reservedFbo: reserves.get(p.id)?.fbo ?? 0,
+    }));
+  }
+
+  /** Резервы FBS (наш склад) и FBO (склад WB) по productId */
+  private async getReservesByProduct(userId: string): Promise<Map<string, { fbs: number; fbo: number }>> {
+    const items = await this.prisma.orderItem.findMany({
+      where: {
+        order: {
+          userId,
+          status: { in: this.RESERVE_STATUSES },
+        },
+      },
+      select: {
+        productId: true,
+        quantity: true,
+        order: { select: { isFbo: true } },
+      },
+    });
+    const map = new Map<string, { fbs: number; fbo: number }>();
+    for (const it of items) {
+      const cur = map.get(it.productId) ?? { fbs: 0, fbo: 0 };
+      const isFbo = it.order?.isFbo === true;
+      if (isFbo) cur.fbo += it.quantity;
+      else cur.fbs += it.quantity;
+      map.set(it.productId, cur);
+    }
+    return map;
   }
 
   /** Список только архивных товаров */

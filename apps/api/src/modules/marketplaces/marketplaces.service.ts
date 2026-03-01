@@ -296,6 +296,42 @@ export class MarketplacesService {
     }));
   }
 
+  /** Остатки FBO (на складах WB) по productId — для страницы товаров */
+  async getWbStockFbo(userId: string): Promise<Record<string, number>> {
+    const conn = await this.getMarketplaceConnection(userId, 'WILDBERRIES');
+    if (!conn?.token) return {};
+    const ids = await this.getEffectiveUserIds(userId);
+    const mappings = await this.prisma.productMarketplaceMapping.findMany({
+      where: {
+        userId: { in: ids },
+        marketplace: 'WILDBERRIES',
+        isActive: true,
+      },
+      select: { productId: true, externalSystemId: true },
+    });
+    const nmIds = mappings
+      .map((m) => parseInt(m.externalSystemId, 10))
+      .filter((n) => !isNaN(n));
+    if (nmIds.length === 0) return {};
+    const adapter = this.adapterFactory.createAdapter('WILDBERRIES', {
+      encryptedToken: conn.token,
+      encryptedRefreshToken: conn.refreshToken,
+      encryptedStatsToken: conn.statsToken ?? undefined,
+      sellerId: conn.sellerId ?? undefined,
+      warehouseId: conn.warehouseId ?? undefined,
+    });
+    if (!adapter || !(adapter instanceof WildberriesAdapter)) return {};
+    const byNmId = await adapter.getStocksFbo(nmIds);
+    const result: Record<string, number> = {};
+    for (const m of mappings) {
+      const nmId = parseInt(m.externalSystemId, 10);
+      if (!isNaN(nmId) && byNmId[nmId] != null) {
+        result[m.productId] = byNmId[nmId];
+      }
+    }
+    return result;
+  }
+
   /**
    * Синхронизация товаров на подключенные маркетплейсы.
    * @param marketplaceFilter — если указан, синхронизировать только на этот маркетплейс (OZON, WILDBERRIES и т.д.)

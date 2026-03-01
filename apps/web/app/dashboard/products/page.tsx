@@ -84,6 +84,9 @@ interface Product {
   sku?: string
   article?: string
   stock?: number
+  reservedFbs?: number
+  reservedFbo?: number
+  stockFbo?: number
   seoTitle?: string
   seoKeywords?: string
   seoDescription?: string
@@ -118,9 +121,18 @@ export default function ProductsPage() {
 
   const fetchProducts = () => {
     if (!token) return
-    fetch("/api/products", { headers: { Authorization: `Bearer ${token}` } })
-      .then((r) => r.json())
-      .then((data) => setProducts(Array.isArray(data) ? data : []))
+    Promise.all([
+      fetch("/api/products", { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()),
+      fetch("/api/marketplaces/wb-fbo-stock", { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.ok ? r.json() : {}),
+    ])
+      .then(([data, stockFboMap]) => {
+        const list = Array.isArray(data) ? data : []
+        const merged = list.map((p: Product) => ({
+          ...p,
+          stockFbo: typeof stockFboMap === "object" && stockFboMap != null && p.id in stockFboMap ? stockFboMap[p.id] : undefined,
+        }))
+        setProducts(merged)
+      })
       .catch(() => setProducts([]))
   }
 
@@ -198,6 +210,7 @@ export default function ProductsPage() {
     YANDEX: { bg: "#FC3F1D", text: "#ffffff" },
     AVITO: { bg: "#7FBA00", text: "#ffffff" },
   }
+  const MARKETPLACE_ORDER = ["WILDBERRIES", "OZON", "YANDEX", "AVITO", "MANUAL"]
 
   const filteredProducts = (() => {
     let list = products
@@ -801,8 +814,10 @@ export default function ProductsPage() {
                   <th className="text-left font-medium p-3">Артикул</th>
                   <th className="text-left font-medium p-3">Название</th>
                   {/* {warehouseFilter !== "local" && <th className="text-left font-medium p-3">Описание</th>} */}
-                  <th className="text-left font-medium p-3" title="Клик для редактирования">Остаток</th>
-                  <th className="text-left font-medium p-3">Резерв</th>
+                  <th className="text-left font-medium p-3" title="Мой склад, клик для редактирования">Остаток FBS</th>
+                  <th className="text-left font-medium p-3" title="На складах WB">Остаток FBO</th>
+                  <th className="text-left font-medium p-3" title="Резерв с нашего склада">Резерв FBS</th>
+                  <th className="text-left font-medium p-3" title="Резерв на складах WB">Резерв FBO</th>
                   <th className="text-left font-medium p-3">Себестоимость</th>
                   {warehouseFilter !== "local" && <th className="text-left font-medium p-3">SEO</th>}
                   <th className="text-left font-medium p-3">Маркетплейс</th>
@@ -895,7 +910,11 @@ export default function ProductsPage() {
                           <span className="font-medium tabular-nums">{product.stock ?? 0}</span>
                         )}
                       </td>
-                      <td className="p-3 text-muted-foreground">0</td>
+                      <td className="p-3 text-muted-foreground tabular-nums">
+                        {product.stockFbo != null ? product.stockFbo : "—"}
+                      </td>
+                      <td className="p-3 text-muted-foreground tabular-nums">{product.reservedFbs ?? 0}</td>
+                      <td className="p-3 text-muted-foreground tabular-nums">{product.reservedFbo ?? 0}</td>
                       <td className="p-3">
                         {canEdit && isEditingF && editingField === "cost" ? (
                           <Input
@@ -941,20 +960,22 @@ export default function ProductsPage() {
                       <td className="p-3">
                         <div className="flex flex-wrap gap-1">
                           {linkedMarketplaces.length > 0 ? (
-                            linkedMarketplaces.map((m) => {
-                              const style = MARKETPLACE_BADGE_STYLE[m]
-                              return (
-                                <Badge
-                                  key={m}
-                                  variant="secondary"
-                                  className="text-[10px] px-1.5 py-0 font-medium border-0"
-                                  style={style ? { backgroundColor: style.bg, color: style.text } : undefined}
-                                  title={m === "WILDBERRIES" ? "Wildberries" : m === "OZON" ? "Ozon" : m === "YANDEX" ? "Яндекс Маркет" : m === "AVITO" ? "Avito" : m}
-                                >
-                                  {m === "WILDBERRIES" ? "WB" : m === "OZON" ? "OZ" : m === "YANDEX" ? "Я" : m === "AVITO" ? "AV" : m.slice(0, 2)}
-                                </Badge>
-                              )
-                            })
+                            [...linkedMarketplaces]
+                              .sort((a, b) => MARKETPLACE_ORDER.indexOf(a) - MARKETPLACE_ORDER.indexOf(b))
+                              .map((m) => {
+                                const style = MARKETPLACE_BADGE_STYLE[m]
+                                return (
+                                  <Badge
+                                    key={m}
+                                    variant="secondary"
+                                    className="text-[10px] px-1.5 py-0 font-medium border-0"
+                                    style={style ? { backgroundColor: style.bg, color: style.text } : undefined}
+                                    title={m === "WILDBERRIES" ? "Wildberries" : m === "OZON" ? "Ozon" : m === "YANDEX" ? "Яндекс Маркет" : m === "AVITO" ? "Avito" : m}
+                                  >
+                                    {m === "WILDBERRIES" ? "WB" : m === "OZON" ? "OZ" : m === "YANDEX" ? "Я" : m === "AVITO" ? "AV" : m.slice(0, 2)}
+                                  </Badge>
+                                )
+                              })
                           ) : (
                             <span className="text-muted-foreground">—</span>
                           )}
@@ -984,7 +1005,7 @@ export default function ProductsPage() {
                               ) : (
                                 <Archive className="mr-1.5 h-3.5 w-3.5" />
                               )}
-                              Архивировать
+                              Арх
                             </Button>
                           )}
                         </div>

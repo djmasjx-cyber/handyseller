@@ -29,6 +29,12 @@ export class MarketplacesController {
     return this.marketplacesService.getUserMarketplaces(userId);
   }
 
+  /** Остатки FBO (на складах WB) по productId — для страницы товаров */
+  @Get('wb-fbo-stock')
+  async getWbFboStock(@CurrentUser('userId') userId: string) {
+    return this.marketplacesService.getWbStockFbo(userId);
+  }
+
   @Post('connect')
   async connect(@CurrentUser('userId') userId: string, @Body() dto: ConnectMarketplaceDto) {
     const credential = dto.apiKey ?? dto.token;
