@@ -110,6 +110,42 @@ export class AdminController {
     });
   }
 
+  /** Проверить, есть ли statsToken у подключений WB (админ) */
+  @Get('wb-stats-token-status')
+  async getWbStatsTokenStatus() {
+    const conns = await this.marketplacesService.findAllWbConnections();
+    const withStatus = conns.map((c) => ({
+      userId: c.userId,
+      hasStatsToken: !!c.statsToken,
+    }));
+    return { connections: withStatus, total: withStatus.length };
+  }
+
+  /** Установить statsToken для WB по email или для всех подключений WB (админ) */
+  @Patch('wb-stats-token')
+  async setWbStatsToken(
+    @Body('email') email?: string,
+    @Body('statsToken') statsToken?: string,
+  ) {
+    if (!statsToken?.trim()) {
+      throw new BadRequestException('Укажите statsToken');
+    }
+    const token = statsToken.trim();
+    if (email?.trim()) {
+      const user = await this.usersService.findByEmail(email.trim());
+      if (!user) throw new BadRequestException('Пользователь не найден');
+      const conn = await this.marketplacesService.updateStatsToken((user as { id: string }).id, 'WILDBERRIES', token);
+      return { ok: true, updated: 1, userId: (user as { id: string }).id };
+    }
+    const conns = await this.marketplacesService.findAllWbConnections();
+    let updated = 0;
+    for (const c of conns) {
+      await this.marketplacesService.updateStatsToken(c.userId, 'WILDBERRIES', token);
+      updated++;
+    }
+    return { ok: true, updated };
+  }
+
   /** Повторное резервирование остатка для заказа по externalId (для любого пользователя) */
   @Post('orders/retry-stock-reserve')
   async retryStockReserve(@Body('externalId') externalId?: string, @Body('orderId') orderId?: string) {

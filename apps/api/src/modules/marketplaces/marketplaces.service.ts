@@ -234,6 +234,14 @@ export class MarketplacesService {
     });
   }
 
+  /** Все подключения WB (для админ-обновления statsToken) */
+  async findAllWbConnections(): Promise<Array<{ userId: string; statsToken?: string | null }>> {
+    return this.prisma.marketplaceConnection.findMany({
+      where: { marketplace: 'WILDBERRIES' },
+      select: { userId: true, statsToken: true },
+    });
+  }
+
   /** Обновить только statsToken для WB (токен «Статистика и Аналитика» для заказов ФБО) */
   async updateStatsToken(
     userId: string,
