@@ -32,6 +32,7 @@ interface Order {
   wbStickerNumber?: string | null
   ozonPostingNumber?: string | null
   salesSource?: string | null
+  isFbo?: boolean | null
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -90,6 +91,42 @@ function getSourceDisplay(order: Order): string {
     return order.salesSource.trim()
   }
   return formatMarketplace(order.marketplace)
+}
+
+/** Цвета маркетплейсов для бейджей */
+const MARKETPLACE_COLORS: Record<string, { bg: string; hover: string }> = {
+  WILDBERRIES: { bg: "#CB11AB", hover: "#B00E99" },
+  OZON: { bg: "#005BFF", hover: "#004FDD" },
+  YANDEX: { bg: "#FC3F1D", hover: "#E33819" },
+  AVITO: { bg: "#7FBA00", hover: "#6FA300" },
+}
+
+/** Бейдж источника: маркетплейс + прикреплённый FBO (два сцепленных овала) */
+function SourceBadge({ order }: { order: Order }) {
+  const colors = MARKETPLACE_COLORS[order.marketplace]
+  const baseClass = colors ? "!border-[var(--mp-bg)] text-white" : ""
+  const style = colors ? { "--mp-bg": colors.bg, "--mp-hover": colors.hover } as React.CSSProperties : undefined
+
+  return (
+    <span className="relative inline-flex items-center">
+      <Badge
+        variant={MARKETPLACE_LABELS[order.marketplace]?.variant ?? "outline"}
+        className={colors ? `!bg-[var(--mp-bg)] hover:!bg-[var(--mp-hover)] ${baseClass}` : undefined}
+        style={style}
+      >
+        {getSourceDisplay(order)}
+      </Badge>
+      {order.isFbo === true && (
+        <span
+          className="absolute -top-1 -right-0.5 min-w-[1.25rem] h-4 px-1 rounded-full text-[9px] font-medium flex items-center justify-center shadow-sm"
+          style={colors ? { backgroundColor: colors.bg, color: "white", border: `1px solid ${colors.bg}` } : { backgroundColor: "hsl(var(--muted))", color: "hsl(var(--muted-foreground))" }}
+          title="FBO — товар со склада маркетплейса"
+        >
+          FBO
+        </span>
+      )}
+    </span>
+  )
 }
 
 function formatStatus(order: Order): string {
@@ -712,22 +749,7 @@ export default function OrdersAssemblyPage() {
                           </span>
                         </td>
                         <td className="p-3">
-                          <Badge
-                            variant={MARKETPLACE_LABELS[order.marketplace]?.variant ?? "outline"}
-                            className={
-                              order.marketplace === "WILDBERRIES"
-                                ? "!bg-[#CB11AB] !border-[#CB11AB] text-white hover:!bg-[#B00E99]"
-                                : order.marketplace === "OZON"
-                                  ? "!bg-[#005BFF] !border-[#005BFF] text-white hover:!bg-[#004FDD]"
-                                  : order.marketplace === "YANDEX"
-                                    ? "!bg-[#FC3F1D] !border-[#FC3F1D] text-white hover:!bg-[#E33819]"
-                                    : order.marketplace === "AVITO"
-                                      ? "!bg-[#7FBA00] !border-[#7FBA00] text-white hover:!bg-[#6FA300]"
-                                      : undefined
-                            }
-                          >
-                            {getSourceDisplay(order)}
-                          </Badge>
+                          <SourceBadge order={order} />
                         </td>
                         <td className="p-3 text-xs">{order.externalId}</td>
                         <td className="p-3">
