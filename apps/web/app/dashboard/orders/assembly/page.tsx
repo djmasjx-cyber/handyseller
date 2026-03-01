@@ -118,7 +118,7 @@ function SourceBadge({ order }: { order: Order }) {
       </Badge>
       {order.isFbo === true && (
         <span
-          className="absolute -top-2 -right-0.5 min-w-[1.25rem] h-4 px-1 rounded-full text-[9px] font-medium flex items-center justify-center shadow-sm"
+          className="absolute -top-3 -right-0.5 min-w-[1.25rem] h-4 px-1 rounded-full text-[9px] font-medium flex items-center justify-center shadow-sm"
           style={colors ? { backgroundColor: colors.bg, color: "white", border: `1px solid ${colors.bg}` } : { backgroundColor: "hsl(var(--muted))", color: "hsl(var(--muted-foreground))" }}
           title="FBO — товар со склада маркетплейса"
         >
