@@ -24,9 +24,6 @@ export class ProductsService {
     private eventEmitter: EventEmitter2,
   ) {}
 
-  /** Статусы заказов, при которых товар ещё в резерве (не отгружен) */
-  private readonly RESERVE_STATUSES = ['NEW', 'IN_PROGRESS', 'READY_FOR_PICKUP'] as const;
-
   async findAll(userId: string, includeArchived = false) {
     const products = await this.prisma.product.findMany({
       where: {
@@ -51,19 +48,21 @@ export class ProductsService {
 
   /** Резервы FBS (наш склад) и FBO (склад WB) по productId */
   private async getReservesByProduct(userId: string): Promise<Map<string, { fbs: number; fbo: number }>> {
-    const orders = await this.prisma.order.findMany({
-      where: { userId, status: { in: this.RESERVE_STATUSES } },
-      include: { items: { select: { productId: true, quantity: true } } },
-    });
+    const rows = await this.prisma.$queryRaw<
+      Array<{ product_id: string; quantity: number; is_fbo: boolean | null }>
+    >`
+      SELECT oi.product_id, oi.quantity, o.is_fbo
+      FROM "OrderItem" oi
+      JOIN "Order" o ON o.id = oi.order_id
+      WHERE o.user_id = ${userId}
+        AND o.status IN ('NEW', 'IN_PROGRESS', 'READY_FOR_PICKUP')
+    `;
     const map = new Map<string, { fbs: number; fbo: number }>();
-    for (const order of orders) {
-      const isFbo = order.isFbo === true;
-      for (const it of order.items) {
-        const cur = map.get(it.productId) ?? { fbs: 0, fbo: 0 };
-        if (isFbo) cur.fbo += it.quantity;
-        else cur.fbs += it.quantity;
-        map.set(it.productId, cur);
-      }
+    for (const row of rows) {
+      const cur = map.get(row.product_id) ?? { fbs: 0, fbo: 0 };
+      if (row.is_fbo === true) cur.fbo += row.quantity;
+      else cur.fbs += row.quantity;
+      map.set(row.product_id, cur);
     }
     return map;
   }
