@@ -51,24 +51,19 @@ export class ProductsService {
 
   /** Резервы FBS (наш склад) и FBO (склад WB) по productId */
   private async getReservesByProduct(userId: string): Promise<Map<string, { fbs: number; fbo: number }>> {
-    const items = await this.prisma.orderItem.findMany({
-      where: {
-        order: {
-          userId,
-          status: { in: this.RESERVE_STATUSES },
-        },
-      },
-      include: {
-        order: { select: { isFbo: true } },
-      },
+    const orders = await this.prisma.order.findMany({
+      where: { userId, status: { in: this.RESERVE_STATUSES } },
+      select: { isFbo: true, items: { select: { productId: true, quantity: true } } },
     });
     const map = new Map<string, { fbs: number; fbo: number }>();
-    for (const it of items) {
-      const cur = map.get(it.productId) ?? { fbs: 0, fbo: 0 };
-      const isFbo = it.order?.isFbo === true;
-      if (isFbo) cur.fbo += it.quantity;
-      else cur.fbs += it.quantity;
-      map.set(it.productId, cur);
+    for (const order of orders) {
+      const isFbo = order.isFbo === true;
+      for (const it of order.items) {
+        const cur = map.get(it.productId) ?? { fbs: 0, fbo: 0 };
+        if (isFbo) cur.fbo += it.quantity;
+        else cur.fbs += it.quantity;
+        map.set(it.productId, cur);
+      }
     }
     return map;
   }
