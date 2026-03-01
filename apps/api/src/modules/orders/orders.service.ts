@@ -4,8 +4,10 @@ import { MarketplacesService } from '../marketplaces/marketplaces.service';
 import { ProductMappingService } from '../marketplaces/product-mapping.service';
 import { ProductsService } from '../products/products.service';
 import { StockService } from '../products/stock.service';
+import { SalesSourcesService } from '../sales-sources/sales-sources.service';
 import { OrderStatus } from '@prisma/client';
 import type { MarketplaceType } from '@prisma/client';
+import type { CreateManualOrderDto } from './dto/create-manual-order.dto';
 
 /** Маппинг статусов WB, Ozon, Яндекс → единый OrderStatus */
 const MARKETPLACE_STATUS_TO_ORDER: Record<string, OrderStatus> = {
@@ -98,6 +100,7 @@ export class OrdersService {
     private productMappingService: ProductMappingService,
     private productsService: ProductsService,
     private stockService: StockService,
+    private salesSourcesService: SalesSourcesService,
   ) {}
 
   /** Сводка по заказам (чистый read, без side effects).
@@ -132,6 +135,65 @@ export class OrdersService {
       const fromLegacy = o.processingTimeMin;
       const val = fromTable ?? (fromLegacy != null && fromLegacy <= MAX_TRUSTED_PROCESSING_MIN ? fromLegacy : null);
       return { ...o, processingTimeMin: val };
+    });
+  }
+
+  /** Создание ручного заказа (MANUAL). */
+  async createManualOrder(userId: string, dto: CreateManualOrderDto) {
+    const externalId = dto.externalId.trim();
+    if (!externalId) {
+      throw new BadRequestException('Укажите номер заказа');
+    }
+
+    const product = await this.prisma.product.findFirst({
+      where: { id: dto.productId, userId },
+    });
+    if (!product) {
+      throw new BadRequestException('Товар не найден');
+    }
+
+    const existing = await this.prisma.order.findUnique({
+      where: { userId_marketplace_externalId: { userId, marketplace: 'MANUAL', externalId } },
+    });
+    if (existing) {
+      throw new BadRequestException(`Заказ с номером «${externalId}» уже существует`);
+    }
+
+    const salesSourceNormalized = await this.salesSourcesService.upsert(userId, dto.salesSource);
+    const salesSourceName = salesSourceNormalized.name;
+
+    const quantity = Math.floor(Number(dto.quantity));
+    if (quantity < 1) {
+      throw new BadRequestException('Количество должно быть не менее 1');
+    }
+    const price = Number(dto.price);
+    const totalAmount = price * quantity;
+
+    const order = await this.prisma.$transaction(async (tx) => {
+      const o = await tx.order.create({
+        data: {
+          userId,
+          marketplace: 'MANUAL',
+          externalId,
+          status: OrderStatus.NEW,
+          totalAmount,
+          salesSource: salesSourceName,
+        },
+      });
+      await tx.orderItem.create({
+        data: {
+          orderId: o.id,
+          productId: product.id,
+          quantity,
+          price,
+        },
+      });
+      return o;
+    });
+
+    return this.prisma.order.findUnique({
+      where: { id: order.id },
+      include: { items: { include: { product: true } } },
     });
   }
 

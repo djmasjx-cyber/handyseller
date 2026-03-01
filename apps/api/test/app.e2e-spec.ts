@@ -87,5 +87,46 @@ describe('AppController (e2e)', () => {
       .send({ name: 'АВИТО' })
       .expect(201);
     expect(upsertRes.body.id).toBe(createRes.body.id);
+
+    // manual order: create product, then POST /orders
+    const productRes = await request(app.getHttpServer())
+      .post('/products')
+      .set('Authorization', `Bearer ${registerRes.body.accessToken}`)
+      .send({ title: 'E2E Test Product', article: 'e2e-001' })
+      .expect(201);
+    const productId = productRes.body.id;
+
+    const orderRes = await request(app.getHttpServer())
+      .post('/orders')
+      .set('Authorization', `Bearer ${registerRes.body.accessToken}`)
+      .send({
+        externalId: '0001',
+        productId,
+        quantity: 2,
+        price: 500,
+        salesSource: 'авито',
+      })
+      .expect(201);
+    expect(orderRes.body.id).toBeDefined();
+    expect(orderRes.body.marketplace).toBe('MANUAL');
+    expect(orderRes.body.externalId).toBe('0001');
+    expect(orderRes.body.salesSource).toBe('Авито');
+    expect(orderRes.body.totalAmount).toBe(1000);
+    expect(orderRes.body.items).toHaveLength(1);
+    expect(orderRes.body.items[0].quantity).toBe(2);
+    expect(orderRes.body.items[0].price).toBe(500);
+
+    // duplicate externalId — 400
+    await request(app.getHttpServer())
+      .post('/orders')
+      .set('Authorization', `Bearer ${registerRes.body.accessToken}`)
+      .send({
+        externalId: '0001',
+        productId,
+        quantity: 1,
+        price: 100,
+        salesSource: 'Инстаграм',
+      })
+      .expect(400);
   });
 });

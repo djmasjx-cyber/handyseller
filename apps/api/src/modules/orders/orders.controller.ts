@@ -3,6 +3,7 @@ import { OrderStatus } from '@prisma/client';
 import { OrdersService } from './orders.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { CreateManualOrderDto } from './dto/create-manual-order.dto';
 
 @Controller('orders')
 @UseGuards(JwtAuthGuard)
@@ -12,6 +13,12 @@ export class OrdersController {
   @Get()
   async findAll(@CurrentUser('userId') userId: string) {
     return this.ordersService.findAll(userId);
+  }
+
+  /** Создание ручного заказа (MANUAL) */
+  @Post()
+  async createManual(@CurrentUser('userId') userId: string, @Body() dto: CreateManualOrderDto) {
+    return this.ordersService.createManualOrder(userId, dto);
   }
 
   /** Синхронизация заказов с маркетплейсов в БД (с идемпотентностью) */
