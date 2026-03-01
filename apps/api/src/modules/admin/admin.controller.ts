@@ -146,6 +146,14 @@ export class AdminController {
     return { ok: true, updated };
   }
 
+  /** Пометить заказ WB как FBO и вернуть ошибочно зарезервированный остаток (админ) */
+  @Post('orders/mark-fbo')
+  async markOrderAsFbo(@Body('externalId') externalId?: string, @Body('orderId') orderId?: string) {
+    const id = (orderId ?? externalId)?.trim();
+    if (!id) throw new BadRequestException('Укажите externalId или orderId (например 4680400358)');
+    return this.ordersService.markOrderAsFbo(id);
+  }
+
   /** Повторное резервирование остатка для заказа по externalId (для любого пользователя) */
   @Post('orders/retry-stock-reserve')
   async retryStockReserve(@Body('externalId') externalId?: string, @Body('orderId') orderId?: string) {

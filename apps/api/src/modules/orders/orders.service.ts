@@ -294,6 +294,50 @@ export class OrdersService {
   }
 
   /**
+   * Пометить заказ WB как FBO (товар со склада WB) и вернуть ошибочно зарезервированный остаток.
+   * Для заказов, которые WB отгружает со своего СЦ (возврат/отказ → новый заказ).
+   */
+  async markOrderAsFbo(orderIdOrExternalId: string): Promise<{ ok: boolean; released: number; message?: string }> {
+    const order = await this.prisma.order.findFirst({
+      where: {
+        marketplace: 'WILDBERRIES',
+        OR: [{ id: orderIdOrExternalId }, { externalId: orderIdOrExternalId }],
+      },
+      include: { items: { include: { product: { select: { id: true, userId: true } } } } },
+    });
+    if (!order) return { ok: false, released: 0, message: 'Заказ WB не найден' };
+    if (isFboOrder(order)) {
+      return { ok: true, released: 0, message: 'Заказ уже помечен как FBO' };
+    }
+    const userId = order.userId;
+    const externalId = order.externalId;
+    let released = 0;
+    for (const item of order.items) {
+      if (!item.product) continue;
+      const hadReserve = await this.prisma.stockLog.findFirst({
+        where: {
+          productId: item.productId,
+          source: 'SALE',
+          delta: { lt: 0 },
+          note: { contains: `Заказ ${externalId}` },
+        },
+      });
+      if (hadReserve) {
+        await this.stockService.release(item.productId, userId, item.quantity, {
+          source: 'SALE' as const,
+          note: `Исправление FBO: заказ ${externalId} (WILDBERRIES) — товар со склада WB`,
+        });
+        released++;
+      }
+    }
+    await this.prisma.order.update({
+      where: { id: order.id },
+      data: { wbFulfillmentType: 'DBW', isFbo: true },
+    });
+    return { ok: true, released, message: `Заказ ${externalId} помечен как FBO, возвращено ${released} позиций` };
+  }
+
+  /**
    * Повторное резервирование остатка для заказа по externalId/orderId (для админа, без проверки userId).
    */
   async retryStockReserveByExternalId(orderIdOrExternalId: string): Promise<{ ok: boolean; reserved: number; message?: string }> {
