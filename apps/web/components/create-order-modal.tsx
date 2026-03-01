@@ -76,7 +76,6 @@ export function CreateOrderModal({ open, onClose, onSuccess, token }: CreateOrde
   useEffect(() => {
     if (!open) return
     fetchSalesSources()
-    setExternalId("")
     setProductQuery("")
     setProductResults([])
     setSelectedProduct(null)
@@ -84,7 +83,22 @@ export function CreateOrderModal({ open, onClose, onSuccess, token }: CreateOrde
     setPrice("")
     setSalesSourceInput("")
     setError(null)
-  }, [open, fetchSalesSources])
+    if (token) {
+      fetch("/api/orders", { headers: { Authorization: `Bearer ${token}` } })
+        .then((r) => r.json())
+        .then((data) => {
+          const manualOrders = Array.isArray(data) ? data.filter((o: { marketplace: string }) => o.marketplace === "MANUAL") : []
+          const nums = manualOrders
+            .map((o: { externalId: string }) => parseInt(o.externalId.replace(/^0+/, "") || "0", 10))
+            .filter((n: number) => !Number.isNaN(n) && n > 0)
+          const max = nums.length > 0 ? Math.max(...nums) : 0
+          setExternalId(String(max + 1).padStart(6, "0"))
+        })
+        .catch(() => setExternalId("000001"))
+    } else {
+      setExternalId("000001")
+    }
+  }, [open, fetchSalesSources, token])
 
   useEffect(() => {
     if (!open) return

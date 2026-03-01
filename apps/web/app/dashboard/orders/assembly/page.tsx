@@ -31,6 +31,7 @@ interface Order {
   items: OrderItem[]
   wbStickerNumber?: string | null
   ozonPostingNumber?: string | null
+  salesSource?: string | null
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -76,10 +77,19 @@ const MARKETPLACE_LABELS: Record<string, { label: string; variant?: "default" | 
   OZON: { label: "Ozon", variant: "secondary" },
   YANDEX: { label: "Яндекс", variant: "outline" },
   AVITO: { label: "Avito", variant: "outline" },
+  MANUAL: { label: "Ручной", variant: "outline" },
 }
 
 function formatMarketplace(mp: string) {
   return MARKETPLACE_LABELS[mp]?.label ?? mp
+}
+
+/** Для MANUAL заказов показываем введённый источник продажи (Авито, Инстаграм и т.д.) */
+function getSourceDisplay(order: Order): string {
+  if (order.marketplace === "MANUAL" && order.salesSource?.trim()) {
+    return order.salesSource.trim()
+  }
+  return formatMarketplace(order.marketplace)
 }
 
 function formatStatus(order: Order): string {
@@ -689,7 +699,7 @@ export default function OrdersAssemblyPage() {
                                       : undefined
                             }
                           >
-                            {formatMarketplace(order.marketplace)}
+                            {getSourceDisplay(order)}
                           </Badge>
                         </td>
                         <td className="p-3 text-xs">{order.externalId}</td>
