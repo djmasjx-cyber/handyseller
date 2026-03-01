@@ -245,13 +245,16 @@ export class OrdersService {
     };
   }
 
-  /** Обновление статуса заказа. NEW → IN_PROGRESS только после истечения холда (30 мин) и при положительном остатке. */
+  /** Обновление статуса заказа. Только для MANUAL — смена статуса пользователем. Маркетплейсные — через sync. */
   async updateStatus(userId: string, orderId: string, status: OrderStatus) {
     const order = await this.prisma.order.findFirst({
       where: { id: orderId, userId },
       include: { items: { include: { product: { select: { id: true, stock: true, title: true, article: true } } } } },
     });
     if (!order) return null;
+    if (order.marketplace !== 'MANUAL') {
+      throw new BadRequestException('Смена статуса доступна только для самостоятельно созданных заказов');
+    }
 
     if (order.status === OrderStatus.NEW && status === OrderStatus.IN_PROGRESS) {
       const now = new Date();

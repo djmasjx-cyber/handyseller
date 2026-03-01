@@ -126,6 +126,8 @@ export default function OrdersPage() {
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
   const [syncingError, setSyncingError] = useState<string | null>(null)
+  const [statusUpdatingId, setStatusUpdatingId] = useState<string | null>(null)
+  const [statusError, setStatusError] = useState<string | null>(null)
 
   const token = typeof window !== "undefined" ? localStorage.getItem("accessToken") : null
 
@@ -215,6 +217,33 @@ export default function OrdersPage() {
     }
   }
 
+  const handleStatusChange = async (orderId: string, newStatus: string) => {
+    if (!token) return
+    setStatusUpdatingId(orderId)
+    setStatusError(null)
+    try {
+      const res = await fetch(`/api/orders/${orderId}/status`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ status: newStatus }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        const msg = Array.isArray(data.message) ? data.message.join(", ") : data.message || `Ошибка ${res.status}`
+        setStatusError(String(msg))
+        return
+      }
+      setOrders((prev) =>
+        prev.map((o) => (o.id === orderId ? { ...o, status: newStatus } : o))
+      )
+    } finally {
+      setStatusUpdatingId(null)
+    }
+  }
+
   const handleWbDebug = async () => {
     if (!token) return
     try {
@@ -285,6 +314,11 @@ export default function OrdersPage() {
       {syncingError && (
         <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">
           {syncingError}
+        </div>
+      )}
+      {statusError && (
+        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">
+          {statusError}
         </div>
       )}
 
@@ -389,13 +423,28 @@ export default function OrdersPage() {
                           {order.warehouseName ?? "—"}
                         </td>
                         <td className="p-3">
-                          <span className="font-medium">
-                            {formatStatus(order)}
-                          </span>
-                          {inHold && (
-                            <span className="block text-xs text-amber-600">
-                              Холд: {holdRemaining(order)}
-                            </span>
+                          {order.marketplace === "MANUAL" ? (
+                            <select
+                              value={order.status}
+                              disabled={!!statusUpdatingId}
+                              onChange={(e) => handleStatusChange(order.id, e.target.value)}
+                              className="text-sm font-medium rounded border bg-background px-2 py-1 min-w-[140px] disabled:opacity-50"
+                            >
+                              {Object.entries(STATUS_LABELS).map(([val, label]) => (
+                                <option key={val} value={val}>{label}</option>
+                              ))}
+                            </select>
+                          ) : (
+                            <>
+                              <span className="font-medium">
+                                {formatStatus(order)}
+                              </span>
+                              {inHold && (
+                                <span className="block text-xs text-amber-600">
+                                  Холд: {holdRemaining(order)}
+                                </span>
+                              )}
+                            </>
                           )}
                         </td>
                         <td className="p-3 text-muted-foreground text-sm">

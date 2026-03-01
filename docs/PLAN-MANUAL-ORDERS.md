@@ -60,7 +60,7 @@ SalesSource (новая таблица)
 ### Шаг 2. API: поиск товаров ✅
 - `GET /api/products/search?q=0001` — поиск по `id`, `article`, `title` (ILIKE)
 - Возврат: `[{ id, article, title, displayId }]` для autocomplete
-- **Пуш в main**
+- **Проверка:** `npm run test:e2e` в apps/api, или `JWT=токен API_URL=https://app.handyseller.ru ./scripts/verify-products-search.sh`
 
 ### Шаг 3. API: источники продаж
 - Модуль `sales-sources` (или в `orders`)

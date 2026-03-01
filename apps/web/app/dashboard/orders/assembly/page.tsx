@@ -324,6 +324,33 @@ export default function OrdersAssemblyPage() {
     }
   }
 
+  const handleManualStatusChange = async (orderId: string, newStatus: string) => {
+    if (!token) return
+    setUpdatingId(orderId)
+    setStatusError(null)
+    try {
+      const res = await fetch(`/api/orders/${orderId}/status`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ status: newStatus }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        const msg = Array.isArray(data.message) ? data.message.join(", ") : data.message || `Ошибка ${res.status}`
+        setStatusError(String(msg))
+        return
+      }
+      setOrders((prev) =>
+        prev.map((o) => (o.id === orderId ? { ...o, status: newStatus } : o))
+      )
+    } finally {
+      setUpdatingId(null)
+    }
+  }
+
   const [tick, setTick] = useState(0)
   useEffect(() => {
     const hasHold = assemblyOrders.some(isInHold)
@@ -715,11 +742,26 @@ export default function OrdersAssemblyPage() {
                           {order.warehouseName ?? "—"}
                         </td>
                         <td className="p-3">
-                          <span className="font-medium">{formatStatus(order)}</span>
-                          {isInHold(order) && (
-                            <span className="block text-xs text-amber-600">
-                              Холд: {holdRemaining(order)}
-                            </span>
+                          {order.marketplace === "MANUAL" ? (
+                            <select
+                              value={order.status}
+                              disabled={!!updatingId}
+                              onChange={(e) => handleManualStatusChange(order.id, e.target.value)}
+                              className="text-sm font-medium rounded border bg-background px-2 py-1 min-w-[140px] disabled:opacity-50"
+                            >
+                              {Object.entries(STATUS_LABELS).map(([val, label]) => (
+                                <option key={val} value={val}>{label}</option>
+                              ))}
+                            </select>
+                          ) : (
+                            <>
+                              <span className="font-medium">{formatStatus(order)}</span>
+                              {isInHold(order) && (
+                                <span className="block text-xs text-amber-600">
+                                  Холд: {holdRemaining(order)}
+                                </span>
+                              )}
+                            </>
                           )}
                         </td>
                         <td className="p-3 text-muted-foreground text-sm">
@@ -757,7 +799,7 @@ export default function OrdersAssemblyPage() {
                                 </Button>
                               </>
                             )}
-                            {order.status === "NEW" && !isInHold(order) && (
+                            {order.status === "NEW" && !isInHold(order) && order.marketplace !== "MANUAL" && (
                               <Button
                                 size="sm"
                                 variant="outline"
