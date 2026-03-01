@@ -867,6 +867,8 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
     const dateFrom = Math.floor((since ?? defaultSince).getTime() / 1000);
     const fboToken = this.config.statsToken;
 
+    /** Индекс в result по ключу — для обновления FBO при приоритете DBW */
+    const keyToIndex = new Map<string, number>();
     const toOrder = (o: Record<string, unknown>, fulfillmentType: 'FBS' | 'DBS' | 'DBW') => {
       const id = o.id ?? o.orderId;
       const srid = (o.srid ?? o.id ?? '') as string;
@@ -883,7 +885,21 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       const offices = o.offices as string[] | undefined;
       const warehouseName = Array.isArray(offices) && offices.length > 0 ? offices[0] : undefined;
       const key = `${id}-${srid}-${nmId}`;
-      if (seen.has(key)) return;
+      // deliveryType из ответа WB — приоритет над эндпоинтом (FBS может возвращать заказы с deliveryType dbw)
+      const deliveryType = (o.deliveryType ?? o.delivery_type ?? '') as string;
+      const isDbwByResponse = /dbw/i.test(deliveryType);
+      const effectiveType: 'FBS' | 'DBS' | 'DBW' = isDbwByResponse ? 'DBW' : fulfillmentType;
+      const existingIdx = keyToIndex.get(key);
+      if (existingIdx != null) {
+        // Заказ уже есть — при приходе из DBW обновляем на FBO (приоритет DBW)
+        if (effectiveType === 'DBW') {
+          const od = result[existingIdx];
+          od.wbFulfillmentType = 'DBW';
+          od.isFbo = true;
+        }
+        return;
+      }
+      keyToIndex.set(key, result.length);
       seen.add(key);
       result.push({
         id: String(id),
@@ -896,8 +912,8 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
         createdAt: new Date(dateStr),
         warehouseName,
         rawStatus: wbStatus,
-        wbFulfillmentType: fulfillmentType,
-        isFbo: fulfillmentType === 'DBW',
+        wbFulfillmentType: effectiveType,
+        isFbo: effectiveType === 'DBW',
       });
     };
 
@@ -965,10 +981,17 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       return map;
     };
 
+    // DBW (FBO) первым — при дубликате в FBS и DBW приоритет у FBO (не списывать «Мой склад»)
     try {
+      await fetchFrom(`${this.MARKETPLACE_API}/api/v3/dbw/orders/new`, undefined, 'DBW', true);
       await fetchFrom(`${this.MARKETPLACE_API}/api/v3/orders/new`, undefined, 'FBS');
       await fetchFrom(`${this.MARKETPLACE_API}/api/v3/dbs/orders/new`, undefined, 'DBS');
-      await fetchFrom(`${this.MARKETPLACE_API}/api/v3/dbw/orders/new`, undefined, 'DBW', true);
+      await fetchFrom(
+        `${this.MARKETPLACE_API}/api/v3/dbw/orders`,
+        { dateFrom, dateTo, next: 0, limit: 1000 },
+        'DBW',
+        true,
+      );
       await fetchFrom(
         `${this.MARKETPLACE_API}/api/v3/orders`,
         { dateFrom, dateTo, next: 0, limit: 1000 },
@@ -978,12 +1001,6 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
         `${this.MARKETPLACE_API}/api/v3/dbs/orders`,
         { dateFrom, dateTo, next: 0, limit: 1000 },
         'DBS',
-      );
-      await fetchFrom(
-        `${this.MARKETPLACE_API}/api/v3/dbw/orders`,
-        { dateFrom, dateTo, next: 0, limit: 1000 },
-        'DBW',
-        true,
       );
 
       const ids = result.map((r) => parseInt(r.id, 10)).filter((n) => !isNaN(n));

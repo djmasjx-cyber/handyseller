@@ -130,7 +130,15 @@ async function main() {
   }
 
   // 2. Заказ в нашей БД (только при использовании БД)
-  let ourOrder: { id?: string; externalId?: string; status: string; rawStatus?: string | null; wbStickerNumber?: string | null } | null = null;
+  let ourOrder: {
+    id?: string;
+    externalId?: string;
+    status: string;
+    rawStatus?: string | null;
+    wbStickerNumber?: string | null;
+    wbFulfillmentType?: string | null;
+    isFbo?: boolean | null;
+  } | null = null;
   if (!USE_ENV_TOKENS) {
     console.log('\n--- 2. Заказ в нашей БД ---');
     const emailHash = crypto.hashForLookup(EMAIL);
@@ -145,13 +153,24 @@ async function main() {
           marketplace: 'WILDBERRIES',
           OR: [{ externalId: ORDER_ID }, { wbStickerNumber: ORDER_ID }],
         },
-        select: { id: true, externalId: true, status: true, rawStatus: true, wbStickerNumber: true, createdAt: true },
+        select: {
+          id: true,
+          externalId: true,
+          status: true,
+          rawStatus: true,
+          wbStickerNumber: true,
+          createdAt: true,
+          wbFulfillmentType: true,
+          isFbo: true,
+        },
       });
     }
     if (ourOrder) {
     console.log('  ID:', ourOrder.id);
     console.log('  externalId:', ourOrder.externalId);
     console.log('  wbStickerNumber:', ourOrder.wbStickerNumber);
+    console.log('  wbFulfillmentType:', ourOrder.wbFulfillmentType ?? '(не задан)');
+    console.log('  isFbo:', ourOrder.isFbo ?? '(не задан)');
     console.log('  status (наше приложение):', ourOrder.status);
     console.log('  rawStatus (сырой WB):', ourOrder.rawStatus ?? '(не сохранён)');
     } else {

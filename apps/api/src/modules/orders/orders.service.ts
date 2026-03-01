@@ -541,9 +541,27 @@ export class OrdersService {
           const needFix =
             existing.wbStickerNumber == null || existing.wbStickerNumber === existing.externalId;
           if (needFix) (updateData as Record<string, unknown>).wbStickerNumber = od.id;
+          const newIsFbo = od.wbFulfillmentType === 'DBW' || (od as { isFbo?: boolean }).isFbo;
           if (od.wbFulfillmentType && existing.marketplace === 'WILDBERRIES') {
             updateData.wbFulfillmentType = od.wbFulfillmentType;
-            if (od.wbFulfillmentType === 'DBW') updateData.isFbo = true;
+            if (newIsFbo) updateData.isFbo = true;
+          }
+          // Исправление FBO: заказ был ошибочно помечен как FBS — возвращаем остаток
+          if (
+            newIsFbo &&
+            existing.status === OrderStatus.IN_PROGRESS &&
+            !isFboOrder(existing)
+          ) {
+            try {
+              for (const item of existing.items) {
+                await this.stockService.release(item.productId, userId, item.quantity, {
+                  source: 'SALE' as const,
+                  note: `Исправление FBO: заказ ${externalId} (${marketplace}) — товар со склада WB`,
+                });
+              }
+            } catch (err) {
+              errors.push(`FBO backfill ${externalId}: ${err instanceof Error ? err.message : String(err)}`);
+            }
           }
         }
         if (marketplace === 'OZON' && (od as { isFbo?: boolean }).isFbo) {
