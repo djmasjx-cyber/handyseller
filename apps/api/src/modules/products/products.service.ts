@@ -47,21 +47,39 @@ export class ProductsService {
   }
 
   /** Резервы FBS (наш склад) и FBO (склад WB) по productId */
+  /**
+   * Резервы по productId.
+   * FBS: IN_PROGRESS — резерв с нашего склада, снимается при отгрузке (SHIPPED/READY_FOR_PICKUP).
+   * FBO: NEW, IN_PROGRESS — резерв на СЦ маркета, снимается когда заказ покинул склад.
+   */
   private async getReservesByProduct(userId: string): Promise<Map<string, { fbs: number; fbo: number }>> {
-    const rows = await this.prisma.$queryRaw<
-      Array<{ product_id: string; quantity: number; is_fbo: boolean | null }>
-    >`
-      SELECT oi.product_id, oi.quantity, o.is_fbo
-      FROM "OrderItem" oi
-      JOIN "Order" o ON o.id = oi.order_id
-      WHERE o.user_id = ${userId}
-        AND o.status IN ('NEW', 'IN_PROGRESS', 'READY_FOR_PICKUP')
-    `;
+    const [fbsRows, fboRows] = await Promise.all([
+      this.prisma.$queryRaw<Array<{ product_id: string; quantity: number }>>`
+        SELECT oi.product_id, oi.quantity
+        FROM "OrderItem" oi
+        JOIN "Order" o ON o.id = oi.order_id
+        WHERE o.user_id = ${userId}
+          AND (o.is_fbo IS NULL OR o.is_fbo = false)
+          AND o.status = 'IN_PROGRESS'
+      `,
+      this.prisma.$queryRaw<Array<{ product_id: string; quantity: number }>>`
+        SELECT oi.product_id, oi.quantity
+        FROM "OrderItem" oi
+        JOIN "Order" o ON o.id = oi.order_id
+        WHERE o.user_id = ${userId}
+          AND o.is_fbo = true
+          AND o.status IN ('NEW', 'IN_PROGRESS')
+      `,
+    ]);
     const map = new Map<string, { fbs: number; fbo: number }>();
-    for (const row of rows) {
+    for (const row of fbsRows) {
       const cur = map.get(row.product_id) ?? { fbs: 0, fbo: 0 };
-      if (row.is_fbo === true) cur.fbo += row.quantity;
-      else cur.fbs += row.quantity;
+      cur.fbs += row.quantity;
+      map.set(row.product_id, cur);
+    }
+    for (const row of fboRows) {
+      const cur = map.get(row.product_id) ?? { fbs: 0, fbo: 0 };
+      cur.fbo += row.quantity;
       map.set(row.product_id, cur);
     }
     return map;
