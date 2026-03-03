@@ -1,0 +1,6 @@
+{
+  // Отключить фоновый анализ — Qoder не должен запускать "Analyzing X and its dependencies"
+  "typescript.tsserver.experimental.enableProjectDiagnostics": false,
+  "typescript.disableAutomaticTypeAcquisition": true,
+  "typescript.preferences.includePackageJsonAutoImports": "off"
+}
