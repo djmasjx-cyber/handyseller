@@ -18,6 +18,8 @@ export interface ProductData {
   name: string;
   description?: string;
   price?: number;
+  /** Цена до скидки (для Ozon old_price) */
+  oldPrice?: number;
   stock: number;
   images: string[];
   /** Ozon: штрих-код (обязателен для v3 import) */

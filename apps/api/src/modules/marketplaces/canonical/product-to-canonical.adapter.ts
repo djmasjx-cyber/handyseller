@@ -41,6 +41,8 @@ export function productToCanonical(product: ProductWithRelations): CanonicalProd
     richContent?: string | null;
     ozonCategoryId?: number | null;
     ozonTypeId?: number | null;
+    price?: number | null;
+    oldPrice?: number | null;
   };
   return {
     canonical_sku: product.id,
@@ -73,7 +75,8 @@ export function productToCanonical(product: ProductWithRelations): CanonicalProd
     long_description_html: p.richContent ?? undefined,
     attributes: attributes.length > 0 ? attributes : undefined,
     images: images.length > 0 ? images : undefined,
-    price: 1,
+    price: p.price ?? 1,
+    old_price: p.oldPrice ?? undefined,
     stock_quantity: product.stock ?? 0,
   };
 }
@@ -114,6 +117,7 @@ export function canonicalToProductData(
     name: canonical.title,
     description: canonical.long_description_plain ?? canonical.short_description,
     price: canonical.price,
+    oldPrice: canonical.old_price,
     stock: canonical.stock_quantity,
     images: canonical.images?.map((i) => i.url) ?? [],
     barcode: canonical.barcode,

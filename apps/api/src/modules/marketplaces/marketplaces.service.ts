@@ -1332,6 +1332,8 @@ export class MarketplacesService {
     title?: string | null;
     imageUrl?: string | null;
     cost?: unknown;
+    price?: number | null;
+    oldPrice?: number | null;
     article?: string | null;
     sku?: string | null;
     weight?: number | null;
@@ -1345,7 +1347,23 @@ export class MarketplacesService {
     if (!product.title?.trim()) errors.push('Укажите название товара');
     if (!product.imageUrl?.trim() || !product.imageUrl.startsWith('http'))
       errors.push('Добавьте URL фото товара (Ozon требует хотя бы одно изображение)');
-    // Цена задаётся клиентом на Ozon; при создании используем placeholder
+    // Ваша цена (продажная) — обязательна для Ozon
+    const price = product.price != null ? Number(product.price) : NaN;
+    if (isNaN(price) || price < 20) errors.push('Укажите «Вашу цену» от 20 ₽ (Ozon: минимальная цена)');
+    // Цена до скидки — если указана, должна быть больше price
+    if (product.oldPrice != null) {
+      const oldPrice = Number(product.oldPrice);
+      if (!isNaN(oldPrice) && oldPrice <= price) {
+        errors.push('«Цена до скидки» должна быть больше «Вашей цены»');
+      }
+      // При price ≤ 400: скидка должна быть > 20%
+      if (!isNaN(price) && price <= 400 && !isNaN(oldPrice)) {
+        const minOldPrice = Math.ceil(price / 0.79);
+        if (oldPrice < minOldPrice) {
+          errors.push(`При цене ≤ 400 ₽ скидка должна быть > 20%. Минимальная «цена до скидки»: ${minOldPrice} ₽`);
+        }
+      }
+    }
     const article = (product.article ?? product.sku ?? '').toString().trim();
     if (!article) errors.push('Укажите артикул (offer_id) — обязателен для Ozon');
     const catId = product.ozonCategoryId != null ? Number(product.ozonCategoryId) : NaN;

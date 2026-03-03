@@ -12,6 +12,19 @@ export class CreateProductDto {
   @IsNumber()
   cost?: number;
 
+  /** Ваша цена (продажная) для Ozon */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(20)
+  price?: number;
+
+  /** Цена до скидки для Ozon */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  oldPrice?: number;
+
   @IsOptional()
   @IsString()
   article?: string;

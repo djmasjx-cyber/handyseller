@@ -69,9 +69,16 @@ GIT_SSH_COMMAND="ssh -i ~/.ssh/id_ed25519_github -o IdentitiesOnly=yes" git push
 
 ### 5. Создание PR
 
+Если `gh` установлен:
 ```bash
 gh pr create --base main --head fix/краткое-описание --title "fix(scope): описание" --body "Описание изменений"
 ```
+
+Если `gh` нет — **не устанавливать**. Дай ссылку пользователю:
+```
+https://github.com/djmasjx-cyber/handyseller/pull/new/fix/имя-ветки
+```
+Пользователь создаст PR в браузере. Cursor смержит без PR.
 
 **На этом всё.** Дальше — Cursor. Не мержить, не пушить в main.
 
@@ -113,11 +120,7 @@ GIT_SSH_COMMAND="ssh -i ~/.ssh/id_ed25519_github -o IdentitiesOnly=yes" git push
 Не гонять `git fetch`, `git branch -vv` для проверки. Если в выводе `fix/xxx -> fix/xxx` — push прошёл.
 
 **Создание PR:**  
-```bash
-gh pr create --base main --head fix/имя-ветки --title "fix(scope): описание" --body "Описание"
-```
-
-После PR — сообщи пользователю. Cursor сделает merge и push в main.
+Если `gh` есть — `gh pr create`. Если нет — дай ссылку, не устанавливай `gh`. Cursor смержит ветку и без PR.
 
 ---
 

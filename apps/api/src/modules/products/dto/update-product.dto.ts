@@ -10,6 +10,18 @@ export class UpdateProductDto {
   @IsNumber()
   cost?: number;
 
+  /** Ваша цена (продажная) для Ozon */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  price?: number;
+
+  /** Цена до скидки для Ozon */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  oldPrice?: number;
+
   @IsOptional()
   @IsString()
   article?: string;

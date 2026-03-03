@@ -105,6 +105,8 @@ export class ProductsService {
       title: string;
       description?: string;
       cost?: number;
+      price?: number;
+      oldPrice?: number;
       article?: string;
       imageUrl?: string;
       sku?: string;
@@ -355,6 +357,8 @@ export class ProductsService {
     data: {
       title?: string;
       cost?: number;
+      price?: number;
+      oldPrice?: number;
       article?: string;
       description?: string;
       seoTitle?: string;
@@ -399,6 +403,11 @@ export class ProductsService {
         if (isNaN(num) || num < 0) continue;
         newVal = num;
       }
+      if (['price', 'oldPrice'].includes(field)) {
+        const num = Number(value);
+        if (isNaN(num) || num < 0) continue;
+        newVal = num;
+      }
       if (['weight', 'width', 'length', 'height', 'itemsPerPack', 'ozonCategoryId', 'ozonTypeId'].includes(field)) {
         const num = Number(value);
         if (isNaN(num)) continue;
@@ -436,7 +445,7 @@ export class ProductsService {
     if (Object.keys(updates).length === 0) return product;
     // Синхронизация на маркеты при изменении любых полей карточки (описание, название, цена, габариты и т.д.)
     const syncRelevantFields = new Set([
-      'title', 'description', 'cost', 'imageUrl', 'brand', 'weight', 'width', 'length', 'height',
+      'title', 'description', 'cost', 'price', 'oldPrice', 'imageUrl', 'brand', 'weight', 'width', 'length', 'height',
       'color', 'material', 'craftType', 'countryOfOrigin', 'packageContents', 'richContent',
       'itemsPerPack', 'ozonCategoryId', 'ozonTypeId', 'seoTitle', 'seoKeywords', 'seoDescription',
     ]);

@@ -293,9 +293,12 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
       this.generateEan13(product.vendorCode ?? product.id);
     const priceStr = String(priceNum);
     // Ozon требует скидку >20% при цене ≤400 (old_price > price / 0.8)
-    const oldPriceNum = priceNum <= 400
-      ? Math.ceil(priceNum / 0.79)
-      : Math.max(priceNum + 1, Math.round((product.price ?? 1) * 1.25));
+    // Если oldPrice указан вручную — используем его, иначе авторасчёт
+    const oldPriceNum = product.oldPrice
+      ? Math.round(product.oldPrice)
+      : priceNum <= 400
+        ? Math.ceil(priceNum / 0.79)
+        : Math.max(priceNum + 1, Math.round((product.price ?? 1) * 1.25));
     const oldPriceStr = String(oldPriceNum);
 
     const validImages = product.images?.filter((u) => typeof u === 'string' && u.startsWith('http')) ?? [];
