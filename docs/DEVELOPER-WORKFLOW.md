@@ -1,14 +1,39 @@
 # Инструкция для разработчиков (Qoder и команда)
 
-## ⛔ Не делать
-
-- **Не пушить напрямую в `main`** — это триггерит деплой на прод. Один неверный коммит = падение сайта.
-- **Не патчить `dist/`** — при сборке через GH всё перезапишется. Менять только исходники (`src/`).
-- **Не мержить без проверки** — конфликты, удалённые файлы, сломанная сборка.
+**Точка входа для агентов:** `AGENTS.md` в корне репо.
 
 ---
 
-## ✅ Правильный workflow: Push to main
+## Вертикаль разработки
+
+| Роль | Кто | Ответственность |
+|------|-----|-----------------|
+| **Главный разработчик** | Cursor AI | Ревью, merge в main, push в main, деплой |
+| **Команда** | Qoder | Правки, коммиты, push ветки в GH, создание PR |
+
+**Правило:** Qoder **не пушит** в `main`. Только Cursor. Qoder делает ветку → push ветки → PR. Cursor мержит и пушит в main.
+
+---
+
+## Workflow: Qoder → Cursor → main
+
+```
+Qoder: ветка → код → коммит → push ветки → gh pr create
+                    ↓
+Cursor: проверка → merge → push main → деплой
+```
+
+---
+
+## ⛔ Не делать
+
+- **Qoder: не пушить в `main`** — это делает только Cursor. Push только в свою ветку.
+- **Не патчить `dist/`** — при сборке через GH всё перезапишется. Менять только исходники (`src/`).
+- **Не мержить без Cursor** — merge в main выполняет Cursor.
+
+---
+
+## Роль Qoder: ветка → GH → PR
 
 ### 1. Ветка
 
@@ -20,8 +45,8 @@ git checkout -b fix/краткое-описание   # или feat/, refactor/
 
 ### 2. Изменения
 
-- Редактировать только файлы в `apps/api/src/`, `apps/web/`, `prisma/` и т.п.
-- Перед коммитом: `npm run build` (если есть) — убедиться, что собирается.
+- Редактировать только файлы в `apps/api/src/`, `apps/web/`, `prisma/`, `docs/` — никогда `dist/`
+- Перед коммитом: `npm run build` — убедиться, что собирается
 
 ### 3. Коммит
 
@@ -30,53 +55,86 @@ git checkout -b fix/краткое-описание   # или feat/, refactor/
 ```
 feat(orders): бейдж FBO в столбце Источник
 fix(ozon): штрих-код — retry 6 попыток
-ci: concurrency — отменять предыдущие ранки
 ```
 
-Типы: `feat`, `fix`, `refactor`, `ci`, `docs`
+Типы: `feat`, `fix`, `refactor`, `ci`, `docs`, `chore`
 
-### 4. Push и PR
+### 4. Push ветки (не main!)
 
 ```bash
 git add .
 git commit -m "fix(scope): описание"
-git push origin fix/краткое-описание
+GIT_SSH_COMMAND="ssh -i ~/.ssh/id_ed25519_github -o IdentitiesOnly=yes" git push -u origin fix/краткое-описание
 ```
 
-Создать **Pull Request** в GitHub: `fix/...` → `main`.  
-Дождаться ревью (или одобрения владельца), затем **Merge**.
+### 5. Создание PR
 
-### 5. Деплой
+```bash
+gh pr create --base main --head fix/краткое-описание --title "fix(scope): описание" --body "Описание изменений"
+```
 
-После merge в `main` автоматически запускается GitHub Actions:
-- Сборка API и Web
-- Push образов в ghcr.io
-- Деплой на VM
+**На этом всё.** Дальше — Cursor. Не мержить, не пушить в main.
 
 ---
 
-## Стиль и правила
+## Роль Cursor: ревью → merge → push main
 
-| Что | Как |
-|-----|-----|
-| Коммиты | `feat(scope):`, `fix(scope):` — на русском или английском |
-| Исходники | Только `.ts`, `.tsx` в `src/` — не трогать `dist/` |
-| Документация | `docs/` — при изменении логики обновлять |
-| Скрипты | Не патчить `dist` — создавать скрипты для `src` или помечать DEPRECATED |
+1. Проверить изменения (код, что нет правок в `dist/`)
+2. `git checkout main && git merge fix/имя-ветки`
+3. `GIT_SSH_COMMAND="ssh -i ~/.ssh/id_ed25519_github -o IdentitiesOnly=yes" git push origin main`
+4. Деплой запустится автоматически (GitHub Actions)
+
+---
+
+## Push в GitHub (SSH-ключ)
+
+Обычный `git push` даёт `Permission denied`. Всегда:
+
+```bash
+GIT_SSH_COMMAND="ssh -i ~/.ssh/id_ed25519_github -o IdentitiesOnly=yes" git push origin <ветка>
+```
+
+Ключ: `~/.ssh/id_ed25519_github`
+
+---
+
+## Для Qoder: кратко
+
+**Твоя зона:** ветка, код, коммит, push ветки, `gh pr create`.  
+**Не твоя зона:** push в main, merge в main. Это делает Cursor.
+
+**Почему не трогать `dist/`:**  
+`dist/` — скомпилированный код. При деплое GitHub Actions перезапишет его. Меняй только `src/*.ts`.
+
+**Push ветки — один раз:**  
+```bash
+GIT_SSH_COMMAND="ssh -i ~/.ssh/id_ed25519_github -o IdentitiesOnly=yes" git push -u origin fix/имя-ветки
+```  
+Не гонять `git fetch`, `git branch -vv` для проверки. Если в выводе `fix/xxx -> fix/xxx` — push прошёл.
+
+**Создание PR:**  
+```bash
+gh pr create --base main --head fix/имя-ветки --title "fix(scope): описание" --body "Описание"
+```
+
+После PR — сообщи пользователю. Cursor сделает merge и push в main.
+
+---
+
+## Первоначальная настройка (один раз)
+
+```bash
+bash scripts/install-git-hooks.sh
+```
+
+Устанавливает pre-commit hook: блокирует коммит файлов из `dist/`.
 
 ---
 
 ## Полезные ссылки
 
+- Точка входа для агентов: `AGENTS.md`
+- Протокол Cursor ↔ Qoder: `docs/CURSOR-QODER-PROTOCOL.md`
 - Деплой: `.github/workflows/deploy.yml`
 - Ozon штрих-коды: `docs/OZON-BARCODE-FIX-REPORT.md`
 - Архитектура: `docs/ARCHITECTURE.md`
-
----
-
-## Команда
-
-- **Cursor AI** — код, ревью, рефакторинг
-- **Qoder** — разработка, следование workflow
-
-Оба работают через ветки и PR. Прямой push в `main` — только в экстренных случаях и с согласования.

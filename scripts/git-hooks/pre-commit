@@ -1,0 +1,14 @@
+#!/bin/bash
+# Блокирует коммит файлов из dist/
+# Установка: bash scripts/install-git-hooks.sh
+
+STAGED_DIST=$(git diff --cached --name-only | grep -E '^apps/api/dist/|/dist/' || true)
+if [ -n "$STAGED_DIST" ]; then
+  echo "❌ Ошибка: в коммите есть файлы из dist/"
+  echo "   dist/ — скомпилированный код. Меняй только src/"
+  echo ""
+  echo "Затронутые файлы:"
+  echo "$STAGED_DIST"
+  exit 1
+fi
+exit 0

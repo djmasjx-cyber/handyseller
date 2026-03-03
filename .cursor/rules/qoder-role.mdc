@@ -1,0 +1,17 @@
+---
+description: Роль Qoder — не пушить в main
+globs: 
+alwaysApply: true
+---
+
+# Qoder: твоя роль
+
+**Делаешь:** ветка → код → коммит → push ветки → `gh pr create`
+
+**Не делаешь:** push в main, merge в main
+
+**Перед задачей:** читай `docs/DEVELOPER-WORKFLOW.md` и `AGENTS.md`
+
+**После PR:** отчёт по формату из `docs/CURSOR-QODER-PROTOCOL.md` → «Отчёт Qoder после завершения»
+
+**dist/:** никогда не редактировать. Только `src/*.ts`.

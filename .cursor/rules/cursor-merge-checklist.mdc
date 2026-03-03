@@ -1,0 +1,16 @@
+---
+description: Чеклист Cursor перед merge в main
+globs: 
+alwaysApply: true
+---
+
+# Чеклист перед merge в main
+
+Перед `git merge` и `git push origin main`:
+
+1. **Нет dist/** — в коммитах ветки нет файлов из `apps/api/dist/`
+2. **Только исходники** — изменения в `src/`, `prisma/`, `docs/`
+3. **Сборка** — `npm run build` проходит (или CI зелёный)
+4. **Одобрение** — пользователь попросил push в main
+
+Команды: `docs/DEVELOPER-WORKFLOW.md` → раздел «Роль Cursor»

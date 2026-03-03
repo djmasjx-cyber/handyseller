@@ -1,0 +1,13 @@
+---
+description: Вертикаль разработки Cursor + Qoder
+globs: 
+alwaysApply: true
+---
+
+# Вертикаль разработки
+
+**Cursor** = главный разработчик. Merge в main, push в main, деплой.
+
+**Qoder** = команда. Ветка → код → коммит → push ветки → PR. Не пушить в main.
+
+Полная инструкция: `docs/DEVELOPER-WORKFLOW.md`
