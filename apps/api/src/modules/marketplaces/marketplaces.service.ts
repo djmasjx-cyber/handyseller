@@ -458,12 +458,16 @@ export class MarketplacesService {
       } else if (marketplace === 'OZON' && adapter instanceof OzonAdapter) {
         const product = await this.productsService.findById(userId, productId);
         const offerId = product ? (product.article ?? product.sku ?? '').toString().trim() : undefined;
-        // Ozon возвращает штрихкод с задержкой после generateBarcodes — retry до 3 раз
+        // Ozon генерирует штрих-код автоматически при импорте. Retry до 6 раз (~21 сек).
         let barcode: string | null = null;
-        for (let attempt = 0; attempt < 3; attempt++) {
+        for (let attempt = 0; attempt < 6; attempt++) {
           barcode = await adapter.getBarcodeByProductId(externalSystemId, offerId || undefined);
           if (barcode) break;
-          if (attempt < 2) await new Promise((r) => setTimeout(r, 3000));
+          if (attempt === 0) {
+            await new Promise((r) => setTimeout(r, 5000));
+          } else if (attempt < 5) {
+            await new Promise((r) => setTimeout(r, 4000));
+          }
         }
         if (barcode) {
           await this.prisma.product.update({
@@ -1222,16 +1226,15 @@ export class MarketplacesService {
       warehouseId: conn.warehouseId ?? undefined,
     });
     if (!adapter || !(adapter instanceof OzonAdapter)) return { error: 'Ошибка доступа к Ozon' };
+    // Ozon генерирует штрих-код автоматически при импорте. Ждём до ~21 сек (генерация до 15–20 сек).
     let barcode: string | null = null;
-    for (let attempt = 0; attempt < 4; attempt++) {
+    for (let attempt = 0; attempt < 6; attempt++) {
       barcode = await adapter.getBarcodeByProductId(ozonProductId ?? '', offerId || undefined);
       if (barcode) break;
-      // При первом отсутствии штрих-кода — запросить генерацию OZ-формата (если есть product_id)
-      if (attempt === 0 && ozonProductId) {
-        await adapter.generateBarcodes([ozonProductId]);
-        await new Promise((r) => setTimeout(r, 3000));
-      } else if (attempt < 3) {
-        await new Promise((r) => setTimeout(r, 2500));
+      if (attempt === 0) {
+        await new Promise((r) => setTimeout(r, 5000));
+      } else if (attempt < 5) {
+        await new Promise((r) => setTimeout(r, 4000));
       }
     }
     if (!barcode) return { error: 'Штрих-код не найден в Ozon. Проверьте артикул (должен совпадать с offer_id на Ozon).' };
