@@ -111,6 +111,7 @@ export function canonicalToProductData(
   ozonCategoryId?: number;
   ozonTypeId?: number;
   barcodeOzon?: string;
+  oldPrice?: number;
 } {
   return {
     id: canonical.canonical_sku,

@@ -1332,8 +1332,8 @@ export class MarketplacesService {
     title?: string | null;
     imageUrl?: string | null;
     cost?: unknown;
-    price?: number | null;
-    oldPrice?: number | null;
+    price?: unknown;
+    oldPrice?: unknown;
     article?: string | null;
     sku?: string | null;
     weight?: number | null;
