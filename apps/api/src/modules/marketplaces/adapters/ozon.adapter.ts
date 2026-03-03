@@ -74,7 +74,11 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
       images: canonical.images?.map((i) => i.url) ?? [],
       name: canonical.title,
       offer_id: offerId,
-      old_price: canonical.old_price ? String(Math.round(canonical.old_price)) : String(Math.round(canonical.price * 1.2)),
+      old_price: canonical.old_price
+        ? String(Math.round(canonical.old_price))
+        : canonical.price <= 400
+          ? String(Math.ceil(canonical.price / 0.79))
+          : String(Math.round(canonical.price * 1.2)),
       price: String(Math.round(canonical.price)),
       vat: '0',
       height,
@@ -288,7 +292,10 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
       (product.barcodeOzon ?? product.barcode)?.trim() ||
       this.generateEan13(product.vendorCode ?? product.id);
     const priceStr = String(priceNum);
-    const oldPriceNum = Math.max(priceNum + 1, Math.round((product.price ?? 1) * 1.25));
+    // Ozon требует скидку >20% при цене ≤400 (old_price > price / 0.8)
+    const oldPriceNum = priceNum <= 400
+      ? Math.ceil(priceNum / 0.79)
+      : Math.max(priceNum + 1, Math.round((product.price ?? 1) * 1.25));
     const oldPriceStr = String(oldPriceNum);
 
     const validImages = product.images?.filter((u) => typeof u === 'string' && u.startsWith('http')) ?? [];
