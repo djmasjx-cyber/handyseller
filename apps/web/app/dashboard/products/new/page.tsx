@@ -16,6 +16,8 @@ export default function NewProductPage() {
     title: "",
     description: "",
     cost: "",
+    price: "",
+    oldPrice: "",
     article: "",
     imageUrl: "",
     brand: "",
@@ -78,6 +80,8 @@ export default function NewProductPage() {
           title: form.title.trim(),
           description: form.description.trim() || undefined,
           cost: isNaN(costVal) ? undefined : costVal,
+          price: form.price ? parseFloat(form.price) : undefined,
+          oldPrice: form.oldPrice ? parseFloat(form.oldPrice) : undefined,
           article: form.article.trim() || undefined,
           imageUrl: form.imageUrl.trim() || undefined,
           brand: form.brand.trim() || undefined,
@@ -219,6 +223,34 @@ export default function NewProductPage() {
                 onChange={(e) => setForm((f) => ({ ...f, cost: e.target.value }))}
                 placeholder="Для аналитики"
               />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="price">Ваша цена, ₽ *</Label>
+                <Input
+                  id="price"
+                  type="number"
+                  step="0.01"
+                  min="20"
+                  value={form.price}
+                  onChange={(e) => setForm((f) => ({ ...f, price: e.target.value }))}
+                  placeholder="Минимум 20"
+                />
+                <p className="text-xs text-muted-foreground">Ozon: мин. 20 ₽. При цене ≤400 скидка должна быть &gt;20%</p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="oldPrice">Цена до скидки, ₽</Label>
+                <Input
+                  id="oldPrice"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={form.oldPrice}
+                  onChange={(e) => setForm((f) => ({ ...f, oldPrice: e.target.value }))}
+                  placeholder="Авто при выгрузке"
+                />
+                <p className="text-xs text-muted-foreground">Если пусто — рассчитается при выгрузке на Ozon</p>
+              </div>
             </div>
             <div className="space-y-2">
               <Label htmlFor="imageUrl">URL фото</Label>

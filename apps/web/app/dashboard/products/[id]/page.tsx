@@ -13,6 +13,8 @@ interface Product {
   title: string
   description?: string
   cost: string | number
+  price?: string | number
+  oldPrice?: string | number
   imageUrl?: string
   article?: string
   stock?: number
@@ -62,6 +64,8 @@ export default function ProductCardPage() {
     title: "",
     description: "",
     cost: "",
+    price: "",
+    oldPrice: "",
     article: "",
     imageUrl: "",
     stock: "",
@@ -115,6 +119,8 @@ export default function ProductCardPage() {
           title: p.title ?? "",
           description: p.description ?? "",
           cost: String(p.cost ?? ""),
+          price: p.price != null ? String(p.price) : "",
+          oldPrice: p.oldPrice != null ? String(p.oldPrice) : "",
           article: p.article ?? "",
           imageUrl: p.imageUrl ?? "",
           stock: String(p.stock ?? 0),
@@ -460,6 +466,8 @@ export default function ProductCardPage() {
         title: form.title.trim(),
         description: form.description.trim() || "",
         cost: isNaN(costVal) ? 0 : costVal,
+        price: form.price ? parseFloat(form.price) : undefined,
+        oldPrice: form.oldPrice ? parseFloat(form.oldPrice) : undefined,
         article: form.article.trim() || "",
         seoTitle: form.seoTitle.trim() || "",
         seoKeywords: form.seoKeywords.trim() || "",
@@ -1193,6 +1201,34 @@ export default function ProductCardPage() {
                 value={form.cost}
                 onChange={(e) => setForm((f) => ({ ...f, cost: e.target.value }))}
               />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="price">Ваша цена, ₽ *</Label>
+                <Input
+                  id="price"
+                  type="number"
+                  step="0.01"
+                  min="20"
+                  value={form.price}
+                  onChange={(e) => setForm((f) => ({ ...f, price: e.target.value }))}
+                  placeholder="Минимум 20"
+                />
+                <p className="text-xs text-muted-foreground">Ozon: мин. 20 ₽. При цене ≤400 скидка &gt;20%</p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="oldPrice">Цена до скидки, ₽</Label>
+                <Input
+                  id="oldPrice"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={form.oldPrice}
+                  onChange={(e) => setForm((f) => ({ ...f, oldPrice: e.target.value }))}
+                  placeholder="Авто при выгрузке"
+                />
+                <p className="text-xs text-muted-foreground">Если пусто — рассчитается при выгрузке на Ozon</p>
+              </div>
             </div>
             <div className="space-y-2">
               <Label htmlFor="stock">Остаток (Мой склад) *</Label>
