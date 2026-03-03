@@ -499,9 +499,9 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
           await this.setStock(product.vendorCode ?? product.id, String(productId), product.stock);
         }
         if (productId) {
-          await this.generateBarcodes([String(productId)]);
-          // Ozon обрабатывает штрихкоды асинхронно — ждём перед получением
-          await new Promise((r) => setTimeout(r, 5000));
+          // Ozon автоматически генерирует штрих-код при импорте
+          // Ждём немного для обработки
+          await new Promise((r) => setTimeout(r, 3000));
           return String(productId);
         }
       }
@@ -1064,35 +1064,15 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
   }
 
   /**
-   * Запросить генерацию штрих-кодов Ozon для товаров (формат OZXXXXXXX).
-   * POST /v1/barcode/generate. Вызывать после создания карточки.
+   * Генерация штрих-кодов Ozon.
+   * @deprecated Ozon автоматически генерирует штрих-код при импорте товара через /v3/product/import
+   * Метод устарел после удаления endpoint /v1/barcode/generate в декабре 2024
    */
   async generateBarcodes(productIds: string[]): Promise<void> {
-    const ids = productIds
-      .map((id) => parseInt(String(id).trim(), 10))
-      .filter((n) => !Number.isNaN(n));
-    if (ids.length === 0) return;
-    try {
-      const { data } = await firstValueFrom(
-        this.httpService.post(
-          `${this.API_BASE}/v1/barcode/generate`,
-          { product_id: ids },
-          {
-            headers: {
-              'Client-Id': this.config.sellerId ?? '',
-              'Api-Key': this.config.apiKey,
-              'Content-Type': 'application/json',
-            },
-          },
-        ),
-      );
-      const errors = (data as { errors?: unknown[] })?.errors;
-      if (Array.isArray(errors) && errors.length > 0) {
-        this.logError(new Error(String(errors[0])), 'generateBarcodes');
-      }
-    } catch (err) {
-      this.logError(err, 'generateBarcodes');
-    }
+    // Метод устарел: Ozon автоматически генерирует штрих-код при импорте товара
+    // Документация: https://docs.ozon.ru/api/seller/#operation/ProductAPI_ProductsImportV3
+    this.logger.warn('generateBarcodes() вызван: штрих-код генерируется автоматически через /v3/product/import');
+    return Promise.resolve();
   }
 
   /**
