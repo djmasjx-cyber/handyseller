@@ -57,7 +57,7 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
     return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
   }
 
-  convertToPlatform(canonical: CanonicalProduct): PlatformProductPayload {
+  convertToPlatform(canonical: CanonicalProduct, barcode?: string): PlatformProductPayload {
     const vendorCode = canonical.vendor_code ?? canonical.canonical_sku;
     const plainDesc = canonical.long_description_plain ?? canonical.short_description ?? '';
     const richDesc = canonical.long_description_html?.trim();
@@ -97,28 +97,46 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
     const l = (canonical.length_mm ?? 100) / 10;
     const weightBrutto = (canonical.weight_grams ?? 100) / 1000; // g → kg
 
+    // subjectId обязателен для создания карточки
+    if (!canonical.wb_subject_id || canonical.wb_subject_id <= 0) {
+      throw new Error('WB: категория (subjectId) обязательна для создания карточки товара');
+    }
+
+    const good: Record<string, unknown> = {
+      nomenclature: 0,
+      variant: 0,
+      vendorCode: `${vendorCode}-1`,
+      characteristics,
+      weightBrutto,
+      length: l,
+      width: w,
+      height: h,
+    };
+
+    // Добавляем штрих-код если есть
+    if (barcode?.trim()) {
+      good.barcode = barcode.trim();
+    }
+
     const card: Record<string, unknown> = {
       nomenclature: 0,
       supplierVendorCode: vendorCode,
       countryProduction: canonical.country_of_origin?.trim() || 'Россия',
       brand: canonical.brand_name ?? 'Ручная работа',
       dimensions: { width: w, height: h, length: l, weightBrutto },
-      ...(canonical.wb_subject_id != null && canonical.wb_subject_id > 0
-        ? { subjectId: canonical.wb_subject_id }
-        : {}),
-      goods: [
-        {
-          nomenclature: 0,
-          variant: 0,
-          vendorCode: `${vendorCode}-1`,
-          characteristics,
-          weightBrutto,
-          length: l,
-          width: w,
-          height: h,
-        },
-      ],
+      subjectId: canonical.wb_subject_id,
+      goods: [good],
     };
+
+    // Добавляем фото если есть
+    if (canonical.images?.length) {
+      card.photos = canonical.images.map((img, idx) => ({
+        nomenclature: 0,
+        number: idx + 1,
+        url: img.url,
+      }));
+    }
+
     if (canonical.seo_title || canonical.seo_description || canonical.seo_keywords) {
       card.seoText = {
         title: canonical.seo_title ?? canonical.title,
@@ -223,6 +241,44 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
   }
 
   /**
+   * Генерация штрих-кодов на стороне WB.
+   * POST /content/v2/barcodes — создаёт уникальные штрих-коды для товаров.
+   * @param count Количество штрих-кодов для генерации (обычно 1)
+   * @returns Массив сгенерированных штрих-кодов
+   */
+  async generateBarcodes(count: number = 1): Promise<string[]> {
+    try {
+      const { data } = await firstValueFrom(
+        this.httpService.post<{ barcodes?: string[]; data?: string[] }>(
+          `${this.CONTENT_API}/content/v2/barcodes`,
+          { count },
+          {
+            headers: {
+              ...this.authHeader(),
+              'Content-Type': 'application/json',
+            },
+            timeout: 15000,
+          },
+        ),
+      );
+      const barcodes = data?.barcodes ?? data?.data ?? [];
+      if (barcodes.length === 0) {
+        console.warn('[WildberriesAdapter] generateBarcodes: пустой ответ от WB');
+      } else {
+        console.log(`[WildberriesAdapter] Сгенерировано ${barcodes.length} штрих-кодов: ${barcodes.join(', ')}`);
+      }
+      return barcodes;
+    } catch (error) {
+      this.logError(error, 'generateBarcodes');
+      const axErr = error as { response?: { status?: number; data?: { detail?: string; message?: string } } };
+      const status = axErr?.response?.status;
+      const wbMsg = axErr?.response?.data?.detail ?? axErr?.response?.data?.message;
+      const msg = wbMsg || (error instanceof Error ? error.message : 'Ошибка генерации штрих-кодов');
+      throw new Error(`Не удалось сгенерировать штрих-коды WB: ${msg}`);
+    }
+  }
+
+  /**
    * Выгрузка товара. Поддерживает как ProductData (legacy), так и CanonicalProduct через convertToPlatform.
    */
   async uploadProduct(product: ProductData): Promise<string> {
@@ -253,11 +309,24 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
 
   /**
    * Выгрузка на WB из канонической модели.
+   * Генерирует штрих-код на стороне WB перед созданием карточки.
    */
   async uploadFromCanonical(canonical: CanonicalProduct): Promise<string> {
     try {
-      const wbProduct = this.convertToPlatform(canonical);
+      // 1. Генерируем штрих-код на стороне WB
+      let barcode: string | undefined;
+      try {
+        const barcodes = await this.generateBarcodes(1);
+        barcode = barcodes[0];
+      } catch (barcodeErr) {
+        console.warn('[WildberriesAdapter] Не удалось сгенерировать штрих-код:', barcodeErr);
+        // Продолжаем без штрих-кода — WB может принять и без него
+      }
 
+      // 2. Формируем payload с штрих-кодом
+      const wbProduct = this.convertToPlatform(canonical, barcode);
+
+      // 3. Выгружаем карточку
       const { data } = await firstValueFrom(
         this.httpService.post(`${this.CONTENT_API}/content/v2/cards/upload`, wbProduct, {
           headers: {
