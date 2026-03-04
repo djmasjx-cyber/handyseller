@@ -2117,9 +2117,9 @@ export class MarketplacesService {
     const mapping: Array<{ our: string; wb: string; value: unknown }> = [
       { our: 'title', wb: 'Наименование (characteristics)', value: product.title },
       { our: 'article', wb: 'supplierVendorCode, vendorCode', value: product.article },
-      { our: 'price (Ваша цена)', wb: 'sizes[0].price', value: (product as { price?: number }).price },
-      { our: 'cost (Себестоимость)', wb: '— не передаётся', value: product.cost },
-      { our: 'wbSubjectId', wb: 'subjectId', value: (product as { wbSubjectId?: number }).wbSubjectId },
+      { our: 'price (Ваша цена)', wb: 'sizes[0].price', value: product.price != null ? Number(product.price) : null },
+      { our: 'cost (Себестоимость)', wb: '— не передаётся', value: product.cost != null ? Number(product.cost) : null },
+      { our: 'wbSubjectId', wb: 'subjectId', value: product.wbSubjectId },
       { our: 'imageUrl', wb: 'addin Фото', value: product.imageUrl },
       { our: 'brand', wb: 'brand', value: (product as { brand?: string }).brand ?? 'Ручная работа' },
     ];
