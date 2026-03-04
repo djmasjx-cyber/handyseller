@@ -363,6 +363,17 @@ export class MarketplacesService {
       if (!conn.token) continue;
       if (conn.marketplace === 'MANUAL') continue;
 
+      if (conn.marketplace === 'OZON' && !conn.warehouseId?.trim()) {
+        results.push({
+          marketplace: 'OZON',
+          success: false,
+          syncedCount: 0,
+          failedCount: products.length,
+          errors: ['ID склада Ozon не указан. Укажите склад в Маркетплейсы → Ozon → выберите склад и нажмите «Сохранить».'],
+        });
+        continue;
+      }
+
       const adapter = this.adapterFactory.createAdapter(conn.marketplace, {
         encryptedToken: conn.token,
         encryptedRefreshToken: conn.refreshToken,
@@ -482,14 +493,20 @@ export class MarketplacesService {
   }
 
   /** Обогатить products external ID из ProductMarketplaceMapping — для обновления при повторной выгрузке.
-   * userIds: текущий userId + linkedToUserId (для привязанных аккаунтов). */
+   * userIds: текущий userId + linkedToUserId (для привязанных аккаунтов).
+   * Для Ozon: включаем все активные связки (не только syncStock: true), чтобы остаток передавался по всем товарам со связкой. */
   private async enrichProductsWithMarketplaceMappings(
     userIds: string[],
     products: ProductData[],
     marketplace: 'WILDBERRIES' | 'OZON' | 'YANDEX' | 'AVITO',
   ): Promise<ProductData[]> {
     const mappings = await this.prisma.productMarketplaceMapping.findMany({
-      where: { userId: { in: userIds }, marketplace, isActive: true, syncStock: true },
+      where: {
+        userId: { in: userIds },
+        marketplace,
+        isActive: true,
+        ...(marketplace === 'WILDBERRIES' ? { syncStock: true } : {}),
+      },
     });
     const byProduct = new Map(mappings.map((m) => [m.productId, m]));
     return products.map((p) => {
@@ -1299,7 +1316,12 @@ export class MarketplacesService {
     if (!adapter || !(adapter instanceof WildberriesAdapter)) {
       throw new BadRequestException('Ошибка доступа к Wildberries');
     }
-    return adapter.getCategoryList();
+    try {
+      return await adapter.getCategoryList();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Не удалось загрузить категории WB';
+      throw new BadRequestException(msg);
+    }
   }
 
   /**
