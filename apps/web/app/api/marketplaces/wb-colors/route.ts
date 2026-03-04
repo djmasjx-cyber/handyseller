@@ -23,5 +23,3 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Сервер недоступен" }, { status: 500 })
   }
 }
-
-}
