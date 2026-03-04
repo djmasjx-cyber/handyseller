@@ -164,7 +164,8 @@ export default function ProductCardPage() {
     const hasOzonCategory = form.ozonCategoryId && form.ozonTypeId
     if (!hasOzonCategory) ozonMissingFields.push("Категория")
     if (!form.imageUrl?.trim() || !form.imageUrl.startsWith("http")) ozonMissingFields.push("Фото (URL)")
-    // Цена задаётся на Ozon — не требуем себестоимость
+    const priceVal = form.price ? parseFloat(form.price) : NaN
+    if (isNaN(priceVal) || priceVal < 20) ozonMissingFields.push("Ваша цена (₽)")
     const weightVal = form.weight ? parseInt(form.weight, 10) : NaN
     if (isNaN(weightVal) || weightVal <= 0) ozonMissingFields.push("Вес (г)")
     const widthVal = form.width ? parseInt(form.width, 10) : NaN
@@ -238,8 +239,8 @@ export default function ProductCardPage() {
       )
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
-        const errList = (data.errors as string[] | undefined) ?? (Array.isArray(data.message) ? data.message : [data.message || `Ошибка ${res.status}`])
-        setExportError(errList)
+        const errList = (data.errors as string[] | undefined) ?? (Array.isArray(data.message) ? data.message : [data.message || `Ошибка ${res.status}`].filter(Boolean))
+        setExportError(errList.length > 0 ? errList : [`Ошибка ${res.status}`])
         return
       }
       const results = Array.isArray(data) ? data : []
@@ -1213,6 +1214,7 @@ export default function ProductCardPage() {
                   value={form.price}
                   onChange={(e) => setForm((f) => ({ ...f, price: e.target.value }))}
                   placeholder="Минимум 20"
+                  className={ozonMissingFields.includes("Ваша цена (₽)") ? "border-destructive ring-destructive" : undefined}
                 />
                 <p className="text-xs text-muted-foreground">Ozon: мин. 20 ₽. При цене ≤400 скидка &gt;20%</p>
               </div>

@@ -72,10 +72,14 @@ export class AllExceptionsFilter implements ExceptionFilter {
         : status >= 500
           ? 'Internal server error'
           : message;
-    res.status(status).json({
-      statusCode: status,
-      message: clientMessage,
-      requestId,
-    });
+
+    const base = { statusCode: status, message: clientMessage, requestId };
+    const response =
+      exception instanceof HttpException ? exception.getResponse() : null;
+    const body =
+      typeof response === 'object' && response !== null
+        ? { ...base, ...(response as Record<string, unknown }) }
+        : base;
+    res.status(status).json(body);
   }
 }
