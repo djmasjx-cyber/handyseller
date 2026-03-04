@@ -489,7 +489,8 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
           await this.setStock(product.vendorCode ?? product.id, String(productId), product.stock);
         }
         if (productId) {
-          // Инициируем генерацию штрих-кода Ozon (OZN...) через API
+          // Инициируем генерацию штрих-кода Ozon (OZN...) — аналог кнопки «Сгенерировать» в ЛК Ozon
+          this.logger.log(`Озон: импорт успешен, product_id=${productId} — вызываем генерацию штрих-кода`);
           await this.generateBarcodes([String(productId)]);
           await new Promise((r) => setTimeout(r, 3000));
           return String(productId);
@@ -1063,6 +1064,7 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
       .map((id) => parseInt(String(id).trim(), 10))
       .filter((n) => !Number.isNaN(n));
     if (ids.length === 0) return;
+    this.logger.log(`Озон: запуск генерации штрих-кода (POST /v1/barcode/generate) для product_id=[${ids.join(', ')}]`);
     try {
       const { status, data } = await firstValueFrom(
         this.httpService.post(
@@ -1084,6 +1086,8 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
       const errors = data?.errors;
       if (Array.isArray(errors) && errors.length > 0) {
         this.logger.warn(`generateBarcodes: Ozon вернул ошибки: ${JSON.stringify(errors)}`);
+      } else if (status === 200) {
+        this.logger.log(`Озон: генерация штрих-кода успешно инициирована для product_id=[${ids.join(', ')}]`);
       }
     } catch (err) {
       this.logger.warn('generateBarcodes: ошибка вызова API (игнорируем, Ozon сгенерирует при импорте):', err);

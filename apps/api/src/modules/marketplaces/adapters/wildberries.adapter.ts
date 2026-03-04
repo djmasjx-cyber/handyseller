@@ -190,7 +190,7 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       const wbProduct = this.convertToPlatform(canonical);
 
       const { data } = await firstValueFrom(
-        this.httpService.post(`${this.CONTENT_API}/content/v2/upload`, wbProduct, {
+        this.httpService.post(`${this.CONTENT_API}/content/v2/cards/upload`, wbProduct, {
           headers: {
             ...this.authHeader(),
             'Content-Type': 'application/json',
@@ -210,7 +210,16 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       return String(data.cards[0].nmID);
     } catch (error) {
       this.logError(error, 'uploadProduct');
-      const msg = error instanceof Error ? error.message : String(error);
+      const axErr = error as { response?: { status?: number; data?: unknown } };
+      const status = axErr?.response?.status;
+      const wbData = axErr?.response?.data;
+      let msg = error instanceof Error ? error.message : String(error);
+      if (status === 404) {
+        msg = `HTTP 404 — endpoint не найден. Проверьте, что WB Content API доступен (content-api.wildberries.ru).`;
+      } else if (wbData && typeof wbData === 'object' && 'detail' in wbData) {
+        const detail = (wbData as { detail?: string }).detail;
+        if (detail) msg = detail;
+      }
       throw new Error(`Ошибка выгрузки товара на Wildberries: ${msg}`);
     }
   }
