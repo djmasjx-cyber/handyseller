@@ -104,6 +104,8 @@ export interface SyncResult {
   errors?: string[];
   /** Созданные связки: productId (наш) → externalSystemId (ID на маркетплейсе). externalArticle — артикул/offer_id для Ozon. */
   createdMappings?: Array<{ productId: string; externalSystemId: string; externalArticle?: string }>;
+  /** Ozon: обновлённые связки, когда offer_id получен из API (для старых товаров с пустым externalArticle). */
+  updatedMappings?: Array<{ productId: string; externalSystemId: string; externalArticle: string }>;
 }
 
 export interface MarketplaceConfig {

@@ -411,6 +411,16 @@ export class MarketplacesService {
             await this.saveBarcodeFromMarketplace(userId, m.productId, conn.marketplace, m.externalSystemId);
           }
         }
+        if (conn.marketplace === 'OZON' && result.updatedMappings?.length) {
+          for (const m of result.updatedMappings) {
+            await this.productMappingService.updateOzonMappingForUserIds(
+              m.productId,
+              ids,
+              m.externalSystemId,
+              m.externalArticle,
+            );
+          }
+        }
 
         await this.prisma.marketplaceConnection.update({
           where: { id: conn.id },
