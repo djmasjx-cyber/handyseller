@@ -128,13 +128,14 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       goods: [good],
     };
 
-    // Добавляем фото если есть
+    // Добавляем фото внутрь goods[0].addin (правильный формат WB)
     if (canonical.images?.length) {
-      card.photos = canonical.images.map((img, idx) => ({
-        nomenclature: 0,
-        number: idx + 1,
-        url: img.url,
-      }));
+      good.addin = (good.addin as unknown[] || []).concat(
+        canonical.images.map((img, idx) => ({
+          type: 'Фото',
+          params: [{ value: img.url, count: idx + 1 }],
+        }))
+      );
     }
 
     if (canonical.seo_title || canonical.seo_description || canonical.seo_keywords) {
@@ -327,6 +328,9 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       // 2. Формируем payload с штрих-кодом
       const wbProduct = this.convertToPlatform(canonical, barcode);
 
+      // Логируем полный запрос для отладки
+      console.log('[WildberriesAdapter] uploadFromCanonical REQUEST:', JSON.stringify(wbProduct, null, 2));
+
       // 3. Выгружаем карточку
       const { data } = await firstValueFrom(
         this.httpService.post(`${this.CONTENT_API}/content/v2/cards/upload`, wbProduct, {
@@ -336,6 +340,9 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
           },
         }),
       );
+
+      // Логируем ответ
+      console.log('[WildberriesAdapter] uploadFromCanonical RESPONSE:', JSON.stringify(data, null, 2));
 
       if (data?.cards?.[0]) {
         const nmId = Number(data.cards[0].nmID);
