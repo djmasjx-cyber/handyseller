@@ -122,4 +122,16 @@ export class UpdateProductDto {
   @IsString()
   @MaxLength(500)
   ozonCategoryPath?: string;
+
+  /** WB: subjectId из справочника категорий */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  wbSubjectId?: number;
+
+  /** WB: путь категории для отображения */
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  wbCategoryPath?: string;
 }

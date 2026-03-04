@@ -1284,6 +1284,25 @@ export class MarketplacesService {
   }
 
   /**
+   * Список категорий WB (subjects) для выбора при создании карточки.
+   */
+  async getWbCategoryList(userId: string): Promise<Array<{ subjectId: number; subjectName: string }>> {
+    const conn = await this.getMarketplaceConnection(userId, 'WILDBERRIES');
+    if (!conn?.token) throw new BadRequestException('Wildberries не подключён. Подключите в разделе Маркетплейсы.');
+    const adapter = this.adapterFactory.createAdapter('WILDBERRIES', {
+      encryptedToken: conn.token,
+      encryptedRefreshToken: conn.refreshToken,
+      encryptedStatsToken: conn.statsToken ?? undefined,
+      sellerId: conn.sellerId ?? undefined,
+      warehouseId: conn.warehouseId ?? undefined,
+    });
+    if (!adapter || !(adapter instanceof WildberriesAdapter)) {
+      throw new BadRequestException('Ошибка доступа к Wildberries');
+    }
+    return adapter.getCategoryList();
+  }
+
+  /**
    * Список складов Ozon (ID + название) для выбора при настройке подключения.
    */
   async getOzonWarehouseList(userId: string): Promise<Array<{ warehouse_id: number; name?: string }>> {

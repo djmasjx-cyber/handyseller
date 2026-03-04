@@ -41,6 +41,7 @@ export function productToCanonical(product: ProductWithRelations): CanonicalProd
     richContent?: string | null;
     ozonCategoryId?: number | null;
     ozonTypeId?: number | null;
+    wbSubjectId?: number | null;
     price?: number | null;
     oldPrice?: number | null;
   };
@@ -62,6 +63,7 @@ export function productToCanonical(product: ProductWithRelations): CanonicalProd
     package_contents: p.packageContents ?? undefined,
     ozon_category_id: p.ozonCategoryId ?? undefined,
     ozon_type_id: p.ozonTypeId ?? undefined,
+    wb_subject_id: p.wbSubjectId ?? undefined,
     title: product.title,
     seo_title: p.seoTitle ?? undefined,
     seo_keywords: p.seoKeywords ?? undefined,
@@ -110,6 +112,7 @@ export function canonicalToProductData(
   characteristics?: Record<string, unknown>;
   ozonCategoryId?: number;
   ozonTypeId?: number;
+  wbSubjectId?: number;
   barcodeOzon?: string;
   oldPrice?: number;
 } {
@@ -141,6 +144,7 @@ export function canonicalToProductData(
       : undefined,
     ozonCategoryId: canonical.ozon_category_id,
     ozonTypeId: canonical.ozon_type_id,
+    wbSubjectId: canonical.wb_subject_id,
     ...overrides,
   };
 }

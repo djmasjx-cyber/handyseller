@@ -6,6 +6,7 @@ import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitl
 import { ArrowLeft, Loader2, Package, Save, History } from "lucide-react"
 import Link from "next/link"
 import { OzonCategorySelectModal } from "@/components/ozon-category-select-modal"
+import { WbCategorySelectModal } from "@/components/wb-category-select-modal"
 
 interface Product {
   id: string
@@ -39,6 +40,8 @@ interface Product {
   ozonCategoryId?: number | null
   ozonTypeId?: number | null
   ozonCategoryPath?: string | null
+  wbSubjectId?: number | null
+  wbCategoryPath?: string | null
   marketplaceMappings?: { marketplace: string; externalSystemId: string }[]
 }
 
@@ -90,6 +93,8 @@ export default function ProductCardPage() {
     ozonCategoryId: "",
     ozonTypeId: "",
     ozonCategoryPath: "",
+    wbSubjectId: "",
+    wbCategoryPath: "",
   })
 
   const token = typeof window !== "undefined" ? localStorage.getItem("accessToken") : null
@@ -145,6 +150,8 @@ export default function ProductCardPage() {
           ozonCategoryId: p.ozonCategoryId != null ? String(p.ozonCategoryId) : "",
           ozonTypeId: p.ozonTypeId != null ? String(p.ozonTypeId) : "",
           ozonCategoryPath: p.ozonCategoryPath ?? "",
+          wbSubjectId: p.wbSubjectId != null ? String(p.wbSubjectId) : "",
+          wbCategoryPath: p.wbCategoryPath ?? "",
         })
       })
       .catch(() => setProduct(null))
@@ -158,6 +165,7 @@ export default function ProductCardPage() {
   const needsCategory = isOzonConnected || isWbConnected
 
   const ozonMissingFields: string[] = []
+  const wbMissingFields: string[] = []
   if (isOzonConnected) {
     if (!form.title?.trim()) ozonMissingFields.push("Название")
     if (!form.article?.trim()) ozonMissingFields.push("Артикул")
@@ -175,6 +183,9 @@ export default function ProductCardPage() {
     const heightVal = form.height ? parseInt(form.height, 10) : NaN
     if (isNaN(heightVal) || heightVal <= 0) ozonMissingFields.push("Высота (мм)")
   }
+  if (isWbConnected) {
+    if (!form.wbSubjectId?.trim()) wbMissingFields.push("Категория WB")
+  }
   const [loadingWbBarcode, setLoadingWbBarcode] = useState(false)
   const [loadingOzonBarcode, setLoadingOzonBarcode] = useState(false)
   const [ozonCheck, setOzonCheck] = useState<{ exists?: boolean; hint?: string; link?: string; name?: string; offer_id?: string; barcode?: string; debug?: { rawByProductId?: unknown; rawByOfferId?: unknown; offerIdsTried?: string[] } } | null>(null)
@@ -188,6 +199,7 @@ export default function ProductCardPage() {
   } | null>(null)
   const [loadingOzonPreview, setLoadingOzonPreview] = useState(false)
   const [ozonCategoryModalOpen, setOzonCategoryModalOpen] = useState(false)
+  const [wbCategoryModalOpen, setWbCategoryModalOpen] = useState(false)
   const [ozonDiagnostic, setOzonDiagnostic] = useState<{
     success?: boolean;
     error?: string;
@@ -221,6 +233,10 @@ export default function ProductCardPage() {
 
   const handleExportToMarketplace = async (marketplace: string) => {
     if (!token || !product?.id || exportLoadingMarketplace) return
+    if (marketplace === "WILDBERRIES" && wbMissingFields.length > 0) {
+      setExportError(["Перед выгрузкой на WB выберите категорию WB"])
+      return
+    }
     setExportLoadingMarketplace(marketplace)
     setExportError(null)
     const cfg = MARKETPLACE_BTN[marketplace]
@@ -490,6 +506,8 @@ export default function ProductCardPage() {
         ozonCategoryId: form.ozonCategoryId ? parseInt(form.ozonCategoryId, 10) : undefined,
         ozonTypeId: form.ozonTypeId ? parseInt(form.ozonTypeId, 10) : undefined,
         ozonCategoryPath: form.ozonCategoryPath?.trim() || undefined,
+        wbSubjectId: form.wbSubjectId ? parseInt(form.wbSubjectId, 10) : undefined,
+        wbCategoryPath: form.wbCategoryPath?.trim() || undefined,
       }
       const stockChanged = stock !== (product.stock ?? 0)
       const [patchRes, stockRes] = await Promise.all([
@@ -702,35 +720,60 @@ export default function ProductCardPage() {
               <p className="text-xs text-muted-foreground">Используется для поиска и при синхронизации с маркетплейсами.</p>
             </div>
             {needsCategory && (
-              <div className="space-y-2">
-                <Label>Категория {ozonMissingFields.includes("Категория") && "*"}</Label>
-                <div className="flex gap-2">
-                  <div
-                    className={`flex-1 min-h-[40px] px-3 py-2 rounded-md border bg-background text-sm flex items-center ${
-                      ozonMissingFields.includes("Категория") ? "border-destructive" : "border-input"
-                    }`}
-                  >
-                    {form.ozonCategoryPath || (
-                      <span className="text-muted-foreground">Не выбрана</span>
-                    )}
+              <>
+                {isOzonConnected && (
+                  <div className="space-y-2">
+                    <Label>Категория Ozon {ozonMissingFields.includes("Категория") && "*"}</Label>
+                    <div className="flex gap-2">
+                      <div
+                        className={`flex-1 min-h-[40px] px-3 py-2 rounded-md border bg-background text-sm flex items-center ${
+                          ozonMissingFields.includes("Категория") ? "border-destructive" : "border-input"
+                        }`}
+                      >
+                        {form.ozonCategoryPath || (
+                          <span className="text-muted-foreground">Не выбрана</span>
+                        )}
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setOzonCategoryModalOpen(true)}
+                        className="shrink-0 border-[#005BFF] text-[#005BFF] hover:bg-[#005BFF]/10"
+                      >
+                        Выбрать категорию
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">Ozon требует категорию третьего уровня.</p>
                   </div>
-                  {isOzonConnected && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setOzonCategoryModalOpen(true)}
-                      className="shrink-0 border-[#005BFF] text-[#005BFF] hover:bg-[#005BFF]/10"
-                    >
-                      Выбрать категорию
-                    </Button>
-                  )}
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  {isOzonConnected ? "Ozon требует категорию третьего уровня. " : ""}
-                  WB: категория при импорте.
-                </p>
-              </div>
+                )}
+                {isWbConnected && (
+                  <div className="space-y-2">
+                    <Label>Категория WB {wbMissingFields.includes("Категория WB") && "*"}</Label>
+                    <div className="flex gap-2">
+                      <div
+                        className={`flex-1 min-h-[40px] px-3 py-2 rounded-md border bg-background text-sm flex items-center ${
+                          wbMissingFields.includes("Категория WB") ? "border-destructive" : "border-input"
+                        }`}
+                      >
+                        {form.wbCategoryPath || (
+                          <span className="text-muted-foreground">Не выбрана</span>
+                        )}
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setWbCategoryModalOpen(true)}
+                        className="shrink-0 border-[#CB11AB] text-[#CB11AB] hover:bg-[#CB11AB]/10"
+                      >
+                        Выбрать категорию
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">WB требует предмет (subject) для выгрузки.</p>
+                  </div>
+                )}
+              </>
             )}
             <div className="space-y-2">
               <Label htmlFor="barcodeWb">Штрих-код WB</Label>
@@ -1335,6 +1378,39 @@ export default function ProductCardPage() {
                   ozonCategoryId,
                   ozonTypeId,
                   ozonCategoryPath,
+                }),
+              })
+              if (r.ok) {
+                const p = await r.json()
+                setProduct((prev) => (prev ? { ...prev, ...p } : prev))
+              }
+            } catch {
+              // Сохранение при выборе — бонус; форма обновлена
+            }
+          }
+        }}
+      />
+      <WbCategorySelectModal
+        open={wbCategoryModalOpen}
+        onOpenChange={setWbCategoryModalOpen}
+        token={token}
+        onSelect={async ({ wbSubjectId, wbCategoryPath }) => {
+          setForm((f) => ({
+            ...f,
+            wbSubjectId: String(wbSubjectId),
+            wbCategoryPath,
+          }))
+          if (token && product?.id) {
+            try {
+              const r = await fetch(`/api/products/${product.id}`, {
+                method: "PATCH",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({
+                  wbSubjectId,
+                  wbCategoryPath,
                 }),
               })
               if (r.ok) {

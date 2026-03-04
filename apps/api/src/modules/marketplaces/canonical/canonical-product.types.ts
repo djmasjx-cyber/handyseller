@@ -97,4 +97,6 @@ export interface CanonicalProduct {
   ozon_category_id?: number;
   /** Ozon: type_id */
   ozon_type_id?: number;
+  /** WB: subjectId из справочника категорий */
+  wb_subject_id?: number;
 }

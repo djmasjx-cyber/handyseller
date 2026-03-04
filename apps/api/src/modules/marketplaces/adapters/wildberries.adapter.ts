@@ -103,6 +103,9 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       countryProduction: canonical.country_of_origin?.trim() || 'Россия',
       brand: canonical.brand_name ?? 'Ручная работа',
       dimensions: { width: w, height: h, length: l, weightBrutto },
+      ...(canonical.wb_subject_id != null && canonical.wb_subject_id > 0
+        ? { subjectId: canonical.wb_subject_id }
+        : {}),
       goods: [
         {
           nomenclature: 0,
@@ -151,6 +154,34 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       this.logError(error, 'authenticate');
       return false;
     }
+  }
+
+  /**
+   * Список категорий WB (subjects) для выбора при создании карточки.
+   * GET /content/v2/object/all — плоский список subjectId + subjectName.
+   */
+  async getCategoryList(): Promise<Array<{ subjectId: number; subjectName: string }>> {
+    const { data } = await firstValueFrom(
+      this.httpService.get<Array<{ subjectId?: number; subjectName?: string; id?: number; name?: string }>>(
+        `${this.CONTENT_API}/content/v2/object/all`,
+        {
+          headers: this.authHeader(),
+          timeout: 15000,
+        },
+      ),
+    );
+    if (!Array.isArray(data)) return [];
+    return data
+      .map((item) => {
+        const subjectId = item.subjectId ?? item.id;
+        const subjectName = item.subjectName ?? item.name ?? '';
+        if (typeof subjectId === 'number' && subjectId > 0 && typeof subjectName === 'string') {
+          return { subjectId, subjectName };
+        }
+        return null;
+      })
+      .filter((x): x is { subjectId: number; subjectName: string } => x != null)
+      .sort((a, b) => a.subjectName.localeCompare(b.subjectName));
   }
 
   /**

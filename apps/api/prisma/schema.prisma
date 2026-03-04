@@ -134,6 +134,8 @@ model Product {
   ozonCategoryId   Int?    @map("ozon_category_id")   // Ozon: description_category_id из справочника
   ozonTypeId       Int?    @map("ozon_type_id")       // Ozon: type_id из справочника
   ozonCategoryPath String? @map("ozon_category_path") @db.VarChar(500) // Путь для отображения: "Хобби > Материал > Бусина"
+  wbSubjectId      Int?    @map("wb_subject_id")      // WB: subjectId из справочника /content/v2/object/all
+  wbCategoryPath   String? @map("wb_category_path")    @db.VarChar(500) // Путь WB для отображения
   archivedAt   DateTime? @map("archived_at") // Архивированный — не показывается в основном списке
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")

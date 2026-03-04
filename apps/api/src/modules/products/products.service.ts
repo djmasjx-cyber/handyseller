@@ -382,6 +382,9 @@ export class ProductsService {
       richContent?: string;
       ozonCategoryId?: number;
       ozonTypeId?: number;
+      ozonCategoryPath?: string;
+      wbSubjectId?: number;
+      wbCategoryPath?: string;
     },
   ) {
     const product = await this.findByArticleOrId(userId, productIdOrArticle);
@@ -408,10 +411,10 @@ export class ProductsService {
         if (isNaN(num) || num < 0) continue;
         newVal = num;
       }
-      if (['weight', 'width', 'length', 'height', 'itemsPerPack', 'ozonCategoryId', 'ozonTypeId'].includes(field)) {
+      if (['weight', 'width', 'length', 'height', 'itemsPerPack', 'ozonCategoryId', 'ozonTypeId', 'wbSubjectId'].includes(field)) {
         const num = Number(value);
         if (isNaN(num)) continue;
-        if (num < 0 && field !== 'ozonCategoryId' && field !== 'ozonTypeId') continue;
+        if (num < 0 && field !== 'ozonCategoryId' && field !== 'ozonTypeId' && field !== 'wbSubjectId') continue;
         newVal = num;
       }
       const oldStr = toStr(current);
@@ -431,7 +434,8 @@ export class ProductsService {
           field === 'countryOfOrigin' ||
           field === 'packageContents' ||
           field === 'richContent' ||
-          field === 'ozonCategoryPath') &&
+          field === 'ozonCategoryPath' ||
+          field === 'wbCategoryPath') &&
         typeof newVal === 'string' &&
         newVal === ''
       ) {
@@ -447,7 +451,7 @@ export class ProductsService {
     const syncRelevantFields = new Set([
       'title', 'description', 'cost', 'price', 'oldPrice', 'imageUrl', 'brand', 'weight', 'width', 'length', 'height',
       'color', 'material', 'craftType', 'countryOfOrigin', 'packageContents', 'richContent',
-      'itemsPerPack', 'ozonCategoryId', 'ozonTypeId', 'seoTitle', 'seoKeywords', 'seoDescription',
+      'itemsPerPack', 'ozonCategoryId', 'ozonTypeId', 'wbSubjectId', 'seoTitle', 'seoKeywords', 'seoDescription',
     ]);
     const shouldSyncToMarketplaces = Object.keys(updates).some((k) => syncRelevantFields.has(k));
     const updated = await this.prisma.$transaction(async (tx) => {

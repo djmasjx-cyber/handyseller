@@ -56,6 +56,8 @@ export interface ProductData {
   ozonCategoryId?: number;
   /** Ozon: type_id — тип товара в категории */
   ozonTypeId?: number;
+  /** WB: subjectId — для выбора категории при выгрузке */
+  wbSubjectId?: number;
   /** WB: sku вида WB-xxx-nmId (legacy). Связка через wbNmId. */
   sku?: string;
   /** WB: nm_id из ProductMarketplaceMapping. Приоритет над sku. */

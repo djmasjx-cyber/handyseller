@@ -255,6 +255,12 @@ export class MarketplacesController {
     return this.marketplacesService.getWbWarehouseList(userId);
   }
 
+  /** Список категорий WB (subjects) — для выбора категории товара */
+  @Get('wb/categories')
+  async getWbCategories(@CurrentUser('userId') userId: string) {
+    return this.marketplacesService.getWbCategoryList(userId);
+  }
+
   /** Атрибуты категории Ozon (по categoryId и typeId) */
   @Get('ozon/categories/attributes')
   async getOzonCategoryAttributes(
