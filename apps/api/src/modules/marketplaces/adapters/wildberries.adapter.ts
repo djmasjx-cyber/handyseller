@@ -197,7 +197,11 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
         }
 
         if (items.length < limit) hasMore = false;
-        else offset += limit;
+        else {
+          offset += limit;
+          // Задержка между запросами для соблюдения rate limiting WB (1 запрос в 500мс)
+          await new Promise((r) => setTimeout(r, 600));
+        }
       }
 
     const seen = new Set<number>();
