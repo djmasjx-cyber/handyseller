@@ -155,24 +155,6 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
   }
 
   /**
-   * Генерация EAN-13 для РФ (префикс 460) при отсутствии штрих-кода.
-   * Ozon требует barcode для v3 import.
-   */
-  private generateEan13(offerId: string): string {
-    let hash = 0;
-    for (let i = 0; i < offerId.length; i++) {
-      hash = (hash * 31 + offerId.charCodeAt(i)) >>> 0;
-    }
-    const base = '460' + String(Math.abs(hash) % 1e9).padStart(9, '0');
-    let sum = 0;
-    for (let i = 0; i < 12; i++) {
-      sum += (i % 2 === 0 ? 1 : 3) * parseInt(base[i], 10);
-    }
-    const check = (10 - (sum % 10)) % 10;
-    return base + String(check);
-  }
-
-  /**
    * Ozon offer_id: только буквы, цифры, дефис, подчёркивание. UUID не подходит.
    */
   private sanitizeOfferId(val: string): string {
@@ -287,10 +269,8 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
   } {
     const priceNum = Math.round(Number(product.price ?? 1));
     const offerId = this.sanitizeOfferId(product.vendorCode ?? `HS_${product.id.slice(0, 8)}`);
-    // Ozon требует barcode. Приоритет: barcodeOzon (из прошлой выгрузки) → barcode → EAN-13.
-    const barcode =
-      (product.barcodeOzon ?? product.barcode)?.trim() ||
-      this.generateEan13(product.vendorCode ?? product.id);
+    // Штрих-код: только если уже есть (barcodeOzon или barcode). Иначе не передаём — Ozon сгенерирует свой (OZN...).
+    const barcode = (product.barcodeOzon ?? product.barcode)?.trim() || undefined;
     const priceStr = String(priceNum);
     // Ozon требует скидку >20% при цене ≤400 (old_price > price / 0.8)
     // Если oldPrice указан вручную — используем его, иначе авторасчёт
@@ -333,7 +313,7 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
       type_id: typeId,
       name: (product.name || '').slice(0, 500),
       offer_id: offerId,
-      barcode,
+      ...(barcode ? { barcode } : {}),
       price: priceStr,
       old_price: oldPriceStr,
       vat: '0',
@@ -368,7 +348,7 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
     const mapping: Record<string, { our: unknown; ozon: unknown }> = {
       name: { our: product.name, ozon: item.name },
       offer_id: { our: product.vendorCode ?? product.id, ozon: offerId },
-      barcode: { our: product.barcodeOzon ?? product.barcode ?? '(EAN-13)', ozon: barcode },
+      barcode: { our: product.barcodeOzon ?? product.barcode ?? '(Ozon сгенерирует)', ozon: barcode ?? '(не передаём)' },
       price: { our: product.price ?? 1, ozon: priceStr },
       images: { our: product.images?.length ?? 0, ozon: validImages.length },
       weight: { our: product.weight ?? weight, ozon: weight },
@@ -509,8 +489,8 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
           await this.setStock(product.vendorCode ?? product.id, String(productId), product.stock);
         }
         if (productId) {
-          // Ozon автоматически генерирует штрих-код при импорте
-          // Ждём немного для обработки
+          // Инициируем генерацию штрих-кода Ozon (OZN...) через API
+          await this.generateBarcodes([String(productId)]);
           await new Promise((r) => setTimeout(r, 3000));
           return String(productId);
         }
@@ -1074,15 +1054,40 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
   }
 
   /**
-   * Генерация штрих-кодов Ozon.
-   * @deprecated Ozon автоматически генерирует штрих-код при импорте товара через /v3/product/import
-   * Метод устарел после удаления endpoint /v1/barcode/generate в декабре 2024
+   * Инициация генерации штрих-кодов Ozon (формат OZN...).
+   * POST /v1/barcode/generate — Ozon генерирует штрих-код на своей стороне.
+   * Если endpoint удалён (404/410) — Ozon сгенерирует штрих-код автоматически при импорте.
    */
   async generateBarcodes(productIds: string[]): Promise<void> {
-    // Метод устарел: Ozon автоматически генерирует штрих-код при импорте товара
-    // Документация: https://docs.ozon.ru/api/seller/#operation/ProductAPI_ProductsImportV3
-    this.logger.warn('generateBarcodes() вызван: штрих-код генерируется автоматически через /v3/product/import');
-    return Promise.resolve();
+    const ids = productIds
+      .map((id) => parseInt(String(id).trim(), 10))
+      .filter((n) => !Number.isNaN(n));
+    if (ids.length === 0) return;
+    try {
+      const { status, data } = await firstValueFrom(
+        this.httpService.post(
+          `${this.API_BASE}/v1/barcode/generate`,
+          { product_id: ids },
+          {
+            headers: this.ozonHeaders(),
+            timeout: 15000,
+            validateStatus: () => true,
+          },
+        ),
+      );
+      if (status === 404 || status === 410) {
+        this.logger.warn(
+          'generateBarcodes: endpoint /v1/barcode/generate недоступен (возможно удалён). Ozon сгенерирует штрих-код при импорте.',
+        );
+        return;
+      }
+      const errors = data?.errors;
+      if (Array.isArray(errors) && errors.length > 0) {
+        this.logger.warn(`generateBarcodes: Ozon вернул ошибки: ${JSON.stringify(errors)}`);
+      }
+    } catch (err) {
+      this.logger.warn('generateBarcodes: ошибка вызова API (игнорируем, Ozon сгенерирует при импорте):', err);
+    }
   }
 
   /**
