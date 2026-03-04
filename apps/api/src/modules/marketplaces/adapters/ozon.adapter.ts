@@ -487,10 +487,22 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
 
       // imported, processed — успешно создан; skipped — товар уже существует (повторная выгрузка)
       if (ozonStatus === 'imported' || ozonStatus === 'processed') {
-        if (productId && this.config.warehouseId) {
-          await this.setStock(product.vendorCode ?? product.id, String(productId), product.stock);
-        }
         if (productId) {
+          // Принудительно передаём остатки (даже если warehouseId не настроен — попробуем с дефолтным)
+          const stockToSend = typeof product.stock === 'number' ? product.stock : 0;
+          const offerId = product.vendorCode ?? product.id;
+          try {
+            if (this.config.warehouseId) {
+              await this.setStock(offerId, String(productId), stockToSend);
+              this.logger.log(`Озон: остатки отправлены для product_id=${productId}, stock=${stockToSend}`);
+            } else {
+              this.logger.warn(`Озон: warehouseId не настроен — остатки НЕ отправлены для product_id=${productId}. Настройте склад в настройках Ozon.`);
+            }
+          } catch (stockErr) {
+            this.logger.error(`Озон: ошибка отправки остатков для product_id=${productId}: ${stockErr instanceof Error ? stockErr.message : String(stockErr)}`);
+            // Не прерываем — товар уже создан, просто остатки не обновились
+          }
+
           // Ozon автоматически генерирует штрих-код (OZN...) при импорте, если barcode не передан
           // Ждём 5 секунд для завершения генерации на стороне Ozon
           this.logger.log(`Озон: импорт успешен, product_id=${productId} — штрих-код генерируется автоматически`);
@@ -505,6 +517,18 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
           productId = await this.findProductIdByOfferId(offerId);
         }
         if (productId) {
+          // Товар уже существует — обновляем остатки принудительно
+          const stockToSend = typeof product.stock === 'number' ? product.stock : 0;
+          try {
+            if (this.config.warehouseId) {
+              await this.setStock(offerId, String(productId), stockToSend);
+              this.logger.log(`Озон (skipped): остатки обновлены для product_id=${productId}, stock=${stockToSend}`);
+            } else {
+              this.logger.warn(`Озон (skipped): warehouseId не настроен — остатки НЕ обновлены для product_id=${productId}`);
+            }
+          } catch (stockErr) {
+            this.logger.error(`Озон (skipped): ошибка обновления остатков для product_id=${productId}: ${stockErr instanceof Error ? stockErr.message : String(stockErr)}`);
+          }
           return String(productId);
         }
       }
