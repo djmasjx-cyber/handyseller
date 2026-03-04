@@ -158,30 +158,64 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
 
   /**
    * Список категорий WB (subjects) для выбора при создании карточки.
-   * GET /content/v2/object/all — плоский список subjectId + subjectName.
+   * GET /content/v2/object/all — предметы второго уровня (limit 1000, пагинация по offset).
+   * Формат ответа WB: subjectID, subjectName (или subjectId, subjectName).
    */
   async getCategoryList(): Promise<Array<{ subjectId: number; subjectName: string }>> {
-    const { data } = await firstValueFrom(
-      this.httpService.get<Array<{ subjectId?: number; subjectName?: string; id?: number; name?: string }>>(
-        `${this.CONTENT_API}/content/v2/object/all`,
-        {
-          headers: this.authHeader(),
-          timeout: 15000,
-        },
-      ),
-    );
-    if (!Array.isArray(data)) return [];
-    return data
-      .map((item) => {
-        const subjectId = item.subjectId ?? item.id;
-        const subjectName = item.subjectName ?? item.name ?? '';
-        if (typeof subjectId === 'number' && subjectId > 0 && typeof subjectName === 'string') {
-          return { subjectId, subjectName };
+    const all: Array<{ subjectId: number; subjectName: string }> = [];
+    const limit = 1000;
+    let offset = 0;
+    let hasMore = true;
+
+    try {
+      while (hasMore) {
+        const { data } = await firstValueFrom(
+          this.httpService.get<unknown>(
+            `${this.CONTENT_API}/content/v2/object/all`,
+            {
+              headers: this.authHeader(),
+              timeout: 20000,
+              params: { limit, offset },
+            },
+          ),
+        );
+
+        const raw = Array.isArray(data) ? data
+          : (data && typeof data === 'object')
+            ? (data as Record<string, unknown>).data ?? (data as Record<string, unknown>).result ?? (data as Record<string, unknown>).items ?? null
+            : null;
+        const items = Array.isArray(raw) ? raw : [];
+
+        for (const item of items) {
+          const obj = item && typeof item === 'object' ? item as Record<string, unknown> : null;
+          if (!obj) continue;
+          const subjectId = (obj.subjectID ?? obj.subjectId ?? obj.id) as number | undefined;
+          const subjectName = (obj.subjectName ?? obj.name ?? obj.subject) as string | undefined;
+          if (typeof subjectId === 'number' && subjectId > 0 && typeof subjectName === 'string' && subjectName) {
+            all.push({ subjectId, subjectName });
+          }
         }
-        return null;
+
+        if (items.length < limit) hasMore = false;
+        else offset += limit;
+      }
+
+    const seen = new Set<number>();
+    return all
+      .filter((x) => {
+        if (seen.has(x.subjectId)) return false;
+        seen.add(x.subjectId);
+        return true;
       })
-      .filter((x): x is { subjectId: number; subjectName: string } => x != null)
-      .sort((a, b) => a.subjectName.localeCompare(b.subjectName));
+      .sort((a, b) => a.subjectName.localeCompare(b.subjectName, 'ru'));
+    } catch (err) {
+      const axErr = err as { response?: { status?: number; data?: { detail?: string; message?: string } } };
+      const status = axErr?.response?.status;
+      const wbMsg = axErr?.response?.data?.detail ?? axErr?.response?.data?.message;
+      const msg = wbMsg || (err instanceof Error ? err.message : `Ошибка WB API`);
+      console.warn('[WildberriesAdapter] getCategoryList failed:', status, wbMsg || err);
+      throw new Error(`Не удалось загрузить категории WB: ${msg}`);
+    }
   }
 
   /**

@@ -32,7 +32,14 @@ export function WbCategorySelectModal({
     fetch("/api/marketplaces/wb/categories", {
       headers: { Authorization: `Bearer ${token}` },
     })
-      .then((r) => r.json())
+      .then(async (r) => {
+        const data = await r.json().catch(() => ({}))
+        if (!r.ok) {
+          const msg = (data as { message?: string | string[] }).message ?? (data as { error?: string }).error ?? `Ошибка ${r.status}`
+          throw new Error(Array.isArray(msg) ? msg.join(". ") : String(msg))
+        }
+        return data
+      })
       .then((data) => {
         if (Array.isArray(data)) {
           setList(
@@ -45,7 +52,7 @@ export function WbCategorySelectModal({
           setList([])
         }
       })
-      .catch(() => setError("Не удалось загрузить категории WB"))
+      .catch((err) => setError(err instanceof Error ? err.message : "Не удалось загрузить категории WB"))
       .finally(() => setLoading(false))
   }, [open, token])
 
