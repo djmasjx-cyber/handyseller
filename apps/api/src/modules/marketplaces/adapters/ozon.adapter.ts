@@ -40,6 +40,8 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
   private readonly logger = new Logger(OzonAdapter.name);
   private readonly API_BASE = 'https://api-seller.ozon.ru';
   private readonly httpService: HttpService;
+  /** Последний offer_id, полученный из Ozon API при setStock — для обновления маппинга. */
+  private lastStockOfferIdResolved?: { productId: string; externalSystemId: string; offerId: string };
 
   constructor(
     crypto: CryptoService,
@@ -489,10 +491,10 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
           await this.setStock(product.vendorCode ?? product.id, String(productId), product.stock);
         }
         if (productId) {
-          // Инициируем генерацию штрих-кода Ozon (OZN...) — аналог кнопки «Сгенерировать» в ЛК Ozon
-          this.logger.log(`Озон: импорт успешен, product_id=${productId} — вызываем генерацию штрих-кода`);
-          await this.generateBarcodes([String(productId)]);
-          await new Promise((r) => setTimeout(r, 3000));
+          // Ozon автоматически генерирует штрих-код (OZN...) при импорте, если barcode не передан
+          // Ждём 5 секунд для завершения генерации на стороне Ozon
+          this.logger.log(`Озон: импорт успешен, product_id=${productId} — штрих-код генерируется автоматически`);
+          await new Promise((r) => setTimeout(r, 5000));
           return String(productId);
         }
       }
@@ -749,14 +751,29 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
       };
 
       // Остаток: по product_id и offer_id (offer_id нужен для склада)
+      // Для старых товаров externalArticle в маппинге может быть пустым или не совпадать с Ozon.
+      // Получаем фактический offer_id через API — гарантирует корректную передачу остатков.
       if (product.stock !== undefined) {
         if (!this.config.warehouseId || !this.config.sellerId) {
           throw new Error(
             'Для обновления остатков Ozon укажите ID склада в настройках подключения (Маркетплейсы → Ozon → Склад).',
           );
         }
-        const rawOffer = (product.vendorCode ?? product.id ?? '').toString();
-        const offerId = rawOffer ? this.sanitizeOfferId(rawOffer) : `HS_${(product.id ?? '').toString().slice(0, 8)}`;
+        this.lastStockOfferIdResolved = undefined;
+        let offerId: string;
+        const ozonInfo = await this.getProductInfoByProductId(marketplaceProductId);
+        const actualOfferId = (ozonInfo?.offer_id ?? '').toString().trim();
+        if (actualOfferId) {
+          offerId = this.sanitizeOfferId(actualOfferId);
+          this.lastStockOfferIdResolved = {
+            productId: (product.id ?? '').toString(),
+            externalSystemId: marketplaceProductId,
+            offerId,
+          };
+        } else {
+          const rawOffer = (product.vendorCode ?? product.id ?? '').toString();
+          offerId = rawOffer ? this.sanitizeOfferId(rawOffer) : `HS_${(product.id ?? '').toString().slice(0, 8)}`;
+        }
         await this.setStock(offerId, marketplaceProductId, product.stock);
       }
 
@@ -1055,43 +1072,18 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
   }
 
   /**
-   * Инициация генерации штрих-кодов Ozon (формат OZN...).
-   * POST /v1/barcode/generate — Ozon генерирует штрих-код на своей стороне.
-   * Если endpoint удалён (404/410) — Ozon сгенерирует штрих-код автоматически при импорте.
+   * @deprecated Метод устарел. Ozon автоматически генерирует штрих-код (OZN...) при импорте товара
+   * через /v3/product/import, если поле barcode не передано. Ручной вызов генерации не требуется.
+   * Endpoint /v1/barcode/generate удалён Ozon в 2024 году.
    */
   async generateBarcodes(productIds: string[]): Promise<void> {
-    const ids = productIds
-      .map((id) => parseInt(String(id).trim(), 10))
-      .filter((n) => !Number.isNaN(n));
-    if (ids.length === 0) return;
-    this.logger.log(`Озон: запуск генерации штрих-кода (POST /v1/barcode/generate) для product_id=[${ids.join(', ')}]`);
-    try {
-      const { status, data } = await firstValueFrom(
-        this.httpService.post(
-          `${this.API_BASE}/v1/barcode/generate`,
-          { product_id: ids },
-          {
-            headers: this.ozonHeaders(),
-            timeout: 15000,
-            validateStatus: () => true,
-          },
-        ),
-      );
-      if (status === 404 || status === 410) {
-        this.logger.warn(
-          'generateBarcodes: endpoint /v1/barcode/generate недоступен (возможно удалён). Ozon сгенерирует штрих-код при импорте.',
-        );
-        return;
-      }
-      const errors = data?.errors;
-      if (Array.isArray(errors) && errors.length > 0) {
-        this.logger.warn(`generateBarcodes: Ozon вернул ошибки: ${JSON.stringify(errors)}`);
-      } else if (status === 200) {
-        this.logger.log(`Озон: генерация штрих-кода успешно инициирована для product_id=[${ids.join(', ')}]`);
-      }
-    } catch (err) {
-      this.logger.warn('generateBarcodes: ошибка вызова API (игнорируем, Ozon сгенерирует при импорте):', err);
-    }
+    this.logger.warn(
+      `generateBarcodes(${productIds.length} items): метод устарел. ` +
+      'Ozon автоматически генерирует штрих-код при импорте. ' +
+      'Документация: https://docs.ozon.ru/api/seller/#operation/ProductAPI_ProductsImportV3'
+    );
+    // Нет необходимости вызывать API — Ozon генерирует штрих-код автоматически
+    return Promise.resolve();
   }
 
   /**
@@ -1376,6 +1368,15 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
           const ok = await this.updateProduct(product.ozonProductId, product);
           if (ok) {
             result.syncedCount++;
+            if (this.lastStockOfferIdResolved?.productId === product.id) {
+              result.updatedMappings = result.updatedMappings ?? [];
+              result.updatedMappings.push({
+                productId: this.lastStockOfferIdResolved.productId,
+                externalSystemId: this.lastStockOfferIdResolved.externalSystemId,
+                externalArticle: this.lastStockOfferIdResolved.offerId,
+              });
+              this.lastStockOfferIdResolved = undefined;
+            }
           } else {
             result.failedCount++;
             result.errors?.push(`Товар ${product.name}: ошибка обновления на Ozon`);
