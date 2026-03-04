@@ -724,6 +724,8 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
     if (isNaN(warehouseIdNum) || warehouseIdNum <= 0) {
       throw new Error(`Некорректный warehouse_id: ${warehouseId}. Получите ID через «Загрузить склады» в настройках Ozon.`);
     }
+    // Уникальный ID запроса для обхода дедупликации Ozon
+    const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const body = {
       stocks: [
         {
@@ -731,11 +733,14 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
           product_id: Number(productId),
           stock,
           warehouse_id: warehouseIdNum,
+          // Уникальный ID для каждого запроса — Ozon не дедуплицирует
+          update_uid: requestId,
         },
       ],
     };
     try {
-      await firstValueFrom(
+      this.logger.log(`Ozon setStock: отправка stock=${stock} для product_id=${productId}, requestId=${requestId}`);
+      const { data } = await firstValueFrom(
         this.httpService.post(
           `${this.API_BASE}/v2/products/stocks`,
           body,
@@ -748,6 +753,7 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
           },
         ),
       );
+      this.logger.log(`Ozon setStock: успешно для product_id=${productId}, response=${JSON.stringify(data)}`);
     } catch (error) {
       const ozonMsg = this.extractOzonErrorFromAxios(error);
       this.logError(error, 'setStock');
