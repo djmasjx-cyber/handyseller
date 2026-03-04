@@ -362,6 +362,15 @@ export class MarketplacesController {
     return this.marketplacesService.validateProductForWb(product);
   }
 
+  /** Предпросмотр выгрузки на WB: payload и маппинг полей */
+  @Get('wb-export-preview/:productId')
+  async getWbExportPreview(
+    @CurrentUser('userId') userId: string,
+    @Param('productId') productId: string,
+  ) {
+    return this.marketplacesService.getWbExportPreview(userId, productId);
+  }
+
   /** Диагностика выгрузки: попытка импорта с полным ответом Ozon при ошибке */
   @Post('ozon-export-diagnostic/:productId')
   async getOzonExportDiagnostic(

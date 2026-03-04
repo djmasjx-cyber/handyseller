@@ -192,6 +192,14 @@ export default function ProductCardPage() {
     if (isNaN(wbPriceVal) || wbPriceVal <= 0) wbMissingFields.push("Ваша цена (₽)")
   }
   const [loadingWbBarcode, setLoadingWbBarcode] = useState(false)
+  const [wbPreview, setWbPreview] = useState<{
+    payload?: Record<string, unknown>;
+    mapping?: Array<{ our: string; wb: string; value: unknown }>;
+    validation?: { valid: boolean; errors?: string[] };
+    fieldMappingNote?: string;
+    error?: string;
+  } | null>(null)
+  const [loadingWbPreview, setLoadingWbPreview] = useState(false)
   const [loadingOzonBarcode, setLoadingOzonBarcode] = useState(false)
   const [ozonCheck, setOzonCheck] = useState<{ exists?: boolean; hint?: string; link?: string; name?: string; offer_id?: string; barcode?: string; debug?: { rawByProductId?: unknown; rawByOfferId?: unknown; offerIdsTried?: string[] } } | null>(null)
   const [ozonPreview, setOzonPreview] = useState<{
@@ -336,6 +344,21 @@ export default function ProductCardPage() {
       setOzonPreview({ error: "Ошибка запроса" })
     } finally {
       setLoadingOzonPreview(false)
+    }
+  }
+
+  const loadWbPreview = async () => {
+    if (!token || !product?.id || loadingWbPreview) return
+    setLoadingWbPreview(true)
+    setWbPreview(null)
+    try {
+      const r = await fetch(`/api/marketplaces/wb-export-preview/${product.id}`, { headers: { Authorization: `Bearer ${token}` } })
+      const data = await r.json().catch(() => ({}))
+      setWbPreview(data)
+    } catch {
+      setWbPreview({ error: "Ошибка запроса" })
+    } finally {
+      setLoadingWbPreview(false)
     }
   }
 
@@ -774,8 +797,49 @@ export default function ProductCardPage() {
                       >
                         Выбрать категорию
                       </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={loadWbPreview}
+                        disabled={loadingWbPreview}
+                        className="shrink-0 h-8 px-2 text-xs touch-manipulation text-[#CB11AB]"
+                        title="Что уйдёт на WB, маппинг полей"
+                      >
+                        {loadingWbPreview ? <Loader2 className="h-4 w-4 animate-spin" /> : "Предпросмотр WB"}
+                      </Button>
                     </div>
-                    <p className="text-xs text-muted-foreground">WB требует предмет (subject) для выгрузки.</p>
+                    <p className="text-xs text-muted-foreground">WB требует предмет (subject) для выгрузки. На WB передаётся «Ваша цена», не себестоимость.</p>
+                    {wbPreview && (
+                      <div className="rounded-lg border border-[#CB11AB]/30 p-2 text-xs bg-[#CB11AB]/5 space-y-2 mt-2">
+                        {wbPreview.error ? (
+                          <p className="text-destructive">{wbPreview.error}</p>
+                        ) : (
+                          <>
+                            {wbPreview.fieldMappingNote && <p className="text-muted-foreground italic">{wbPreview.fieldMappingNote}</p>}
+                            {wbPreview.mapping && (
+                              <details className="cursor-pointer">
+                                <summary className="font-medium">Маппинг полей</summary>
+                                <ul className="mt-1 space-y-0.5">
+                                  {wbPreview.mapping.map((m, i) => (
+                                    <li key={i}><span className="text-muted-foreground">{m.our}</span> → {m.wb}: <code>{JSON.stringify(m.value)}</code></li>
+                                  ))}
+                                </ul>
+                              </details>
+                            )}
+                            {wbPreview.validation && !wbPreview.validation.valid && (
+                              <p className="text-amber-600 dark:text-amber-400">Заполните: {wbPreview.validation.errors?.join(", ")}</p>
+                            )}
+                            {wbPreview.payload && (
+                              <details className="cursor-pointer">
+                                <summary className="font-medium">Payload (JSON)</summary>
+                                <pre className="mt-2 p-2 bg-black/5 rounded text-[10px] overflow-auto max-h-48 whitespace-pre-wrap">{JSON.stringify(wbPreview.payload, null, 2)}</pre>
+                              </details>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </>
@@ -1250,6 +1314,7 @@ export default function ProductCardPage() {
                 value={form.cost}
                 onChange={(e) => setForm((f) => ({ ...f, cost: e.target.value }))}
               />
+              <p className="text-xs text-muted-foreground">Для аналитики. На WB и Ozon не передаётся.</p>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
@@ -1262,9 +1327,9 @@ export default function ProductCardPage() {
                   value={form.price}
                   onChange={(e) => setForm((f) => ({ ...f, price: e.target.value }))}
                   placeholder="Минимум 20"
-                  className={ozonMissingFields.includes("Ваша цена (₽)") ? "border-destructive ring-destructive" : undefined}
+                  className={ozonMissingFields.includes("Ваша цена (₽)") || wbMissingFields.includes("Ваша цена (₽)") ? "border-destructive ring-destructive" : undefined}
                 />
-                <p className="text-xs text-muted-foreground">Ozon: мин. 20 ₽. При цене ≤400 скидка &gt;20%</p>
+                <p className="text-xs text-muted-foreground">WB: sizes[0].price. Ozon: price. Мин. 20 ₽.</p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="oldPrice">Цена до скидки, ₽</Label>

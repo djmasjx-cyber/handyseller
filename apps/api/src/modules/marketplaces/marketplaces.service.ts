@@ -2078,6 +2078,59 @@ export class MarketplacesService {
     };
   }
 
+  /**
+   * Предпросмотр выгрузки на WB: payload, маппинг полей.
+   * GET /api/marketplaces/wb-export-preview/:productId
+   */
+  async getWbExportPreview(userId: string, productId: string) {
+    const product = await this.productsService.findByIdWithMappings(userId, productId);
+    if (!product) throw new BadRequestException('Товар не найден');
+    const conn = await this.getMarketplaceConnection(userId, 'WILDBERRIES');
+    if (!conn?.token) {
+      return { error: 'Wildberries не подключён. Подключите в разделе Маркетплейсы.' };
+    }
+    const adapter = this.adapterFactory.createAdapter('WILDBERRIES', {
+      encryptedToken: conn.token,
+      encryptedRefreshToken: conn.refreshToken,
+      encryptedStatsToken: conn.statsToken,
+      sellerId: conn.sellerId ?? undefined,
+      warehouseId: conn.warehouseId ?? undefined,
+    });
+    if (!adapter || !(adapter instanceof WildberriesAdapter)) {
+      return { error: 'Ошибка доступа к WB' };
+    }
+    const canonical = productToCanonical(product);
+    let wbCharcs: Array<{ charcID: number; name: string; required?: boolean }> | undefined;
+    if (canonical.wb_subject_id && canonical.wb_subject_id > 0) {
+      wbCharcs = await adapter.getCharcsForSubject(canonical.wb_subject_id);
+    }
+    const barcodePlaceholder = '0000000000000'; // для предпросмотра, реальный генерируется при выгрузке
+    let payload: Record<string, unknown>;
+    try {
+      payload = adapter.convertToPlatform(canonical, barcodePlaceholder, wbCharcs) as Record<string, unknown>;
+    } catch (err) {
+      return {
+        error: err instanceof Error ? err.message : String(err),
+        validation: this.validateProductForWb(product),
+      };
+    }
+    const mapping: Array<{ our: string; wb: string; value: unknown }> = [
+      { our: 'title', wb: 'Наименование (characteristics)', value: product.title },
+      { our: 'article', wb: 'supplierVendorCode, vendorCode', value: product.article },
+      { our: 'price (Ваша цена)', wb: 'sizes[0].price', value: (product as { price?: number }).price },
+      { our: 'cost (Себестоимость)', wb: '— не передаётся', value: product.cost },
+      { our: 'wbSubjectId', wb: 'subjectId', value: (product as { wbSubjectId?: number }).wbSubjectId },
+      { our: 'imageUrl', wb: 'addin Фото', value: product.imageUrl },
+      { our: 'brand', wb: 'brand', value: (product as { brand?: string }).brand ?? 'Ручная работа' },
+    ];
+    return {
+      payload,
+      mapping,
+      validation: this.validateProductForWb(product),
+      fieldMappingNote: 'На WB передаётся только price (Ваша цена). cost (Себестоимость) не используется.',
+    };
+  }
+
   /** Отладка: проверить статус заказа 4645532575 на стороне WB */
   async getWbOrderStatus(userId: string, orderIdOrSrid: string) {
     const conn = await this.getMarketplaceConnection(userId, 'WILDBERRIES');
