@@ -184,7 +184,12 @@ export default function ProductCardPage() {
     if (isNaN(heightVal) || heightVal <= 0) ozonMissingFields.push("Высота (мм)")
   }
   if (isWbConnected) {
+    if (!form.title?.trim()) wbMissingFields.push("Название")
+    if (!form.article?.trim()) wbMissingFields.push("Артикул")
     if (!form.wbSubjectId?.trim()) wbMissingFields.push("Категория WB")
+    if (!form.imageUrl?.trim() || !form.imageUrl.startsWith("http")) wbMissingFields.push("Фото (URL)")
+    const wbPriceVal = form.price ? parseFloat(form.price) : NaN
+    if (isNaN(wbPriceVal) || wbPriceVal <= 0) wbMissingFields.push("Ваша цена (₽)")
   }
   const [loadingWbBarcode, setLoadingWbBarcode] = useState(false)
   const [loadingOzonBarcode, setLoadingOzonBarcode] = useState(false)
@@ -234,7 +239,7 @@ export default function ProductCardPage() {
   const handleExportToMarketplace = async (marketplace: string) => {
     if (!token || !product?.id || exportLoadingMarketplace) return
     if (marketplace === "WILDBERRIES" && wbMissingFields.length > 0) {
-      setExportError(["Перед выгрузкой на WB выберите категорию WB"])
+      setExportError([`Перед выгрузкой на WB заполните: ${wbMissingFields.join(", ")}`])
       return
     }
     setExportLoadingMarketplace(marketplace)

@@ -155,6 +155,25 @@ export class MarketplacesController {
       }
     }
 
+    if (marketplace === 'WILDBERRIES' && products.length > 0) {
+      const validationErrors: string[] = [];
+      for (const p of products) {
+        const dbProduct = await this.productsService.findById(userId, p.id);
+        if (dbProduct) {
+          const v = this.marketplacesService.validateProductForWb(dbProduct);
+          if (!v.valid) {
+            validationErrors.push(`${p.name || 'Товар'}: ${v.errors.join('; ')}`);
+          }
+        }
+      }
+      if (validationErrors.length > 0) {
+        throw new BadRequestException({
+          message: 'Перед выгрузкой на WB заполните обязательные поля',
+          errors: validationErrors,
+        });
+      }
+    }
+
     if (asyncMode === '1' || asyncMode === 'true') {
       return this.syncQueueService.addSyncJob(userId, products, marketplace);
     }
@@ -330,6 +349,17 @@ export class MarketplacesController {
     const product = await this.productsService.findById(userId, productId);
     if (!product) throw new BadRequestException('Товар не найден');
     return this.marketplacesService.validateProductForOzon(product);
+  }
+
+  /** Валидация перед выгрузкой на WB: обязательные поля */
+  @Get('wb-validate/:productId')
+  async validateForWb(
+    @CurrentUser('userId') userId: string,
+    @Param('productId') productId: string,
+  ) {
+    const product = await this.productsService.findById(userId, productId);
+    if (!product) throw new BadRequestException('Товар не найден');
+    return this.marketplacesService.validateProductForWb(product);
   }
 
   /** Диагностика выгрузки: попытка импорта с полным ответом Ozon при ошибке */

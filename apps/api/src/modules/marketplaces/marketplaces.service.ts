@@ -1433,6 +1433,32 @@ export class MarketplacesService {
   }
 
   /**
+   * Проверка перед выгрузкой на WB: обязательные поля.
+   * Маппинг: title→Наименование, article→supplierVendorCode, imageUrl→Фото, wbSubjectId→subjectId.
+   */
+  validateProductForWb(product: {
+    title?: string | null;
+    imageUrl?: string | null;
+    price?: unknown;
+    article?: string | null;
+    sku?: string | null;
+    wbSubjectId?: number | null;
+  }): { valid: boolean; errors: string[] } {
+    const errors: string[] = [];
+    if (!product.title?.trim()) errors.push('Укажите название товара');
+    if (!product.imageUrl?.trim() || !product.imageUrl.startsWith('http'))
+      errors.push('Добавьте URL фото товара (WB требует хотя бы одно изображение)');
+    const price = product.price != null ? Number(product.price) : NaN;
+    if (isNaN(price) || price <= 0) errors.push('Укажите «Вашу цену» (WB: price в sizes)');
+    const article = (product.article ?? product.sku ?? '').toString().trim();
+    if (!article) errors.push('Укажите артикул (vendor code) — обязателен для WB');
+    const subjectId = product.wbSubjectId != null ? Number(product.wbSubjectId) : NaN;
+    if (isNaN(subjectId) || subjectId <= 0)
+      errors.push('Выберите категорию WB (обязательное поле для выгрузки)');
+    return { valid: errors.length === 0, errors };
+  }
+
+  /**
    * Проверить, создана ли карточка товара на Ozon. GET /api/marketplaces/ozon-check/:productIdOrArticle
    * productIdOrArticle: UUID, displayId или артикул (edc002).
    */

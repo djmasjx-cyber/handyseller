@@ -474,17 +474,28 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
         const parts: string[] = [];
         if (typeof wbData.detail === 'string') parts.push(wbData.detail);
         if (typeof wbData.message === 'string') parts.push(wbData.message);
-        const errs = wbData.errors ?? wbData.Errors;
+        if (typeof wbData.title === 'string') parts.push(wbData.title);
+        const errs = wbData.errors ?? wbData.Errors ?? wbData.error;
         if (Array.isArray(errs) && errs.length > 0) {
-          const first = errs[0];
-          const errMsg = typeof first === 'string' ? first : (first && typeof first === 'object' && 'message' in first ? (first as { message?: string }).message : null);
-          if (errMsg) parts.push(errMsg);
+          for (const e of errs) {
+            const s = typeof e === 'string' ? e : (e && typeof e === 'object' && 'message' in e ? (e as { message?: string }).message : null);
+            if (s?.trim()) parts.push(s.trim());
+          }
+        } else if (typeof errs === 'string' && errs.trim()) {
+          parts.push(errs.trim());
         }
-        if (parts.length > 0) msg = parts.join('. ');
+        const dataErr = wbData.data as Record<string, unknown> | undefined;
+        if (dataErr && typeof dataErr === 'object' && Array.isArray(dataErr.errors)) {
+          for (const e of dataErr.errors) {
+            const s = typeof e === 'string' ? e : (e && typeof e === 'object' && 'message' in e ? (e as { message?: string }).message : null);
+            if (s?.trim()) parts.push(s.trim());
+          }
+        }
+        if (parts.length > 0) msg = [...new Set(parts)].join('. ');
         if (status === 400) {
           console.warn('[WildberriesAdapter] uploadProduct 400:', JSON.stringify(wbData));
           if (!msg || msg.includes('status code')) {
-            msg = parts.length > 0 ? parts.join('. ') : 'HTTP 400 — неверный формат. Проверьте категорию WB, фото и обязательные поля.';
+            msg = parts.length > 0 ? msg : 'HTTP 400 — неверный формат. Выберите категорию WB, добавьте фото и заполните обязательные поля (название, артикул, габариты, вес).';
           }
         }
       }
