@@ -58,6 +58,16 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
   }
 
   convertToPlatform(canonical: CanonicalProduct, barcode?: string): PlatformProductPayload {
+    // Логируем входные данные для отладки
+    console.log('[WildberriesAdapter] convertToPlatform INPUT:', {
+      canonical_sku: canonical.canonical_sku,
+      title: canonical.title,
+      wb_subject_id: canonical.wb_subject_id,
+      vendor_code: canonical.vendor_code,
+      images_count: canonical.images?.length ?? 0,
+      barcode: barcode ?? 'не сгенерирован',
+    });
+
     const vendorCode = canonical.vendor_code ?? canonical.canonical_sku;
     const plainDesc = canonical.long_description_plain ?? canonical.short_description ?? '';
     const richDesc = canonical.long_description_html?.trim();
@@ -283,6 +293,15 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
    * Выгрузка товара. Поддерживает как ProductData (legacy), так и CanonicalProduct через convertToPlatform.
    */
   async uploadProduct(product: ProductData): Promise<string> {
+    // Логируем входные данные ProductData
+    console.log('[WildberriesAdapter] uploadProduct ProductData:', {
+      id: product.id,
+      name: product.name,
+      wbSubjectId: product.wbSubjectId,
+      vendorCode: product.vendorCode,
+      imagesCount: product.images?.length ?? 0,
+    });
+
     const canonical: CanonicalProduct = {
       canonical_sku: product.id,
       vendor_code: product.vendorCode ?? product.id,
