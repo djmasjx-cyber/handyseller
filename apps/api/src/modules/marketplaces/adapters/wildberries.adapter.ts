@@ -212,13 +212,27 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       this.logError(error, 'uploadProduct');
       const axErr = error as { response?: { status?: number; data?: unknown } };
       const status = axErr?.response?.status;
-      const wbData = axErr?.response?.data;
+      const wbData = axErr?.response?.data as Record<string, unknown> | undefined;
       let msg = error instanceof Error ? error.message : String(error);
       if (status === 404) {
         msg = `HTTP 404 — endpoint не найден. Проверьте, что WB Content API доступен (content-api.wildberries.ru).`;
-      } else if (wbData && typeof wbData === 'object' && 'detail' in wbData) {
-        const detail = (wbData as { detail?: string }).detail;
-        if (detail) msg = detail;
+      } else if (wbData && typeof wbData === 'object') {
+        const parts: string[] = [];
+        if (typeof wbData.detail === 'string') parts.push(wbData.detail);
+        if (typeof wbData.message === 'string') parts.push(wbData.message);
+        const errs = wbData.errors ?? wbData.Errors;
+        if (Array.isArray(errs) && errs.length > 0) {
+          const first = errs[0];
+          const errMsg = typeof first === 'string' ? first : (first && typeof first === 'object' && 'message' in first ? (first as { message?: string }).message : null);
+          if (errMsg) parts.push(errMsg);
+        }
+        if (parts.length > 0) msg = parts.join('. ');
+        if (status === 400) {
+          console.warn('[WildberriesAdapter] uploadProduct 400:', JSON.stringify(wbData));
+          if (!msg || msg.includes('status code')) {
+            msg = parts.length > 0 ? parts.join('. ') : 'HTTP 400 — неверный формат. Проверьте категорию WB, фото и обязательные поля.';
+          }
+        }
       }
       throw new Error(`Ошибка выгрузки товара на Wildberries: ${msg}`);
     }
