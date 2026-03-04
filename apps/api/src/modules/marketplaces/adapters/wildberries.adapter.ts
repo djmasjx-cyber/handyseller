@@ -57,7 +57,22 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
     return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
   }
 
-  convertToPlatform(canonical: CanonicalProduct, barcode?: string): PlatformProductPayload {
+  /**
+   * Получить charcID по имени характеристики (для маппинга наших полей на WB).
+   * @param charcs - массив из getCharcsForSubject
+   * @param names - варианты названия (например ['Наименование', 'наименование', 'Название'])
+   */
+  private findCharcIdByNames(charcs: Array<{ charcID: number; name: string }>, names: string[]): number | null {
+    const lower = names.map((n) => n.toLowerCase());
+    const found = charcs.find((c) => lower.some((n) => (c.name || '').toLowerCase().includes(n) || n.includes((c.name || '').toLowerCase())));
+    return found?.charcID ?? null;
+  }
+
+  convertToPlatform(
+    canonical: CanonicalProduct,
+    barcode?: string,
+    wbCharcs?: Array<{ charcID: number; name: string; required?: boolean }>,
+  ): PlatformProductPayload {
     // Логируем входные данные для отладки
     console.log('[WildberriesAdapter] convertToPlatform INPUT:', {
       canonical_sku: canonical.canonical_sku,
@@ -66,6 +81,7 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       vendor_code: canonical.vendor_code,
       images_count: canonical.images?.length ?? 0,
       barcode: barcode ?? 'не сгенерирован',
+      charcs_count: wbCharcs?.length ?? 0,
     });
 
     const vendorCode = canonical.vendor_code ?? canonical.canonical_sku;
@@ -74,31 +90,56 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
     const descriptionText = richDesc
       ? (plainDesc ? `${plainDesc}\n\n${this.stripHtml(richDesc)}` : this.stripHtml(richDesc))
       : plainDesc;
-    const characteristics: Array<{ id: number; name: string; value: string }> = [
-      { id: 0, name: 'Наименование', value: canonical.title },
-      { id: 3, name: 'Описание', value: descriptionText },
-    ];
-    if (canonical.color?.trim()) {
-      characteristics.push({ id: 1, name: 'Цвет', value: canonical.color.trim() });
+    const title = (canonical.title || '').trim();
+
+    const characteristics: Array<{ id: number; name?: string; value: string | string[] }> = [];
+
+    if (wbCharcs && wbCharcs.length > 0) {
+      // Используем charcID из API WB — обязательные поля зависят от категории
+      const addChar = (names: string[], value: string | string[] | undefined) => {
+        if (value === undefined || value === null || (typeof value === 'string' && !value.trim())) return;
+        const id = this.findCharcIdByNames(wbCharcs!, names);
+        if (id) characteristics.push({ id, value: Array.isArray(value) ? value : value.trim() });
+      };
+      addChar(['Наименование', 'наименование', 'Название', 'title'], title || 'Товар');
+      addChar(['Описание', 'описание', 'description'], descriptionText?.trim() || 'Описание товара');
+      addChar(['Цвет', 'цвет', 'color'], canonical.color?.trim());
+      addChar(['Количество предметов в упаковке', 'количество'], canonical.items_per_pack != null && canonical.items_per_pack > 0 ? String(canonical.items_per_pack) : undefined);
+      addChar(['Материал изделия', 'материал', 'material'], canonical.material?.trim());
+      addChar(['Вид творчества', 'вид творчества', 'craft'], canonical.craft_type?.trim());
+      addChar(['Комплектация', 'комплектация'], canonical.package_contents?.trim());
+      for (const a of canonical.attributes ?? []) {
+        const id = this.findCharcIdByNames(wbCharcs, [a.name]);
+        if (id && a.value?.trim()) characteristics.push({ id, value: a.value.trim() });
+      }
+      // Добавляем обязательные характеристики, которые не заполнены (дефолт для прохождения модерации)
+      const addedIds = new Set(characteristics.map((c) => c.id));
+      for (const c of wbCharcs) {
+        if (c.required && !addedIds.has(c.charcID)) {
+          characteristics.push({ id: c.charcID, value: 'Не указано' });
+          addedIds.add(c.charcID);
+        }
+      }
     }
-    if (canonical.items_per_pack != null && canonical.items_per_pack > 0) {
-      characteristics.push({ id: 4, name: 'Количество предметов в упаковке', value: String(canonical.items_per_pack) });
-    }
-    if (canonical.material?.trim()) {
-      characteristics.push({ id: 5, name: 'Материал изделия', value: canonical.material.trim() });
-    }
-    if (canonical.craft_type?.trim()) {
-      characteristics.push({ id: 6, name: 'Вид творчества', value: canonical.craft_type.trim() });
-    }
-    if (canonical.package_contents?.trim()) {
-      characteristics.push({ id: 7, name: 'Комплектация', value: canonical.package_contents.trim() });
-    }
-    if (canonical.attributes?.length) {
-      let nextId = 100;
-      for (const a of canonical.attributes) {
-        const skip = ['Артикул', 'Наименование', 'Описание', 'Цвет', 'Количество предметов в упаковке', 'Материал изделия', 'Вид творчества', 'Комплектация'];
-        if (!skip.includes(a.name)) {
-          characteristics.push({ id: nextId++, name: a.name, value: a.value });
+
+    if (characteristics.length === 0) {
+      // Fallback: фиксированные ID (могут не подходить для всех категорий)
+      characteristics.push({ id: 0, name: 'Наименование', value: title || 'Товар' });
+      characteristics.push({ id: 3, name: 'Описание', value: descriptionText || '' });
+      if (canonical.color?.trim()) characteristics.push({ id: 1, name: 'Цвет', value: canonical.color.trim() });
+      if (canonical.items_per_pack != null && canonical.items_per_pack > 0) {
+        characteristics.push({ id: 4, name: 'Количество предметов в упаковке', value: String(canonical.items_per_pack) });
+      }
+      if (canonical.material?.trim()) characteristics.push({ id: 5, name: 'Материал изделия', value: canonical.material.trim() });
+      if (canonical.craft_type?.trim()) characteristics.push({ id: 6, name: 'Вид творчества', value: canonical.craft_type.trim() });
+      if (canonical.package_contents?.trim()) characteristics.push({ id: 7, name: 'Комплектация', value: canonical.package_contents.trim() });
+      if (canonical.attributes?.length) {
+        let nextId = 100;
+        for (const a of canonical.attributes) {
+          const skip = ['Артикул', 'Наименование', 'Описание', 'Цвет', 'Количество предметов в упаковке', 'Материал изделия', 'Вид творчества', 'Комплектация'];
+          if (!skip.includes(a.name)) {
+            characteristics.push({ id: nextId++, name: a.name, value: a.value });
+          }
         }
       }
     }
@@ -123,9 +164,18 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       height: h,
     };
 
-    // Добавляем штрих-код если есть
+    // Штрих-код и sizes — WB требует sizes[].skus для идентификации размера
     if (barcode?.trim()) {
       good.barcode = barcode.trim();
+      const priceRub = Math.round(canonical.price ?? 1);
+      good.sizes = [
+        {
+          techSize: 'Без размера',
+          wbSize: 'RU',
+          price: priceRub,
+          skus: [barcode.trim()],
+        },
+      ];
     }
 
     const card: Record<string, unknown> = {
@@ -252,6 +302,38 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
   }
 
   /**
+   * Получить характеристики категории WB (обязательные и опциональные атрибуты).
+   * GET /content/v2/object/charcs/{subjectId}
+   * Характеристики зависят от категории — для корректной выгрузки нужны charcID из API.
+   */
+  async getCharcsForSubject(subjectId: number): Promise<Array<{ charcID: number; name: string; required?: boolean }>> {
+    try {
+      const { data } = await firstValueFrom(
+        this.httpService.get<unknown>(
+          `${this.CONTENT_API}/content/v2/object/charcs/${subjectId}`,
+          { headers: this.authHeader(), timeout: 10000 },
+        ),
+      );
+      const raw = Array.isArray(data) ? data
+        : (data && typeof data === 'object')
+          ? (data as Record<string, unknown>).data ?? (data as Record<string, unknown>).result ?? (data as Record<string, unknown>).items ?? null
+          : null;
+      const items = Array.isArray(raw) ? raw : [];
+      return items
+        .filter((x): x is Record<string, unknown> => x && typeof x === 'object')
+        .map((x) => ({
+          charcID: Number(x.charcID ?? x.id ?? x.charcId ?? 0),
+          name: String(x.name ?? x.attributeName ?? '').trim(),
+          required: Boolean(x.required),
+        }))
+        .filter((x) => x.charcID > 0 && x.name);
+    } catch (err) {
+      this.logError(err as Error, 'getCharcsForSubject');
+      return [];
+    }
+  }
+
+  /**
    * Генерация штрих-кодов на стороне WB.
    * POST /content/v2/barcodes — создаёт уникальные штрих-коды для товаров.
    * @param count Количество штрих-кодов для генерации (обычно 1)
@@ -344,8 +426,15 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
         // Продолжаем без штрих-кода — WB может принять и без него
       }
 
-      // 2. Формируем payload с штрих-кодом
-      const wbProduct = this.convertToPlatform(canonical, barcode);
+      // 2. Получаем характеристики категории (обязательные поля зависят от subjectId)
+      let wbCharcs: Array<{ charcID: number; name: string; required?: boolean }> | undefined;
+      if (canonical.wb_subject_id && canonical.wb_subject_id > 0) {
+        await new Promise((r) => setTimeout(r, 300)); // rate limit WB API
+        wbCharcs = await this.getCharcsForSubject(canonical.wb_subject_id);
+      }
+
+      // 3. Формируем payload с штрих-кодом и корректными charcID
+      const wbProduct = this.convertToPlatform(canonical, barcode, wbCharcs);
 
       // Логируем полный запрос для отладки
       console.log('[WildberriesAdapter] uploadFromCanonical REQUEST:', JSON.stringify(wbProduct, null, 2));
