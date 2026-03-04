@@ -299,6 +299,7 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       country_of_origin: product.countryOfOrigin,
       package_contents: product.packageContents,
       long_description_html: product.richContent,
+      wb_subject_id: product.wbSubjectId,
       attributes: undefined,
       images: product.images.map((url) => ({ url })),
       price: product.price ?? 1,
