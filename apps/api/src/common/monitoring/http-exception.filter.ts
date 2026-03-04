@@ -78,7 +78,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       exception instanceof HttpException ? exception.getResponse() : null;
     const body =
       typeof response === 'object' && response !== null
-        ? { ...base, ...(response as Record<string, unknown }) }
+        ? { ...base, ...(response as { [key: string]: unknown }) }
         : base;
     res.status(status).json(body);
   }
