@@ -158,6 +158,7 @@ export default function MarketplacesPage() {
   const [wbWarehouseSaving, setWbWarehouseSaving] = useState(false)
   const [wbWarehouses, setWbWarehouses] = useState<Array<{ id: string; name?: string }> | null>(null)
   const [wbWarehousesLoading, setWbWarehousesLoading] = useState(false)
+  const [wbColorsSyncing, setWbColorsSyncing] = useState(false)
 
   const token = typeof window !== "undefined" ? localStorage.getItem("accessToken") : null
 
@@ -241,6 +242,24 @@ export default function MarketplacesPage() {
       alert(err instanceof Error ? err.message : "Ошибка")
     } finally {
       setOzonWarehouseSaving(false)
+    }
+  }
+
+  const handleWbColorsSync = async () => {
+    if (!token) return
+    setWbColorsSyncing(true)
+    try {
+      const res = await fetch("/api/marketplaces/wb-colors/sync", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.message ?? data.error ?? "Ошибка синхронизации")
+      alert(`Синхронизировано цветов: ${data.synced ?? 0}`)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Ошибка синхронизации цветов")
+    } finally {
+      setWbColorsSyncing(false)
     }
   }
 
@@ -607,6 +626,25 @@ export default function MarketplacesPage() {
                             )}
                           </div>
                         )}
+                      </div>
+                      <div className="space-y-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleWbColorsSync}
+                          disabled={wbColorsSyncing}
+                          className="border-[#CB11AB] text-[#CB11AB] hover:bg-[#CB11AB]/10"
+                        >
+                          {wbColorsSyncing ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <RefreshCw className="mr-2 h-4 w-4" />
+                          )}
+                          Синхронизировать цвета WB
+                        </Button>
+                        <p className="text-xs text-muted-foreground">
+                          Справочник цветов для выпадающего списка при создании/редактировании товара.
+                        </p>
                       </div>
                     </div>
                   )}

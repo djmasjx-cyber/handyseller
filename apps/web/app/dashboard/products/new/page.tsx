@@ -12,6 +12,9 @@ export default function NewProductPage() {
   const [atLimit, setAtLimit] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [connections, setConnections] = useState<{ marketplace: string }[]>([])
+  const [wbColors, setWbColors] = useState<{ id: number; name: string }[]>([])
+  const [wbColorsSyncing, setWbColorsSyncing] = useState(false)
   const [form, setForm] = useState({
     title: "",
     description: "",
@@ -45,11 +48,15 @@ export default function NewProductPage() {
     Promise.all([
       fetch("/api/subscriptions/me", { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()),
       fetch("/api/products", { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()),
+      fetch("/api/marketplaces", { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()).catch(() => []),
+      fetch("/api/marketplaces/wb-colors", { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.ok ? r.json() : []).catch(() => []),
     ])
-      .then(([subData, productsData]) => {
+      .then(([subData, productsData, conns, colors]) => {
         const limits = subData?.limits
         const products = Array.isArray(productsData) ? productsData : []
         if (limits && products.length >= limits.maxProducts) setAtLimit(true)
+        setConnections(Array.isArray(conns) ? conns : [])
+        setWbColors(Array.isArray(colors) ? colors : [])
       })
       .catch(() => {})
       .finally(() => setLoading(false))
@@ -280,13 +287,71 @@ export default function NewProductPage() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="color">Цвет</Label>
-                <Input
-                  id="color"
-                  value={form.color}
-                  onChange={(e) => setForm((f) => ({ ...f, color: e.target.value }))}
-                  placeholder="Красный, синий, мультиколор..."
-                />
-                <p className="text-xs text-muted-foreground">Отображается на WB, Ozon, Яндекс.Маркет</p>
+                {connections.some((c) => c.marketplace === "WILDBERRIES") && wbColors.length > 0 ? (
+                  <select
+                    id="color"
+                    value={form.color}
+                    onChange={(e) => setForm((f) => ({ ...f, color: e.target.value }))}
+                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  >
+                    <option value="">— Не указано —</option>
+                    {wbColors.map((c) => (
+                      <option key={c.id} value={c.name}>{c.name}</option>
+                    ))}
+                  </select>
+                ) : connections.some((c) => c.marketplace === "WILDBERRIES") && wbColors.length === 0 ? (
+                  <div className="space-y-2">
+                    <Input
+                      id="color"
+                      value={form.color}
+                      onChange={(e) => setForm((f) => ({ ...f, color: e.target.value }))}
+                      placeholder="Красный, синий, мультиколор..."
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={wbColorsSyncing}
+                      onClick={async () => {
+                        if (!token) return
+                        setWbColorsSyncing(true)
+                        try {
+                          const r = await fetch("/api/marketplaces/wb-colors/sync", {
+                            method: "POST",
+                            headers: { Authorization: `Bearer ${token}` },
+                          })
+                          const data = await r.json().catch(() => ({}))
+                          if (r.ok) {
+                            const list = await fetch("/api/marketplaces/wb-colors", { headers: { Authorization: `Bearer ${token}` } })
+                              .then((res) => res.ok ? res.json() : [])
+                            setWbColors(Array.isArray(list) ? list : [])
+                          } else {
+                            alert(data.message || data.error || "Ошибка синхронизации")
+                          }
+                        } finally {
+                          setWbColorsSyncing(false)
+                        }
+                      }}
+                    >
+                      {wbColorsSyncing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                      {wbColorsSyncing ? "Синхронизация..." : "Синхронизировать цвета WB"}
+                    </Button>
+                  </div>
+                ) : (
+                  <Input
+                    id="color"
+                    value={form.color}
+                    onChange={(e) => setForm((f) => ({ ...f, color: e.target.value }))}
+                    placeholder="Красный, синий, мультиколор..."
+                  />
+                )}
+                <p className="text-xs text-muted-foreground">
+                  {connections.some((c) => c.marketplace === "WILDBERRIES") && wbColors.length > 0
+                    ? "WB: только из справочника. Синхронизируйте цвета в настройках маркетплейсов."
+                    : connections.some((c) => c.marketplace === "WILDBERRIES") && wbColors.length === 0
+                      ? "WB: синхронизируйте цвета для выбора из списка."
+                      : "Отображается на WB, Ozon, Яндекс.Маркет"}
+                </p>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 <div className="space-y-2">

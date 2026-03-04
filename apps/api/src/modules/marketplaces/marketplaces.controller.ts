@@ -9,6 +9,7 @@ import { UpdateWarehouseDto } from './dto/update-warehouse.dto';
 import type { ProductData } from './adapters/base-marketplace.adapter';
 import { productToCanonical, canonicalToProductData } from './canonical';
 import { SyncQueueService } from './sync-queue/sync-queue.service';
+import { WbColorService } from './wb-color.service';
 
 @Controller('marketplaces')
 @UseGuards(JwtAuthGuard)
@@ -17,6 +18,7 @@ export class MarketplacesController {
     private readonly marketplacesService: MarketplacesService,
     private readonly productsService: ProductsService,
     private readonly syncQueueService: SyncQueueService,
+    private readonly wbColorService: WbColorService,
   ) {}
 
   @Get()
@@ -33,6 +35,18 @@ export class MarketplacesController {
   @Get('wb-fbo-stock')
   async getWbFboStock(@CurrentUser('userId') userId: string) {
     return this.marketplacesService.getWbStockFbo(userId);
+  }
+
+  /** Справочник цветов WB (для выпадающего списка при создании/редактировании товара) */
+  @Get('wb-colors')
+  async getWbColors() {
+    return this.wbColorService.findAll();
+  }
+
+  /** Синхронизация справочника цветов WB из API (требует подключённый WB) */
+  @Post('wb-colors/sync')
+  async syncWbColors(@CurrentUser('userId') userId: string) {
+    return this.wbColorService.syncFromWb(userId);
   }
 
   @Post('connect')
@@ -156,11 +170,12 @@ export class MarketplacesController {
     }
 
     if (marketplace === 'WILDBERRIES' && products.length > 0) {
+      const wbColorNames = await this.marketplacesService.getWbColorNames();
       const validationErrors: string[] = [];
       for (const p of products) {
         const dbProduct = await this.productsService.findById(userId, p.id);
         if (dbProduct) {
-          const v = this.marketplacesService.validateProductForWb(dbProduct);
+          const v = this.marketplacesService.validateProductForWb(dbProduct, { wbColorNames });
           if (!v.valid) {
             validationErrors.push(`${p.name || 'Товар'}: ${v.errors.join('; ')}`);
           }
@@ -359,7 +374,8 @@ export class MarketplacesController {
   ) {
     const product = await this.productsService.findById(userId, productId);
     if (!product) throw new BadRequestException('Товар не найден');
-    return this.marketplacesService.validateProductForWb(product);
+    const wbColorNames = await this.marketplacesService.getWbColorNames();
+    return this.marketplacesService.validateProductForWb(product, { wbColorNames });
   }
 
   /** Предпросмотр выгрузки на WB: payload и маппинг полей */

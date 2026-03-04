@@ -60,6 +60,8 @@ export default function ProductCardPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [connections, setConnections] = useState<{ marketplace: string }[]>([])
+  const [wbColors, setWbColors] = useState<{ id: number; name: string }[]>([])
+  const [wbColorsSyncing, setWbColorsSyncing] = useState(false)
   const [exportLoadingMarketplace, setExportLoadingMarketplace] = useState<string | null>(null)
   const [exportError, setExportError] = useState<string | string[] | null>(null)
 
@@ -105,6 +107,14 @@ export default function ProductCardPage() {
       .then((r) => r.json())
       .then((data) => setConnections(Array.isArray(data) ? data : []))
       .catch(() => setConnections([]))
+  }, [token])
+
+  useEffect(() => {
+    if (!token) return
+    fetch("/api/marketplaces/wb-colors", { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => r.ok ? r.json() : [])
+      .then((data) => setWbColors(Array.isArray(data) ? data : []))
+      .catch(() => setWbColors([]))
   }, [token])
 
   useEffect(() => {
@@ -1136,13 +1146,74 @@ export default function ProductCardPage() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="color">Цвет</Label>
-              <Input
-                id="color"
-                value={form.color}
-                onChange={(e) => setForm((f) => ({ ...f, color: e.target.value }))}
-                placeholder="Красный, синий, мультиколор..."
-              />
-              <p className="text-xs text-muted-foreground">Отображается на WB, Ozon, Яндекс.Маркет</p>
+              {isWbConnected && wbColors.length > 0 ? (
+                <select
+                  id="color"
+                  value={form.color}
+                  onChange={(e) => setForm((f) => ({ ...f, color: e.target.value }))}
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                >
+                  <option value="">— Не указано —</option>
+                  {form.color && !wbColors.some((c) => c.name === form.color) && (
+                    <option value={form.color}>{form.color} (не из списка WB — замените)</option>
+                  )}
+                  {wbColors.map((c) => (
+                    <option key={c.id} value={c.name}>{c.name}</option>
+                  ))}
+                </select>
+              ) : isWbConnected && wbColors.length === 0 ? (
+                <div className="space-y-2">
+                  <Input
+                    id="color"
+                    value={form.color}
+                    onChange={(e) => setForm((f) => ({ ...f, color: e.target.value }))}
+                    placeholder="Красный, синий, мультиколор..."
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={wbColorsSyncing}
+                    onClick={async () => {
+                      if (!token) return
+                      setWbColorsSyncing(true)
+                      try {
+                        const r = await fetch("/api/marketplaces/wb-colors/sync", {
+                          method: "POST",
+                          headers: { Authorization: `Bearer ${token}` },
+                        })
+                        const data = await r.json().catch(() => ({}))
+                        if (r.ok) {
+                          const list = await fetch("/api/marketplaces/wb-colors", { headers: { Authorization: `Bearer ${token}` } })
+                            .then((res) => res.ok ? res.json() : [])
+                          setWbColors(Array.isArray(list) ? list : [])
+                        } else {
+                          alert(data.message || data.error || "Ошибка синхронизации")
+                        }
+                      } finally {
+                        setWbColorsSyncing(false)
+                      }
+                    }}
+                  >
+                    {wbColorsSyncing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                    {wbColorsSyncing ? "Синхронизация..." : "Синхронизировать цвета WB"}
+                  </Button>
+                </div>
+              ) : (
+                <Input
+                  id="color"
+                  value={form.color}
+                  onChange={(e) => setForm((f) => ({ ...f, color: e.target.value }))}
+                  placeholder="Красный, синий, мультиколор..."
+                />
+              )}
+              <p className="text-xs text-muted-foreground">
+                {isWbConnected && wbColors.length > 0
+                  ? "WB: только из справочника. Синхронизируйте цвета в настройках маркетплейсов."
+                  : isWbConnected && wbColors.length === 0
+                    ? "WB: синхронизируйте цвета для выбора из списка."
+                    : "Отображается на WB, Ozon, Яндекс.Маркет"}
+              </p>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div className="space-y-2">

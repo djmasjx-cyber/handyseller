@@ -11,6 +11,7 @@ import { MarketplaceAdapterFactory } from './adapters/marketplace-adapter.factor
 import { StockSyncListener } from './stock-sync.listener';
 import { ProductMappingService } from './product-mapping.service';
 import { WbSupplyService } from './wb-supply.service';
+import { WbColorService } from './wb-color.service';
 import { SyncQueueService } from './sync-queue/sync-queue.service';
 import { SyncQueueProcessor } from './sync-queue/sync-queue.processor';
 import { SYNC_QUEUE_NAME } from './sync-queue/sync-queue.constants';
@@ -37,10 +38,11 @@ import { SYNC_QUEUE_NAME } from './sync-queue/sync-queue.constants';
     MarketplaceAdapterFactory,
     ProductMappingService,
     WbSupplyService,
+    WbColorService,
     StockSyncListener,
     SyncQueueService,
     SyncQueueProcessor,
   ],
-  exports: [MarketplacesService, MarketplaceAdapterFactory, ProductMappingService, SyncQueueService],
+  exports: [MarketplacesService, MarketplaceAdapterFactory, ProductMappingService, WbColorService, SyncQueueService],
 })
 export class MarketplacesModule {}

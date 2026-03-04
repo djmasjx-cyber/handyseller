@@ -143,10 +143,11 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
         }
       }
     }
-    const w = (canonical.width_mm ?? 100) / 10;   // mm → cm
-    const h = (canonical.height_mm ?? 100) / 10;
-    const l = (canonical.length_mm ?? 100) / 10;
-    const weightBrutto = (canonical.weight_grams ?? 100) / 1000; // g → kg
+    // WB: габариты в см (у нас мм), вес в кг (у нас г). Разделитель дробной части — точка.
+    const w = Math.round(((canonical.width_mm ?? 100) / 10) * 100) / 100;   // mm → cm, 2 знака
+    const h = Math.round(((canonical.height_mm ?? 100) / 10) * 100) / 100;
+    const l = Math.round(((canonical.length_mm ?? 100) / 10) * 100) / 100;
+    const weightBrutto = Math.round(((canonical.weight_grams ?? 100) / 1000) * 100) / 100; // g → kg, 2 знака
 
     // subjectId обязателен для создания карточки
     if (!canonical.wb_subject_id || canonical.wb_subject_id <= 0) {
@@ -334,6 +335,40 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
   }
 
   /**
+   * Получить справочник цветов WB.
+   * GET /content/v2/directory/colors — требуется авторизация.
+   * @param token — токен WB (опционально, иначе берётся из config)
+   */
+  async getColors(token?: string): Promise<Array<{ id: number; name: string }>> {
+    try {
+      const { data } = await firstValueFrom(
+        this.httpService.get<unknown>(
+          `${this.CONTENT_API}/content/v2/directory/colors`,
+          { headers: this.authHeader(token), timeout: 10000 },
+        ),
+      );
+      const raw = Array.isArray(data) ? data
+        : (data && typeof data === 'object')
+          ? (data as Record<string, unknown>).data ?? (data as Record<string, unknown>).result ?? (data as Record<string, unknown>).items ?? null
+          : null;
+      const items = Array.isArray(raw) ? raw : [];
+      return items
+        .filter((x): x is Record<string, unknown> => x && typeof x === 'object')
+        .map((x) => ({
+          id: Number(x.id ?? x.colorId ?? x.color_id ?? 0),
+          name: String(x.name ?? x.colorName ?? x.color_name ?? '').trim(),
+        }))
+        .filter((x) => x.id > 0 && x.name);
+    } catch (err) {
+      this.logError(err as Error, 'getColors');
+      const msg = err instanceof Error ? err.message : String(err);
+      const axErr = err as { response?: { status?: number; data?: { detail?: string } } };
+      const wbMsg = axErr?.response?.data?.detail ?? axErr?.response?.status;
+      throw new Error(wbMsg ? `Ошибка WB API: ${wbMsg}` : `Не удалось загрузить цвета. ${msg}`);
+    }
+  }
+
+  /**
    * Генерация штрих-кодов на стороне WB.
    * POST /content/v2/barcodes — создаёт уникальные штрих-коды для товаров.
    * @param count Количество штрих-кодов для генерации (обычно 1)
@@ -416,14 +451,11 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
    */
   async uploadFromCanonical(canonical: CanonicalProduct): Promise<string> {
     try {
-      // 1. Генерируем штрих-код на стороне WB
-      let barcode: string | undefined;
-      try {
-        const barcodes = await this.generateBarcodes(1);
-        barcode = barcodes[0];
-      } catch (barcodeErr) {
-        console.warn('[WildberriesAdapter] Не удалось сгенерировать штрих-код:', barcodeErr);
-        // Продолжаем без штрих-кода — WB может принять и без него
+      // 1. Генерируем штрих-код на стороне WB (обязательно при выгрузке карточки)
+      const barcodes = await this.generateBarcodes(1);
+      const barcode = barcodes[0];
+      if (!barcode?.trim()) {
+        throw new Error('Не удалось сгенерировать штрих-код WB. Выгрузка карточки невозможна без штрих-кода.');
       }
 
       // 2. Получаем характеристики категории (обязательные поля зависят от subjectId)

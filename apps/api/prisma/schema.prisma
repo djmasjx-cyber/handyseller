@@ -455,6 +455,16 @@ enum PaymentStatus {
   CANCELLED
 }
 
+/// Справочник цветов WB (синхронизируется из API /content/v2/directory/colors).
+/// Используется для выпадающего списка при выборе цвета товара.
+model WbColor {
+  id        Int      @id
+  name      String   @db.VarChar(200)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("wb_color")
+}
+
 model VtbWebhook {
   id              String   @id @default(uuid())
   paymentId       String?  @map("payment_id")

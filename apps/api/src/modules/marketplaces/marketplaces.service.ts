@@ -1432,18 +1432,29 @@ export class MarketplacesService {
     return { valid: errors.length === 0, errors };
   }
 
+  /** Список названий цветов WB из БД (для валидации при выгрузке) */
+  async getWbColorNames(): Promise<string[]> {
+    const rows = await this.prisma.wbColor.findMany({ select: { name: true } });
+    return rows.map((r) => r.name);
+  }
+
   /**
    * Проверка перед выгрузкой на WB: обязательные поля.
    * Маппинг: title→Наименование, article→supplierVendorCode, imageUrl→Фото, wbSubjectId→subjectId.
+   * @param options.wbColorNames — если задан и у товара указан цвет, он должен быть из справочника WB.
    */
-  validateProductForWb(product: {
-    title?: string | null;
-    imageUrl?: string | null;
-    price?: unknown;
-    article?: string | null;
-    sku?: string | null;
-    wbSubjectId?: number | null;
-  }): { valid: boolean; errors: string[] } {
+  validateProductForWb(
+    product: {
+      title?: string | null;
+      imageUrl?: string | null;
+      price?: unknown;
+      article?: string | null;
+      sku?: string | null;
+      wbSubjectId?: number | null;
+      color?: string | null;
+    },
+    options?: { wbColorNames?: string[] },
+  ): { valid: boolean; errors: string[] } {
     const errors: string[] = [];
     if (!product.title?.trim()) errors.push('Укажите название товара');
     if (!product.imageUrl?.trim() || !product.imageUrl.startsWith('http'))
@@ -1455,6 +1466,14 @@ export class MarketplacesService {
     const subjectId = product.wbSubjectId != null ? Number(product.wbSubjectId) : NaN;
     if (isNaN(subjectId) || subjectId <= 0)
       errors.push('Выберите категорию WB (обязательное поле для выгрузки)');
+    const color = (product.color ?? '').toString().trim();
+    if (color && options?.wbColorNames?.length) {
+      if (!options.wbColorNames.includes(color)) {
+        errors.push(
+          'Цвет должен быть из справочника WB. Синхронизируйте цвета в настройках маркетплейсов и выберите из списка.',
+        );
+      }
+    }
     return { valid: errors.length === 0, errors };
   }
 
@@ -2109,11 +2128,13 @@ export class MarketplacesService {
     try {
       payload = adapter.convertToPlatform(canonical, barcodePlaceholder, wbCharcs) as Record<string, unknown>;
     } catch (err) {
+      const wbColorNames = await this.getWbColorNames();
       return {
         error: err instanceof Error ? err.message : String(err),
-        validation: this.validateProductForWb(product),
+        validation: this.validateProductForWb(product, { wbColorNames }),
       };
     }
+    const wbColorNames = await this.getWbColorNames();
     const mapping: Array<{ our: string; wb: string; value: unknown }> = [
       { our: 'title', wb: 'Наименование (characteristics)', value: product.title },
       { our: 'article', wb: 'supplierVendorCode, vendorCode', value: product.article },
@@ -2126,7 +2147,7 @@ export class MarketplacesService {
     return {
       payload,
       mapping,
-      validation: this.validateProductForWb(product),
+      validation: this.validateProductForWb(product, { wbColorNames }),
       fieldMappingNote: 'На WB передаётся только price (Ваша цена). cost (Себестоимость) не используется.',
     };
   }
