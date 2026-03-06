@@ -1317,14 +1317,14 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
       ozonCategoryId?: number;
       ozonTypeId?: number;
     }> = [];
-    // Используем /v3/product/info/list с offer_id (sku)
-    const offerIds = items.map((it) => it.offer_id).filter(Boolean);
-    console.log(`[OzonAdapter.getProductsFromOzon] Calling /v3/product/info/list for ${offerIds.length} offerIds`);
+    // Используем /v3/product/info/list с sku (product_id)
+    const skus = items.map((it) => it.product_id).filter(Boolean);
+    console.log(`[OzonAdapter.getProductsFromOzon] Calling /v3/product/info/list for ${skus.length} skus: ${JSON.stringify(skus)}`);
     try {
       const { data } = await firstValueFrom(
         this.httpService.post(
           `${this.API_BASE}/v3/product/info/list`,
-          { offer_id: offerIds },
+          { sku: skus },
           {
             headers: {
               'Client-Id': this.config.sellerId ?? '',
