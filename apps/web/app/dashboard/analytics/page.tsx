@@ -218,12 +218,16 @@ export default function AnalyticsPage() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Активные товары</CardTitle>
+            <CardTitle className="text-sm font-medium">Товары на площадках</CardTitle>
             <Package className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{s.totalProducts ?? 0}</div>
-            <p className="text-xs text-muted-foreground mt-1">Товары со склада «Мой склад»</p>
+            <div className="text-2xl font-bold">{s.totalProductsOnMarketplaces ?? 0}</div>
+            {perMarketplaceProductsLabel ? (
+              <p className="text-xs text-muted-foreground mt-1">По площадкам: {perMarketplaceProductsLabel}</p>
+            ) : (
+              <p className="text-xs text-muted-foreground mt-1">{s.marketplaceLabel ?? "—"}</p>
+            )}
           </CardContent>
         </Card>
       </div>

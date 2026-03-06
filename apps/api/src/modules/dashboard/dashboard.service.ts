@@ -37,7 +37,7 @@ export class DashboardService {
         console.warn('[Dashboard] countActiveProducts:', e instanceof Error ? e.message : String(e));
         return 0;
       }),
-      this.prisma.product.count({ where: { userId } }).catch((e) => {
+      this.prisma.product.count({ where: { userId, archivedAt: null } }).catch((e) => {
         console.warn('[Dashboard] product.count:', e instanceof Error ? e.message : String(e));
         return 0;
       }),
@@ -186,12 +186,12 @@ export class DashboardService {
   }
 
   /**
-   * Активные товары: продукты пользователя с остатком > 0 (Product.stock, «Мой склад»).
-   * Остаток берётся из Product — источник истины для каталога.
+   * Активные товары: все продукты пользователя (как на странице «Мой склад»).
+   * Исключаем архивные товары (archivedAt IS NULL).
    */
   private async countActiveProducts(userId: string): Promise<number> {
     return this.prisma.product.count({
-      where: { userId, stock: { gt: 0 } },
+      where: { userId, archivedAt: null },
     });
   }
 
