@@ -1290,7 +1290,8 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
       );
       const result = data?.result;
       console.log(`[OzonAdapter.getProductsFromOzon] /v3/product/list response: total=${result?.total}, items count=${result?.items?.length}`);
-      const pageItems = (result?.items ?? []) as Array<{ product_id?: number; offer_id?: string }>;
+      console.log(`[OzonAdapter.getProductsFromOzon] /v3/product/list raw items: ${JSON.stringify(result?.items?.slice(0, 2))}`);
+      const pageItems = (result?.items ?? []) as Array<{ product_id?: number; offer_id?: string; name?: string; sku?: number }>;
       for (const it of pageItems) {
         const pid = it?.product_id ?? 0;
         const oid = (it?.offer_id ?? '').toString().trim();
