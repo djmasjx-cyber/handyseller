@@ -34,7 +34,8 @@ export class AnalyticsService {
 
   /**
    * Агрегаты по товарам за период (по умолчанию — текущий календарный месяц).
-   * Источник: заказы в БД (Order + OrderItem). Выручка = сумма totalAmount по заказам.
+   * Источник: все товары пользователя + заказы в БД (Order + OrderItem).
+   * Выручка = сумма totalAmount по заказам.
    */
   async getProductStats(
     userId: string,
@@ -45,95 +46,76 @@ export class AnalyticsService {
     const fromDate = from ?? new Date(now.getFullYear(), now.getMonth(), 1);
     const toDate = to ?? new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
 
+    // 1. Получаем ВСЕ товары пользователя (неархивные)
+    const products = await this.prisma.product.findMany({
+      where: { userId, archivedAt: null },
+      select: { id: true, title: true, article: true, imageUrl: true, stock: true },
+    });
+
+    // 2. Получаем заказы за период
     const orders = await this.prisma.order.findMany({
       where: {
         userId,
         createdAt: { gte: fromDate, lte: toDate },
+        status: { not: OrderStatus.CANCELLED }, // Исключаем отменённые
       },
       select: {
         id: true,
         marketplace: true,
         status: true,
         totalAmount: true,
-        items: {
-          select: {
-            productId: true,
-            product: {
-              select: {
-                id: true,
-                title: true,
-                article: true,
-                imageUrl: true,
-                stock: true,
-              },
-            },
-          },
-        },
+        items: { select: { productId: true } },
       },
     });
 
-    const byProduct = new Map<
-      string,
-      {
-        product: { id: string; title: string; article: string | null; imageUrl: string | null; stock: number };
-        byMarketplace: Record<string, { revenue: number; orders: number; delivered: number }>;
-      }
-    >();
+    // 3. Агрегируем статистику по товарам
+    const statsByProduct = new Map<string, Record<string, { revenue: number; orders: number; delivered: number }>>();
 
     for (const order of orders) {
       const amount = Number(order.totalAmount);
       const marketplace = order.marketplace;
       const isDelivered = order.status === OrderStatus.DELIVERED;
       const firstItem = order.items[0];
-      if (!firstItem?.product) continue;
+      if (!firstItem?.productId) continue;
       const pid = firstItem.productId;
-      const product = firstItem.product;
 
-      if (!byProduct.has(pid)) {
-        byProduct.set(pid, {
-          product: {
-            id: product.id,
-            title: product.title,
-            article: product.article,
-            imageUrl: product.imageUrl,
-            stock: product.stock ?? 0,
-          },
-          byMarketplace: {},
-        });
+      if (!statsByProduct.has(pid)) {
+        statsByProduct.set(pid, {});
       }
-      const row = byProduct.get(pid)!;
-      if (!row.byMarketplace[marketplace]) {
-        row.byMarketplace[marketplace] = { revenue: 0, orders: 0, delivered: 0 };
+      const byMp = statsByProduct.get(pid)!;
+      if (!byMp[marketplace]) {
+        byMp[marketplace] = { revenue: 0, orders: 0, delivered: 0 };
       }
-      const mp = row.byMarketplace[marketplace];
-      mp.revenue += amount;
-      mp.orders += 1;
-      if (isDelivered) mp.delivered += 1;
+      byMp[marketplace].revenue += amount;
+      byMp[marketplace].orders += 1;
+      if (isDelivered) byMp[marketplace].delivered += 1;
     }
 
-    const result: ProductAnalyticsRow[] = [];
-    for (const [, data] of byProduct) {
+    // 4. Формируем результат для ВСЕХ товаров
+    const result: ProductAnalyticsRow[] = products.map((product) => {
+      const byMarketplace = statsByProduct.get(product.id) ?? {};
       let totalRevenue = 0;
       let totalOrders = 0;
       let totalDelivered = 0;
-      for (const st of Object.values(data.byMarketplace)) {
+      for (const st of Object.values(byMarketplace)) {
         totalRevenue += st.revenue;
         totalOrders += st.orders;
         totalDelivered += st.delivered;
       }
-      result.push({
-        productId: data.product.id,
-        title: data.product.title,
-        article: data.product.article,
-        imageUrl: data.product.imageUrl,
-        stock: data.product.stock,
-        byMarketplace: data.byMarketplace,
+      return {
+        productId: product.id,
+        title: product.title,
+        article: product.article,
+        imageUrl: product.imageUrl,
+        stock: product.stock ?? 0,
+        byMarketplace,
         totalRevenue,
         totalOrders,
         totalDelivered,
-      });
-    }
+      };
+    });
 
+    // Сортируем по выручке (сначала товары с продажами)
     result.sort((a, b) => b.totalRevenue - a.totalRevenue);
     return result;
   }
