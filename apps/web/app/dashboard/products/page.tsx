@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Badge, Input, Label, Textarea } from "@handyseller/ui"
 import Link from "next/link"
@@ -531,13 +531,6 @@ export default function ProductsPage() {
 
   const [importError, setImportError] = useState<string | null>(null)
 
-  // Пополнение остатков
-  const [replenishProductId, setReplenishProductId] = useState("")
-  const [replenishDelta, setReplenishDelta] = useState("")
-  const [replenishLookup, setReplenishLookup] = useState<Product | null>(null)
-  const [replenishLoading, setReplenishLoading] = useState(false)
-  const [replenishError, setReplenishError] = useState<string | null>(null)
-
   // История изменений (остатки + поля)
   const [historyProduct, setHistoryProduct] = useState<Product | null>(null)
   const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([])
@@ -564,66 +557,6 @@ export default function ProductsPage() {
       .catch(() => setHistoryEntries([]))
       .finally(() => setHistoryLoading(false))
   }, [token, historyProduct?.id])
-
-  const doLookup = useCallback(() => {
-    if (!token || !replenishProductId.trim()) {
-      setReplenishLookup(null)
-      return
-    }
-    fetch(`/api/products/lookup?q=${encodeURIComponent(replenishProductId.trim())}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((r) => r.json())
-      .then((p) => {
-        if (p && typeof p.id === "string") setReplenishLookup(p as Product)
-        else setReplenishLookup(null)
-      })
-      .catch(() => setReplenishLookup(null))
-  }, [token, replenishProductId])
-
-  useEffect(() => {
-    const t = setTimeout(doLookup, 400)
-    return () => clearTimeout(t)
-  }, [replenishProductId, doLookup])
-
-  const handleReplenish = async () => {
-    if (!token || !replenishProductId.trim()) return
-    const delta = parseInt(replenishDelta, 10)
-    if (isNaN(delta) || delta === 0) {
-      setReplenishError("Введите ненулевое количество")
-      return
-    }
-    setReplenishLoading(true)
-    setReplenishError(null)
-    try {
-      const res = await fetch("/api/products/replenish", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          productIdOrArticle: replenishProductId.trim(),
-          delta,
-        }),
-      })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        const msg = Array.isArray(data.message) ? data.message.join(", ") : data.message || `Ошибка ${res.status}`
-        setReplenishError(String(msg))
-        return
-      }
-      setReplenishProductId("")
-      setReplenishDelta("")
-      setReplenishLookup(null)
-      setReplenishError(null)
-      fetchProducts()
-    } catch (err) {
-      setReplenishError(err instanceof Error ? err.message : "Ошибка")
-    } finally {
-      setReplenishLoading(false)
-    }
-  }
 
   const handleImportFromMarketplace = async (marketplace: "WILDBERRIES" | "OZON") => {
     if (!token) return
@@ -751,55 +684,6 @@ export default function ProductsPage() {
         <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">
           {importError}
         </div>
-      )}
-
-      {warehouseFilter === "local" && (
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Warehouse className="h-5 w-5" />
-            Пополнение остатков
-          </CardTitle>
-          <CardDescription>
-            Введите ID или артикул товара и количество (положительное — пополнить, отрицательное — списать)
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-wrap gap-3 items-end">
-            <div className="flex-1 min-w-[200px] space-y-2">
-              <Label htmlFor="product-id">Товар (ID или артикул)</Label>
-              <Input
-                id="product-id"
-                placeholder="0006, Ang002, БУС-001"
-                value={replenishProductId}
-                onChange={(e) => setReplenishProductId(e.target.value)}
-                onBlur={doLookup}
-              />
-              {replenishLookup && (
-                <p className="text-sm text-muted-foreground">
-                  ✓ {replenishLookup.title} {replenishLookup.article && `(${replenishLookup.article})`} — остаток: {replenishLookup.stock ?? 0}
-                </p>
-              )}
-            </div>
-            <div className="w-32 space-y-2">
-              <Label htmlFor="delta">Количество</Label>
-              <Input
-                id="delta"
-                type="number"
-                placeholder="+10 или -5"
-                value={replenishDelta}
-                onChange={(e) => setReplenishDelta(e.target.value)}
-              />
-            </div>
-            <Button onClick={handleReplenish} disabled={replenishLoading}>
-              {replenishLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Применить"}
-            </Button>
-          </div>
-          {replenishError && (
-            <p className="text-sm text-destructive mt-2">{replenishError}</p>
-          )}
-        </CardContent>
-      </Card>
       )}
 
       <Card>
