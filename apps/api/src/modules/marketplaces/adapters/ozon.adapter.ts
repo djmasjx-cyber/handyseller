@@ -1277,6 +1277,7 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
         limit: 100,
       };
       if (lastId) body.last_id = lastId;
+      console.log(`[OzonAdapter.getProductsFromOzon] Calling /v3/product/list with lastId=${lastId}, sellerId=${this.config.sellerId}`);
       const { data } = await firstValueFrom(
         this.httpService.post(`${this.API_BASE}/v3/product/list`, body, {
           headers: {
@@ -1288,15 +1289,18 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
         }),
       );
       const result = data?.result;
+      console.log(`[OzonAdapter.getProductsFromOzon] /v3/product/list response: total=${result?.total}, items count=${result?.items?.length}`);
       const pageItems = (result?.items ?? []) as Array<{ product_id?: number; offer_id?: string }>;
       for (const it of pageItems) {
         const pid = it?.product_id ?? 0;
         const oid = (it?.offer_id ?? '').toString().trim();
         if (pid && oid) items.push({ product_id: pid, offer_id: oid });
+        else console.log(`[OzonAdapter.getProductsFromOzon] Skipping item: pid=${pid}, oid=${oid}`);
       }
       lastId = result?.last_id;
       if (!lastId || pageItems.length === 0) break;
     } while (true);
+    console.log(`[OzonAdapter.getProductsFromOzon] Total items collected: ${items.length}`);
 
     const out: Array<{
       productId: number;
@@ -1316,6 +1320,7 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
     for (let i = 0; i < items.length; i += 100) {
       const batch = items.slice(i, i + 100);
       const productIds = batch.map((b) => b.product_id);
+      console.log(`[OzonAdapter.getProductsFromOzon] Calling /v3/product/info/list for ${productIds.length} products`);
       const { data } = await firstValueFrom(
         this.httpService.post(
           `${this.API_BASE}/v3/product/info/list`,
@@ -1349,11 +1354,15 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
         description_category_id?: number;
         type_id?: number;
       }>;
+      console.log(`[OzonAdapter.getProductsFromOzon] /v3/product/info/list returned ${infoItems.length} items`);
       for (const inf of infoItems) {
         const pid = inf?.id ?? 0;
         const offerId = (inf?.offer_id ?? '').toString().trim();
         const name = (inf?.name ?? `Товар ${pid}`).trim().slice(0, 500);
-        if (!name) continue;
+        if (!name) {
+          console.log(`[OzonAdapter.getProductsFromOzon] Skipping product ${pid}: empty name`);
+          continue;
+        }
         let description: string | undefined;
         if (typeof inf?.description === 'string' && inf.description.trim()) {
           description = inf.description.slice(0, 5000);
@@ -1387,6 +1396,7 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
         });
       }
     }
+    console.log(`[OzonAdapter.getProductsFromOzon] Returning ${out.length} products`);
     return out;
   }
 
