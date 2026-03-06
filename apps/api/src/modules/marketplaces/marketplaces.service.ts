@@ -932,11 +932,14 @@ export class MarketplacesService {
     const allProductIds = new Set<string>();
 
     // 1. ProductMarketplaceMapping — канонический источник
+    // Проверяем что товар не в архиве (через include product)
     const mappings = await this.prisma.productMarketplaceMapping.findMany({
       where: { userId: { in: ids }, isActive: true },
-      select: { productId: true, marketplace: true },
+      select: { productId: true, marketplace: true, product: { select: { archivedAt: true } } },
     });
     for (const m of mappings) {
+      // Пропускаем архивные товары
+      if (m.product?.archivedAt != null) continue;
       const key = m.marketplace.toLowerCase();
       if (!linkedByMp.has(key)) linkedByMp.set(key, new Set());
       linkedByMp.get(key)!.add(m.productId);
@@ -972,12 +975,21 @@ export class MarketplacesService {
     }
 
     // 3. Order + OrderItem — товары с заказами (доказано на площадке)
+    // Получаем productIds из заказов и фильтруем архивные
     const orderItems = await this.prisma.orderItem.findMany({
       where: { order: { userId: { in: ids } } },
       select: { productId: true, order: { select: { marketplace: true } } },
     });
+    const orderProductIds = [...new Set(orderItems.map(i => i.productId).filter(Boolean))];
+    const activeOrderProducts = await this.prisma.product.findMany({
+      where: { id: { in: orderProductIds }, archivedAt: null },
+      select: { id: true },
+    });
+    const activeOrderProductIds = new Set(activeOrderProducts.map(p => p.id));
     for (const item of orderItems) {
       if (!item.productId || !item.order?.marketplace) continue;
+      // Пропускаем архивные товары
+      if (!activeOrderProductIds.has(item.productId)) continue;
       const key = item.order.marketplace.toLowerCase();
       if (!linkedByMp.has(key)) linkedByMp.set(key, new Set());
       linkedByMp.get(key)!.add(item.productId);
