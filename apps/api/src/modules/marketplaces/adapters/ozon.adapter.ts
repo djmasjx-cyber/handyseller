@@ -1320,7 +1320,7 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
     for (let i = 0; i < items.length; i += 100) {
       const batch = items.slice(i, i + 100);
       const productIds = batch.map((b) => b.product_id);
-      console.log(`[OzonAdapter.getProductsFromOzon] Calling /v3/product/info/list for ${productIds.length} products`);
+      console.log(`[OzonAdapter.getProductsFromOzon] Calling /v3/product/info/list for ${productIds.length} products: ${JSON.stringify(productIds)}`);
       const { data } = await firstValueFrom(
         this.httpService.post(
           `${this.API_BASE}/v3/product/info/list`,
@@ -1335,6 +1335,7 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
           },
         ),
       );
+      console.log(`[OzonAdapter.getProductsFromOzon] /v3/product/info/list raw response: ${JSON.stringify(data?.result)}`);
       const infoItems = (data?.result?.items ?? []) as Array<{
         id?: number;
         offer_id?: string;
