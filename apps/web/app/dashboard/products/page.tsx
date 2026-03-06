@@ -183,16 +183,6 @@ export default function ProductsPage() {
     return () => clearInterval(t)
   }, [router, token])
 
-  // Загружаем остатки при изменении подключений
-  useEffect(() => {
-    if (isWbConnected) {
-      fetchWbStockFbo()
-    }
-    if (isOzonConnected) {
-      fetchOzonStockFbo()
-    }
-  }, [isWbConnected, isOzonConnected])
-
   // Открыть историю по ?history=productId (при переходе из карточки товара).
   // historyId — UUID или displayId (0006, 6).
   useEffect(() => {
@@ -210,6 +200,16 @@ export default function ProductsPage() {
 
   const isWbConnected = connections.some((c) => c.marketplace === "WILDBERRIES")
   const isOzonConnected = connections.some((c) => c.marketplace === "OZON")
+
+  // Загружаем остатки при изменении подключений
+  useEffect(() => {
+    if (isWbConnected) {
+      fetchWbStockFbo()
+    }
+    if (isOzonConnected) {
+      fetchOzonStockFbo()
+    }
+  }, [isWbConnected, isOzonConnected])
   const atProductLimit = limits ? products.length >= limits.maxProducts : false
 
   // Селектор склада: local | WILDBERRIES | OZON | YANDEX | AVITO — горизонтальные вкладки
