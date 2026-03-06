@@ -332,6 +332,47 @@ export class MarketplacesService {
     return result;
   }
 
+  /** Остатки FBO (на складах Ozon) по productId — для страницы товаров */
+  async getOzonStockFbo(userId: string): Promise<Record<string, number>> {
+    const conn = await this.getMarketplaceConnection(userId, 'OZON');
+    if (!conn?.token) return {};
+    const ids = await this.getEffectiveUserIds(userId);
+    const mappings = await this.prisma.productMarketplaceMapping.findMany({
+      where: {
+        userId: { in: ids },
+        marketplace: 'OZON',
+        isActive: true,
+      },
+      select: { productId: true, externalSystemId: true },
+    });
+    const offerIds = mappings
+      .map((m) => m.externalSystemId)
+      .filter((id): id is string => !!id);
+    if (offerIds.length === 0) return {};
+    const adapter = this.adapterFactory.createAdapter('OZON', {
+      encryptedToken: conn.token,
+      encryptedRefreshToken: conn.refreshToken,
+      sellerId: conn.sellerId ?? undefined,
+      warehouseId: conn.warehouseId ?? undefined,
+    });
+    if (!adapter || !(adapter instanceof OzonAdapter)) return {};
+    try {
+      const stocksData = await adapter.getProductStocks(offerIds);
+      const result: Record<string, number> = {};
+      for (const m of mappings) {
+        const stockItem = stocksData.items.find(
+          (item) => item.offer_id === m.externalSystemId || String(item.product_id) === m.externalSystemId
+        );
+        if (stockItem?.stock != null) {
+          result[m.productId] = stockItem.stock;
+        }
+      }
+      return result;
+    } catch {
+      return {};
+    }
+  }
+
   /**
    * Синхронизация товаров на подключенные маркетплейсы.
    * @param marketplaceFilter — если указан, синхронизировать только на этот маркетплейс (OZON, WILDBERRIES и т.д.)

@@ -119,24 +119,45 @@ export default function ProductsPage() {
       .catch(() => {})
   }
 
+  // Остатки FBO по маркетплейсам
+  const [wbStockFbo, setWbStockFbo] = useState<Record<string, number>>({})
+  const [ozonStockFbo, setOzonStockFbo] = useState<Record<string, number>>({})
+
   const fetchProducts = () => {
     if (!token) return
-    Promise.all([
-      fetch("/api/products", { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()),
-      fetch("/api/marketplaces/wb-fbo-stock", { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.ok ? r.json() : {}),
-    ])
-      .then(([data, stockFboMapRaw]) => {
+    fetch("/api/products", { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => r.json())
+      .then((data) => {
         const list = Array.isArray(data) ? data : []
-        const stockFboMap = (typeof stockFboMapRaw === "object" && stockFboMapRaw != null && !Array.isArray(stockFboMapRaw))
-          ? (stockFboMapRaw as Record<string, number>)
-          : {}
-        const merged = list.map((p: Product) => ({
-          ...p,
-          stockFbo: p.id in stockFboMap ? stockFboMap[p.id] : undefined,
-        }))
-        setProducts(merged)
+        setProducts(list)
       })
       .catch(() => setProducts([]))
+  }
+
+  const fetchWbStockFbo = () => {
+    if (!token || !isWbConnected) return
+    fetch("/api/marketplaces/wb-fbo-stock", { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => r.ok ? r.json() : {})
+      .then((data) => {
+        const map = (typeof data === "object" && data != null && !Array.isArray(data))
+          ? (data as Record<string, number>)
+          : {}
+        setWbStockFbo(map)
+      })
+      .catch(() => setWbStockFbo({}))
+  }
+
+  const fetchOzonStockFbo = () => {
+    if (!token || !isOzonConnected) return
+    fetch("/api/marketplaces/ozon-fbo-stock", { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => r.ok ? r.json() : {})
+      .then((data) => {
+        const map = (typeof data === "object" && data != null && !Array.isArray(data))
+          ? (data as Record<string, number>)
+          : {}
+        setOzonStockFbo(map)
+      })
+      .catch(() => setOzonStockFbo({}))
   }
 
   const fetchConnections = () => {
@@ -155,10 +176,22 @@ export default function ProductsPage() {
     fetchProducts()
     fetchConnections()
     fetchSubscription()
+    // Загружаем остатки FBO при инициализации
+    fetchWbStockFbo()
     setLoading(false)
     const t = setInterval(fetchProducts, 60000)
     return () => clearInterval(t)
   }, [router, token])
+
+  // Загружаем остатки при изменении подключений
+  useEffect(() => {
+    if (isWbConnected) {
+      fetchWbStockFbo()
+    }
+    if (isOzonConnected) {
+      fetchOzonStockFbo()
+    }
+  }, [isWbConnected, isOzonConnected])
 
   // Открыть историю по ?history=productId (при переходе из карточки товара).
   // historyId — UUID или displayId (0006, 6).
@@ -184,12 +217,18 @@ export default function ProductsPage() {
   const [warehouseFilter, setWarehouseFilter] = useState<WarehouseFilter>("local")
   const [searchQuery, setSearchQuery] = useState("") // Поиск по артикулу или наименованию
 
-  // Отмена редактирования при переключении с Мой склад
+  // Отмена редактирования при переключении с Мой склад + загрузка остатков FBO
   useEffect(() => {
     if (warehouseFilter !== "local") {
       setEditingStockId(null)
       setEditingFieldId(null)
       setEditingField(null)
+    }
+    // Загружаем остатки FBO для выбранного маркетплейса
+    if (warehouseFilter === "WILDBERRIES") {
+      fetchWbStockFbo()
+    } else if (warehouseFilter === "OZON") {
+      fetchOzonStockFbo()
     }
   }, [warehouseFilter])
   const warehouseTabs: { value: WarehouseFilter; label: string }[] = [
@@ -819,9 +858,9 @@ export default function ProductsPage() {
                   <th className="text-left font-medium p-3">Название</th>
                   {/* {warehouseFilter !== "local" && <th className="text-left font-medium p-3">Описание</th>} */}
                   <th className="text-left font-medium p-3" title="Мой склад, клик для редактирования">Остаток FBS</th>
-                  <th className="text-left font-medium p-3" title="На складах WB">Остаток FBO</th>
+                  <th className="text-left font-medium p-3" title={warehouseFilter === "OZON" ? "На складах Ozon" : warehouseFilter === "WILDBERRIES" ? "На складах WB" : "На складах маркетплейсов"}>Остаток FBO</th>
                   <th className="text-left font-medium p-3" title="Резерв с нашего склада">Резерв FBS</th>
-                  <th className="text-left font-medium p-3" title="Резерв на складах WB">Резерв FBO</th>
+                  <th className="text-left font-medium p-3" title={warehouseFilter === "OZON" ? "Резерв на складах Ozon" : warehouseFilter === "WILDBERRIES" ? "Резерв на складах WB" : "Резерв на складах маркетплейсов"}>Резерв FBO</th>
                   <th className="text-left font-medium p-3">Себестоимость</th>
                   {warehouseFilter !== "local" && <th className="text-left font-medium p-3">SEO</th>}
                   <th className="text-left font-medium p-3">Маркетплейс</th>
@@ -928,7 +967,18 @@ export default function ProductsPage() {
                         )}
                       </td>
                       <td className="p-3 text-muted-foreground tabular-nums">
-                        {product.stockFbo != null ? product.stockFbo : "—"}
+                        {(() => {
+                          // Показываем остаток FBO для выбранного маркетплейса
+                          if (warehouseFilter === "WILDBERRIES") {
+                            return wbStockFbo[product.id] != null ? wbStockFbo[product.id] : "—"
+                          } else if (warehouseFilter === "OZON") {
+                            return ozonStockFbo[product.id] != null ? ozonStockFbo[product.id] : "—"
+                          } else {
+                            // Для "Мой склад" — сумма по всем маркетплейсам (пока только WB)
+                            const wbStock = wbStockFbo[product.id] ?? 0
+                            return wbStock > 0 ? wbStock : "—"
+                          }
+                        })()}
                       </td>
                       <td className="p-3 text-muted-foreground tabular-nums">{product.reservedFbs ?? 0}</td>
                       <td className="p-3 text-muted-foreground tabular-nums">{product.reservedFbo ?? 0}</td>

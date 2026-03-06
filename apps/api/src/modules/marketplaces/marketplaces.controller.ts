@@ -37,6 +37,12 @@ export class MarketplacesController {
     return this.marketplacesService.getWbStockFbo(userId);
   }
 
+  /** Остатки FBO (на складах Ozon) по productId — для страницы товаров */
+  @Get('ozon-fbo-stock')
+  async getOzonFboStock(@CurrentUser('userId') userId: string) {
+    return this.marketplacesService.getOzonStockFbo(userId);
+  }
+
   /** Справочник цветов WB (для выпадающего списка при создании/редактировании товара) */
   @Get('wb-colors')
   async getWbColors() {
