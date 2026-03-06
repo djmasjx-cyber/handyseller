@@ -1319,8 +1319,8 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
       ozonTypeId?: number;
     }> = [];
     // Используем /v3/product/info/list с sku (product_id)
-    const skus = items.map((it) => it.product_id).filter(Boolean);
-    console.log(`[OzonAdapter.getProductsFromOzon] Calling /v3/product/info/list for ${skus.length} skus: ${JSON.stringify(skus)}`);
+    const skus = items.map((it) => it.product_id).filter((id): id is number => id > 0);
+    console.log(`[OzonAdapter.getProductsFromOzon] Calling /v3/product/info/list for ${skus.length} skus`);
     try {
       const { data } = await firstValueFrom(
         this.httpService.post(
@@ -1336,6 +1336,7 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
           },
         ),
       );
+      console.log(`[OzonAdapter.getProductsFromOzon] /v3/product/info/list raw response: ${JSON.stringify(data?.result)?.slice(0, 500)}`);
       const infoItems = (data?.result?.items ?? []) as Array<{
         id?: number;
         offer_id?: string;
