@@ -54,10 +54,12 @@ export class DashboardService {
         console.warn('[Dashboard] order.findMany:', e instanceof Error ? e.message : String(e));
         return [] as Array<{ status: string; id: string; externalId: string; totalAmount: unknown; createdAt: Date; marketplace: string; items: Array<{ productId: string; product?: { title: string } }> }>;
       }),
+      // Заказы текущего месяца (по дате создания в нашей системе)
+      // Включаем все статусы кроме CANCELLED (отмены покупателем)
       this.prisma.order.aggregate({
         where: {
           userId,
-          createdAt: { gte: since },
+          createdAt: { gte: monthStart, lte: monthEnd },
           status: { not: 'CANCELLED' },
         },
         _sum: { totalAmount: true },
