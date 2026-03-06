@@ -30,7 +30,15 @@ export async function GET(req: NextRequest) {
     const orders = ordersRes.ok ? await ordersRes.json().catch(() => []) : []
     const connections = connectionsRes.ok ? await connectionsRes.json().catch(() => []) : []
 
-    const productsList = Array.isArray(products) ? products : []
+    const productsListRaw = Array.isArray(products) ? products : []
+    // Уникальные товары по id (как на странице "Мой склад")
+    const uniqueProductsMap = new Map<string, unknown>()
+    for (const p of productsListRaw as Array<{ id?: string; [k: string]: unknown }>) {
+      if (p?.id && !uniqueProductsMap.has(p.id)) {
+        uniqueProductsMap.set(p.id, p)
+      }
+    }
+    const productsList = Array.from(uniqueProductsMap.values())
     let ordersList = Array.isArray(orders) ? orders : []
     // Обогащаем заказы названиями товаров из каталога (по productId/nmId в sku)
     const productBySku = new Map<string, { title: string }>()
