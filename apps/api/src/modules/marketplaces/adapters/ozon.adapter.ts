@@ -1324,7 +1324,7 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
       const { data } = await firstValueFrom(
         this.httpService.post(
           `${this.API_BASE}/v3/product/info/list`,
-          { product_id: productIds },
+          { sku: productIds },
           {
             headers: {
               'Client-Id': this.config.sellerId ?? '',
