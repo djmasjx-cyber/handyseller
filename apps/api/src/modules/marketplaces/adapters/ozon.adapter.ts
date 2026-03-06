@@ -1351,7 +1351,7 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
         if (typeof inf?.description === 'string' && inf.description.trim()) {
           description = inf.description.slice(0, 5000);
         } else if (Array.isArray(inf?.source)) {
-          const attr4190 = inf.source.find((a) => a?.attribute_id === 4190);
+          const attr4190 = inf.source.find((a: { attribute_id?: number; value?: string }) => a?.attribute_id === 4190);
           if (attr4190?.value) description = attr4190.value.slice(0, 5000);
         }
         const images = inf?.images ?? [];
