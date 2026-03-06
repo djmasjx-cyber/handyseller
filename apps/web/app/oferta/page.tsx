@@ -1,26 +1,14 @@
 import Link from "next/link"
 import type { Metadata } from "next"
 import { ArrowLeft } from "lucide-react"
+import { LEGAL_REQUISITES } from "@/lib/legal-requisites"
 
 export const metadata: Metadata = {
   title: "Публичная оферта",
   description: "Публичная оферта HandySeller — условия оказания услуг по предоставлению доступа к программному обеспечению.",
 }
 
-// Заполните реквизиты перед публикацией
-const PLACEHOLDERS = {
-  city: "[Ваш Город]",
-  date: "[Дата]",
-  fullName: "[Ваша Фамилия Имя Отчество]",
-  inn: "[Ваш ИНН]",
-  ogrnip: "[Ваш ОГРНИП]",
-  bankAccount: "[Номер счета]",
-  bankName: "[Наименование банка]",
-  bik: "[БИК]",
-  correspondentAccount: "[Корр. счет]",
-  email: "[Ваш e-mail]",
-  phone: "[Ваш телефон]",
-}
+const P = LEGAL_REQUISITES
 
 export default function OfertaPage() {
   return (
@@ -40,13 +28,13 @@ export default function OfertaPage() {
             об оказании услуг по предоставлению доступа к программному обеспечению (Сервис HandySeller)
           </p>
           <p className="text-sm text-muted-foreground">
-            г. {PLACEHOLDERS.city}
+            г. {P.city}
             <br />
-            Дата публикации: {PLACEHOLDERS.date}
+            Дата публикации: {P.date}
           </p>
 
           <p className="mt-6">
-            Настоящий документ (далее – «Оферта») является официальным предложением Индивидуального предпринимателя {PLACEHOLDERS.fullName} (ИНН {PLACEHOLDERS.inn}, ОГРНИП {PLACEHOLDERS.ogrnip}), именуемого в дальнейшем «Исполнитель», адресованное неопределенному кругу лиц, обладающих правоспособностью и необходимыми полномочиями для заключения договора, заключить договор об оказании услуг по предоставлению доступа к программному обеспечению (далее – «Договор») на условиях, изложенных ниже.
+            Настоящий документ (далее – «Оферта») является официальным предложением Индивидуального предпринимателя {P.fullName} (ИНН {P.inn}, ОГРНИП {P.ogrnip}), именуемого в дальнейшем «Исполнитель», адресованное неопределенному кругу лиц, обладающих правоспособностью и необходимыми полномочиями для заключения договора, заключить договор об оказании услуг по предоставлению доступа к программному обеспечению (далее – «Договор») на условиях, изложенных ниже.
           </p>
 
           <h2 className="text-lg font-semibold mt-8 mb-4">1. ТЕРМИНЫ И ОПРЕДЕЛЕНИЯ</h2>
@@ -125,7 +113,7 @@ export default function OfertaPage() {
 
           <h2 className="text-lg font-semibold mt-8 mb-4">7. ФОРС-МАЖОР И РАЗРЕШЕНИЕ СПОРОВ</h2>
           <p><strong>7.1.</strong> Споры по настоящему Договору разрешаются путем переговоров с обязательным соблюдением досудебного претензионного порядка. Срок ответа на претензию – 10 (Десять) рабочих дней с даты ее получения.</p>
-          <p className="mt-2"><strong>7.2.</strong> В случае недостижения согласия, спор подлежит рассмотрению в суде по месту нахождения Исполнителя (либо в Арбитражном суде г. {PLACEHOLDERS.city} в соответствии с подсудностью, установленной АПК РФ для ИП и юрлиц).</p>
+          <p className="mt-2"><strong>7.2.</strong> В случае недостижения согласия, спор подлежит рассмотрению в суде по месту нахождения Исполнителя (либо в Арбитражном суде г. {P.city} в соответствии с подсудностью, установленной АПК РФ для ИП и юрлиц).</p>
           <p className="mt-2"><strong>7.3.</strong> По вопросам, не урегулированным настоящим Договором, Стороны руководствуются действующим законодательством РФ.</p>
 
           <h2 className="text-lg font-semibold mt-8 mb-4">8. СРОК ДЕЙСТВИЯ И ИЗМЕНЕНИЕ УСЛОВИЙ ОФЕРТЫ</h2>
@@ -136,15 +124,15 @@ export default function OfertaPage() {
 
           <h2 className="text-lg font-semibold mt-8 mb-4">9. РЕКВИЗИТЫ ИСПОЛНИТЕЛЯ</h2>
           <p className="font-mono text-sm">
-            Индивидуальный предприниматель {PLACEHOLDERS.fullName}<br />
-            ИНН: {PLACEHOLDERS.inn}<br />
-            ОГРНИП: {PLACEHOLDERS.ogrnip}<br />
-            Расчетный счет: {PLACEHOLDERS.bankAccount}<br />
-            Банк: {PLACEHOLDERS.bankName}<br />
-            БИК: {PLACEHOLDERS.bik}<br />
-            Корр. счет: {PLACEHOLDERS.correspondentAccount}<br />
-            E-mail для корреспонденции: {PLACEHOLDERS.email}<br />
-            Телефон: {PLACEHOLDERS.phone}
+            Индивидуальный предприниматель {P.fullName}<br />
+            ИНН: {P.inn}<br />
+            ОГРНИП: {P.ogrnip}<br />
+            Расчетный счет: {P.bankAccount}<br />
+            Банк: {P.bankName}<br />
+            БИК: {P.bik}<br />
+            Корр. счет: {P.correspondentAccount}<br />
+            E-mail для корреспонденции: {P.email}<br />
+            Телефон: {P.phone}
           </p>
         </article>
       </main>

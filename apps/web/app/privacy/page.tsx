@@ -1,21 +1,14 @@
 import Link from "next/link"
 import type { Metadata } from "next"
 import { ArrowLeft } from "lucide-react"
+import { LEGAL_REQUISITES } from "@/lib/legal-requisites"
 
 export const metadata: Metadata = {
   title: "Политика конфиденциальности",
   description: "Политика конфиденциальности и обработки персональных данных сервиса HandySeller в соответствии с 152-ФЗ.",
 }
 
-const PLACEHOLDERS = {
-  date: "[Дата]",
-  fullName: "[Ваша Фамилия Имя Отчество]",
-  inn: "[Ваш ИНН]",
-  ogrnip: "[Ваш ОГРНИП]",
-  address: "[Ваш почтовый адрес]",
-  email: "[Ваш e-mail для запросов по персональным данным]",
-  phone: "[Ваш телефон]",
-}
+const P = LEGAL_REQUISITES
 
 export default function PrivacyPage() {
   return (
@@ -35,7 +28,9 @@ export default function PrivacyPage() {
           </h1>
           <p className="text-muted-foreground mb-8">Сервиса HandySeller</p>
           <p className="text-sm text-muted-foreground">
-            Дата публикации: {PLACEHOLDERS.date}
+            г. {P.city}
+            <br />
+            Дата публикации: {P.date}
             <br />
             Версия: 1.0
           </p>
@@ -56,12 +51,12 @@ export default function PrivacyPage() {
           <h2 className="text-lg font-semibold mt-8 mb-4">2. ОПЕРАТОР ПЕРСОНАЛЬНЫХ ДАННЫХ</h2>
           <p><strong>2.1.</strong> Оператором персональных данных Пользователей является:</p>
           <p className="mt-2 font-mono text-sm">
-            Индивидуальный предприниматель {PLACEHOLDERS.fullName}<br />
-            ИНН: {PLACEHOLDERS.inn}<br />
-            ОГРНИП: {PLACEHOLDERS.ogrnip}<br />
-            Адрес для корреспонденции: {PLACEHOLDERS.address}<br />
-            E-mail: {PLACEHOLDERS.email}<br />
-            Телефон: {PLACEHOLDERS.phone}
+            Индивидуальный предприниматель {P.fullName}<br />
+            ИНН: {P.inn}<br />
+            ОГРНИП: {P.ogrnip}<br />
+            Адрес для корреспонденции: {P.address}<br />
+            E-mail: {P.email}<br />
+            Телефон: {P.phone}
           </p>
           <p className="mt-2"><strong>2.2.</strong> Оператор самостоятельно организует и осуществляет обработку персональных данных, а также определяет цели обработки, состав обрабатываемых персональных данных и совершаемые с ними действия.</p>
 
@@ -226,7 +221,7 @@ export default function PrivacyPage() {
           <ul className="list-disc pl-6 mt-2 space-y-1">
             <li>Через форму обратной связи в Личном кабинете;</li>
             <li>По электронной почте: <a href="mailto:privacy@handyseller.ru" className="text-primary hover:underline">privacy@handyseller.ru</a> (с пометкой «Персональные данные»);</li>
-            <li>По почтовому адресу: {PLACEHOLDERS.address}.</li>
+            <li>По почтовому адресу: {P.address}.</li>
           </ul>
           <p className="mt-2"><strong>11.2.</strong> При направлении запроса указывать: ФИО, e-mail, указанный при регистрации, суть запроса, способ ответа.</p>
           <p className="mt-2"><strong>11.3.</strong> Оператор вправе запросить дополнительную информацию для идентификации заявителя.</p>
