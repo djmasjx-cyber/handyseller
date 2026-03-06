@@ -1317,48 +1317,31 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
       ozonCategoryId?: number;
       ozonTypeId?: number;
     }> = [];
-    for (let i = 0; i < items.length; i += 100) {
-      const batch = items.slice(i, i + 100);
-      const productIds = batch.map((b) => b.product_id);
-      console.log(`[OzonAdapter.getProductsFromOzon] Calling /v3/product/info/list for ${productIds.length} products: ${JSON.stringify(productIds)}`);
-      const { data } = await firstValueFrom(
-        this.httpService.post(
-          `${this.API_BASE}/v3/product/info/list`,
-          { sku: productIds },
-          {
-            headers: {
-              'Client-Id': this.config.sellerId ?? '',
-              'Api-Key': this.config.apiKey,
-              'Content-Type': 'application/json',
+    // Используем /v2/product/info вместо /v3/product/info/list
+    for (const item of items) {
+      try {
+        console.log(`[OzonAdapter.getProductsFromOzon] Calling /v2/product/info for product_id=${item.product_id}`);
+        const { data } = await firstValueFrom(
+          this.httpService.post(
+            `${this.API_BASE}/v2/product/info`,
+            { product_id: item.product_id },
+            {
+              headers: {
+                'Client-Id': this.config.sellerId ?? '',
+                'Api-Key': this.config.apiKey,
+                'Content-Type': 'application/json',
+              },
+              timeout: 10000,
             },
-            timeout: 20000,
-          },
-        ),
-      );
-      console.log(`[OzonAdapter.getProductsFromOzon] /v3/product/info/list raw response: ${JSON.stringify(data?.result)}`);
-      const infoItems = (data?.result?.items ?? []) as Array<{
-        id?: number;
-        offer_id?: string;
-        name?: string;
-        description?: string;
-        source?: { item_id?: number; attribute_id?: number; value?: string }[];
-        images?: string[];
-        marketing_price?: string;
-        price?: string;
-        old_price?: string;
-        barcode?: string;
-        barcodes?: string[] | Array<{ barcode?: string }>;
-        weight?: number;
-        height?: number;
-        width?: number;
-        depth?: number;
-        description_category_id?: number;
-        type_id?: number;
-      }>;
-      console.log(`[OzonAdapter.getProductsFromOzon] /v3/product/info/list returned ${infoItems.length} items`);
-      for (const inf of infoItems) {
-        const pid = inf?.id ?? 0;
-        const offerId = (inf?.offer_id ?? '').toString().trim();
+          ),
+        );
+        const inf = data?.result;
+        if (!inf) {
+          console.log(`[OzonAdapter.getProductsFromOzon] No result for product_id=${item.product_id}`);
+          continue;
+        }
+        const pid = inf?.id ?? item.product_id;
+        const offerId = (inf?.offer_id ?? item.offer_id ?? '').toString().trim();
         const name = (inf?.name ?? `Товар ${pid}`).trim().slice(0, 500);
         if (!name) {
           console.log(`[OzonAdapter.getProductsFromOzon] Skipping product ${pid}: empty name`);
@@ -1395,6 +1378,8 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
           ozonCategoryId: typeof catId === 'number' && catId > 0 ? catId : undefined,
           ozonTypeId: typeof typeId === 'number' && typeId > 0 ? typeId : undefined,
         });
+      } catch (err) {
+        console.log(`[OzonAdapter.getProductsFromOzon] Error fetching product_id=${item.product_id}: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
     console.log(`[OzonAdapter.getProductsFromOzon] Returning ${out.length} products`);
