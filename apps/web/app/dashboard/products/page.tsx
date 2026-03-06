@@ -813,6 +813,7 @@ export default function ProductsPage() {
             <table className="w-full text-sm">
               <thead className="sticky top-0 z-10 bg-muted/95 backdrop-blur-sm">
                 <tr className="border-b bg-muted/50">
+                  <th className="text-left font-medium p-3 w-16">Фото</th>
                   <th className="text-left font-medium p-3">ID</th>
                   <th className="text-left font-medium p-3">Артикул</th>
                   <th className="text-left font-medium p-3">Название</th>
@@ -857,6 +858,19 @@ export default function ProductsPage() {
                           : undefined
                       }
                     >
+                      <td className="p-3">
+                        {product.imageUrl ? (
+                          <img
+                            src={product.imageUrl}
+                            alt={product.title}
+                            className="h-12 w-12 object-cover rounded-md border"
+                          />
+                        ) : (
+                          <div className="h-12 w-12 rounded-md bg-muted flex items-center justify-center border">
+                            <Package className="h-6 w-6 text-muted-foreground" />
+                          </div>
+                        )}
+                      </td>
                       <td className="p-3 font-mono font-medium">
                         {product.displayId != null
                           ? String(product.displayId).padStart(4, "0")
