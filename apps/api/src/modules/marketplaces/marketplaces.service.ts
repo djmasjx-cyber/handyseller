@@ -345,10 +345,19 @@ export class MarketplacesService {
       },
       select: { productId: true, externalSystemId: true, externalArticle: true },
     });
-    const identifiers = mappings
-      .map((m) => m.externalArticle ?? m.externalSystemId)
-      .filter((id): id is string => !!id);
-    if (identifiers.length === 0) return {};
+    const productIdSet = new Set<number>();
+    const offerIdSet = new Set<string>();
+    for (const m of mappings) {
+      if (m.externalSystemId && /^\d+$/.test(m.externalSystemId)) {
+        productIdSet.add(parseInt(m.externalSystemId, 10));
+      } else {
+        const offer = (m.externalArticle ?? m.externalSystemId ?? '').trim();
+        if (offer && !offer.startsWith('OZON_')) offerIdSet.add(offer);
+      }
+    }
+    const productIds = [...productIdSet];
+    const offerIds = [...offerIdSet];
+    if (productIds.length === 0 && offerIds.length === 0) return {};
     const adapter = this.adapterFactory.createAdapter('OZON', {
       encryptedToken: conn.token,
       encryptedRefreshToken: conn.refreshToken,
@@ -357,13 +366,13 @@ export class MarketplacesService {
     });
     if (!adapter || !(adapter instanceof OzonAdapter)) return {};
     try {
-      const byProductOrOffer = await adapter.getStocksFbo(identifiers);
+      const byProductOrOffer = await adapter.getStocksFbo({ productIds, offerIds });
       const result: Record<string, number> = {};
       for (const m of mappings) {
-        const key = m.externalArticle ?? m.externalSystemId;
-        if (key && byProductOrOffer[key] != null) {
-          result[m.productId] = byProductOrOffer[key];
-        }
+        const stock =
+          (m.externalSystemId && byProductOrOffer[m.externalSystemId]) ??
+          (m.externalArticle && byProductOrOffer[m.externalArticle]);
+        if (stock != null) result[m.productId] = stock;
       }
       return result;
     } catch {
@@ -374,7 +383,8 @@ export class MarketplacesService {
   /** Диагностика остатков FBO Ozon: mappings, запрос, сырой ответ API, распарсенный результат */
   async getOzonFboStockDiagnostic(userId: string): Promise<{
     mappings: Array<{ productId: string; externalSystemId: string; externalArticle: string | null }>;
-    identifiers: string[];
+    productIds: number[];
+    offerIds: string[];
     warehouseId: string | null;
     diagnostic: { request: object; response: unknown; parsed: Record<string, number> };
     resultByProductId: Record<string, number>;
@@ -383,7 +393,8 @@ export class MarketplacesService {
     if (!conn?.token) {
       return {
         mappings: [],
-        identifiers: [],
+        productIds: [],
+        offerIds: [],
         warehouseId: null,
         diagnostic: { request: {}, response: { error: 'Ozon не подключён' }, parsed: {} },
         resultByProductId: {},
@@ -394,9 +405,18 @@ export class MarketplacesService {
       where: { userId: { in: ids }, marketplace: 'OZON', isActive: true },
       select: { productId: true, externalSystemId: true, externalArticle: true },
     });
-    const identifiers = mappings
-      .map((m) => m.externalArticle ?? m.externalSystemId)
-      .filter((id): id is string => !!id);
+    const productIdSet = new Set<number>();
+    const offerIdSet = new Set<string>();
+    for (const m of mappings) {
+      if (m.externalSystemId && /^\d+$/.test(m.externalSystemId)) {
+        productIdSet.add(parseInt(m.externalSystemId, 10));
+      } else {
+        const offer = (m.externalArticle ?? m.externalSystemId ?? '').trim();
+        if (offer && !offer.startsWith('OZON_')) offerIdSet.add(offer);
+      }
+    }
+    const productIds = [...productIdSet];
+    const offerIds = [...offerIdSet];
     const adapter = this.adapterFactory.createAdapter('OZON', {
       encryptedToken: conn.token,
       encryptedRefreshToken: conn.refreshToken,
@@ -406,23 +426,25 @@ export class MarketplacesService {
     if (!adapter || !(adapter instanceof OzonAdapter)) {
       return {
         mappings: mappings.map((m) => ({ ...m, externalArticle: m.externalArticle })),
-        identifiers,
+        productIds,
+        offerIds,
         warehouseId: conn.warehouseId,
         diagnostic: { request: {}, response: { error: 'Адаптер Ozon не создан' }, parsed: {} },
         resultByProductId: {},
       };
     }
-    const diagnostic = await adapter.getStocksFboRaw(identifiers);
+    const diagnostic = await adapter.getStocksFboRaw({ productIds, offerIds });
     const resultByProductId: Record<string, number> = {};
     for (const m of mappings) {
-      const key = m.externalArticle ?? m.externalSystemId;
-      if (key && diagnostic.parsed[key] != null) {
-        resultByProductId[m.productId] = diagnostic.parsed[key];
-      }
+      const stock =
+        (m.externalSystemId && diagnostic.parsed[m.externalSystemId]) ??
+        (m.externalArticle && diagnostic.parsed[m.externalArticle]);
+      if (stock != null) resultByProductId[m.productId] = stock;
     }
     return {
       mappings: mappings.map((m) => ({ ...m, externalArticle: m.externalArticle })),
-      identifiers,
+      productIds,
+      offerIds,
       warehouseId: conn.warehouseId,
       diagnostic,
       resultByProductId,

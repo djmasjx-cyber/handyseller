@@ -684,37 +684,21 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
 
   /**
    * Остатки FBO (на складах Ozon) — товар на складах Ozon, не на нашем FBS-складе.
-   * POST /v4/product/info/stocks возвращает items с stocks[] по складам (type: fbs/fbo).
-   * Суммируем present где type='fbo'. Fallback: если stocks[] пустой — total stock (для FBO-only).
-   * @param identifiers — offer_id или product_id (Ozon принимает оба в filter)
+   * POST /v4/product/info/stocks. Два типа запросов (product_id + offer_id), батчинг по 100, пагинация.
+   * Возвращает Record: ключ = product_id или offer_id (для маппинга в сервисе).
    */
-  async getStocksFbo(identifiers: string[]): Promise<Record<string, number>> {
-    if (identifiers.length === 0) return {};
+  async getStocksFbo(params: {
+    productIds: number[];
+    offerIds: string[];
+  }): Promise<Record<string, number>> {
+    const { productIds, offerIds } = params;
+    if (productIds.length === 0 && offerIds.length === 0) return {};
     const ourWarehouseId = this.config.warehouseId ? parseInt(this.config.warehouseId, 10) : 0;
     const result: Record<string, number> = {};
-    const productIds = identifiers.filter((id) => /^\d+$/.test(id)).map((id) => parseInt(id, 10));
-    const offerIds = identifiers.filter((id) => !/^\d+$/.test(id));
-    const filter: { visibility: string; offer_id?: string[]; product_id?: number[] } = { visibility: 'ALL' };
-    if (productIds.length > 0) filter.product_id = productIds;
-    else if (offerIds.length > 0) filter.offer_id = offerIds;
-    else return {};
-    try {
-      const { data } = await firstValueFrom(
-        this.httpService.post<{ result?: { items?: unknown[] }; items?: unknown[] }>(
-          `${this.API_BASE}/v4/product/info/stocks`,
-          { filter },
-          { headers: this.ozonHeaders(), timeout: 15000 },
-        ),
-      );
-      const items = (data?.result?.items ?? data?.items ?? []) as Array<{
-        offer_id?: string;
-        product_id?: number;
-        stock?: number;
-        stocks?: Array<{ warehouse_id?: number; type?: string; present?: number; reserved?: number }>;
-      }>;
+    const BATCH = 100;
+
+    const parseItems = (items: Array<{ offer_id?: string; product_id?: number; stock?: number; stocks?: Array<{ warehouse_id?: number; type?: string; present?: number }> }>) => {
       for (const item of items) {
-        const key = item.offer_id ?? (item.product_id != null ? String(item.product_id) : '');
-        if (!key) continue;
         let fboStock = 0;
         if (Array.isArray(item.stocks) && item.stocks.length > 0) {
           for (const s of item.stocks) {
@@ -732,7 +716,52 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
         } else if (item.stock != null) {
           fboStock = Number(item.stock);
         }
-        if (fboStock > 0) result[key] = fboStock;
+        if (fboStock > 0) {
+          if (item.product_id != null) result[String(item.product_id)] = fboStock;
+          if (item.offer_id?.trim()) result[item.offer_id.trim()] = fboStock;
+        }
+      }
+    };
+
+    const fetchBatch = async (
+      filter: { visibility: string; product_id?: number[]; offer_id?: string[] },
+    ): Promise<void> => {
+      const isProductId = 'product_id' in filter && filter.product_id != null;
+      const ids = (filter.product_id ?? filter.offer_id ?? []) as number[] | string[];
+      for (let offset = 0; offset < ids.length; offset += BATCH) {
+        const batch = isProductId
+          ? (ids as number[]).slice(offset, offset + BATCH)
+          : (ids as string[]).slice(offset, offset + BATCH);
+        if (batch.length === 0) break;
+        let lastId: string | undefined;
+        do {
+          const f = { visibility: 'ALL' as const, ...(isProductId ? { product_id: batch } : { offer_id: batch }) };
+          const body = lastId ? { filter: f, last_id: lastId } : { filter: f };
+          const { data } = await firstValueFrom(
+            this.httpService.post<{ result?: { items?: unknown[]; last_id?: string }; items?: unknown[] }>(
+              `${this.API_BASE}/v4/product/info/stocks`,
+              body,
+              { headers: this.ozonHeaders(), timeout: 15000 },
+            ),
+          );
+          const items = (data?.result?.items ?? data?.items ?? []) as Array<{
+            offer_id?: string;
+            product_id?: number;
+            stock?: number;
+            stocks?: Array<{ warehouse_id?: number; type?: string; present?: number }>;
+          }>;
+          parseItems(items);
+          lastId = data?.result?.last_id;
+        } while (lastId);
+      }
+    };
+
+    try {
+      if (productIds.length > 0) {
+        await fetchBatch({ visibility: 'ALL', product_id: productIds });
+      }
+      if (offerIds.length > 0) {
+        await fetchBatch({ visibility: 'ALL', offer_id: offerIds });
       }
       return result;
     } catch (error) {
@@ -742,15 +771,16 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
   }
 
   /**
-   * Диагностика: сырой ответ Ozon v4/product/info/stocks для отладки остатков FBO.
-   * Один запрос — возвращаем request, response и распарсенный результат.
+   * Диагностика: сырой ответ Ozon v4/product/info/stocks. Один запрос (первый batch).
    */
-  async getStocksFboRaw(identifiers: string[]): Promise<{ request: object; response: unknown; parsed: Record<string, number> }> {
-    const productIds = identifiers.filter((id) => /^\d+$/.test(id)).map((id) => parseInt(id, 10));
-    const offerIds = identifiers.filter((id) => !/^\d+$/.test(id));
-    const filter: { visibility: string; offer_id?: string[]; product_id?: number[] } = { visibility: 'ALL' };
-    if (productIds.length > 0) filter.product_id = productIds;
-    else if (offerIds.length > 0) filter.offer_id = offerIds;
+  async getStocksFboRaw(params: {
+    productIds: number[];
+    offerIds: string[];
+  }): Promise<{ request: object; response: unknown; parsed: Record<string, number> }> {
+    const { productIds, offerIds } = params;
+    const filter: { visibility: string; product_id?: number[]; offer_id?: string[] } = { visibility: 'ALL' };
+    if (productIds.length > 0) filter.product_id = productIds.slice(0, 100);
+    else if (offerIds.length > 0) filter.offer_id = offerIds.slice(0, 100);
     const request = { filter };
     try {
       const { data } = await firstValueFrom(
@@ -768,18 +798,18 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
       }>;
       const parsed: Record<string, number> = {};
       for (const item of items) {
-        const key = item.offer_id ?? (item.product_id != null ? String(item.product_id) : '');
-        if (!key) continue;
         let fboStock = 0;
         if (Array.isArray(item.stocks) && item.stocks.length > 0) {
           for (const s of item.stocks) {
-            const type = (s.type ?? '').toLowerCase();
-            if (type === 'fbo') fboStock += Number(s.present ?? 0);
+            if ((s.type ?? '').toLowerCase() === 'fbo') fboStock += Number(s.present ?? 0);
           }
         } else if (item.stock != null) {
           fboStock = Number(item.stock);
         }
-        if (fboStock > 0) parsed[key] = fboStock;
+        if (fboStock > 0) {
+          if (item.product_id != null) parsed[String(item.product_id)] = fboStock;
+          if (item.offer_id?.trim()) parsed[item.offer_id.trim()] = fboStock;
+        }
       }
       return { request, response: data, parsed };
     } catch (err) {

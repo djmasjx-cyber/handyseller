@@ -619,7 +619,8 @@ export default function ProductsPage() {
       const data = await res.json().catch(() => ({}))
       const msg = [
         `Маппингов Ozon: ${data.mappings?.length ?? 0}`,
-        `Идентификаторов: ${data.identifiers?.join(", ") || "—"}`,
+        `product_id: [${(data.productIds ?? []).join(", ")}]`,
+        `offer_id: [${(data.offerIds ?? []).join(", ")}]`,
         `warehouseId: ${data.warehouseId ?? "не задан"}`,
         `Распарсено: ${JSON.stringify(data.resultByProductId ?? data.diagnostic?.parsed ?? {})}`,
         data.diagnostic?.response ? `Ответ API: ${JSON.stringify(data.diagnostic.response).slice(0, 500)}...` : "",
