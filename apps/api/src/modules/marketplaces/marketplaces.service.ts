@@ -371,6 +371,64 @@ export class MarketplacesService {
     }
   }
 
+  /** Диагностика остатков FBO Ozon: mappings, запрос, сырой ответ API, распарсенный результат */
+  async getOzonFboStockDiagnostic(userId: string): Promise<{
+    mappings: Array<{ productId: string; externalSystemId: string; externalArticle: string | null }>;
+    identifiers: string[];
+    warehouseId: string | null;
+    diagnostic: { request: object; response: unknown; parsed: Record<string, number> };
+    resultByProductId: Record<string, number>;
+  }> {
+    const conn = await this.getMarketplaceConnection(userId, 'OZON');
+    if (!conn?.token) {
+      return {
+        mappings: [],
+        identifiers: [],
+        warehouseId: null,
+        diagnostic: { request: {}, response: { error: 'Ozon не подключён' }, parsed: {} },
+        resultByProductId: {},
+      };
+    }
+    const ids = await this.getEffectiveUserIds(userId);
+    const mappings = await this.prisma.productMarketplaceMapping.findMany({
+      where: { userId: { in: ids }, marketplace: 'OZON', isActive: true },
+      select: { productId: true, externalSystemId: true, externalArticle: true },
+    });
+    const identifiers = mappings
+      .map((m) => m.externalArticle ?? m.externalSystemId)
+      .filter((id): id is string => !!id);
+    const adapter = this.adapterFactory.createAdapter('OZON', {
+      encryptedToken: conn.token,
+      encryptedRefreshToken: conn.refreshToken,
+      sellerId: conn.sellerId ?? undefined,
+      warehouseId: conn.warehouseId ?? undefined,
+    });
+    if (!adapter || !(adapter instanceof OzonAdapter)) {
+      return {
+        mappings: mappings.map((m) => ({ ...m, externalArticle: m.externalArticle })),
+        identifiers,
+        warehouseId: conn.warehouseId,
+        diagnostic: { request: {}, response: { error: 'Адаптер Ozon не создан' }, parsed: {} },
+        resultByProductId: {},
+      };
+    }
+    const diagnostic = await adapter.getStocksFboRaw(identifiers);
+    const resultByProductId: Record<string, number> = {};
+    for (const m of mappings) {
+      const key = m.externalArticle ?? m.externalSystemId;
+      if (key && diagnostic.parsed[key] != null) {
+        resultByProductId[m.productId] = diagnostic.parsed[key];
+      }
+    }
+    return {
+      mappings: mappings.map((m) => ({ ...m, externalArticle: m.externalArticle })),
+      identifiers,
+      warehouseId: conn.warehouseId,
+      diagnostic,
+      resultByProductId,
+    };
+  }
+
   /**
    * Синхронизация товаров на подключенные маркетплейсы.
    * @param marketplaceFilter — если указан, синхронизировать только на этот маркетплейс (OZON, WILDBERRIES и т.д.)

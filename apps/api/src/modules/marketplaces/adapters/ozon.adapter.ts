@@ -684,9 +684,8 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
 
   /**
    * Остатки FBO (на складах Ozon) — товар на складах Ozon, не на нашем FBS-складе.
-   * POST /v4/product/info/stocks возвращает items с stocks[] по складам.
-   * Суммируем present где type='fbo' или warehouse_id != наш FBS warehouse_id.
-   * Резервы FBO считаются из заказов в БД (isFbo=true).
+   * POST /v4/product/info/stocks возвращает items с stocks[] по складам (type: fbs/fbo).
+   * Суммируем present где type='fbo'. Fallback: если stocks[] пустой — total stock (для FBO-only).
    * @param identifiers — offer_id или product_id (Ozon принимает оба в filter)
    */
   async getStocksFbo(identifiers: string[]): Promise<Record<string, number>> {
@@ -701,13 +700,13 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
     else return {};
     try {
       const { data } = await firstValueFrom(
-        this.httpService.post<{ result?: { items?: unknown[] } }>(
+        this.httpService.post<{ result?: { items?: unknown[] }; items?: unknown[] }>(
           `${this.API_BASE}/v4/product/info/stocks`,
           { filter },
           { headers: this.ozonHeaders(), timeout: 15000 },
         ),
       );
-      const items = (data?.result?.items ?? []) as Array<{
+      const items = (data?.result?.items ?? data?.items ?? []) as Array<{
         offer_id?: string;
         product_id?: number;
         stock?: number;
@@ -730,7 +729,7 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
               fboStock += present;
             }
           }
-        } else if (item.stock != null && ourWarehouseId <= 0) {
+        } else if (item.stock != null) {
           fboStock = Number(item.stock);
         }
         if (fboStock > 0) result[key] = fboStock;
@@ -739,6 +738,52 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
     } catch (error) {
       this.logError(error, 'getStocksFbo');
       return {};
+    }
+  }
+
+  /**
+   * Диагностика: сырой ответ Ozon v4/product/info/stocks для отладки остатков FBO.
+   * Один запрос — возвращаем request, response и распарсенный результат.
+   */
+  async getStocksFboRaw(identifiers: string[]): Promise<{ request: object; response: unknown; parsed: Record<string, number> }> {
+    const productIds = identifiers.filter((id) => /^\d+$/.test(id)).map((id) => parseInt(id, 10));
+    const offerIds = identifiers.filter((id) => !/^\d+$/.test(id));
+    const filter: { visibility: string; offer_id?: string[]; product_id?: number[] } = { visibility: 'ALL' };
+    if (productIds.length > 0) filter.product_id = productIds;
+    else if (offerIds.length > 0) filter.offer_id = offerIds;
+    const request = { filter };
+    try {
+      const { data } = await firstValueFrom(
+        this.httpService.post<{ result?: { items?: unknown[] }; items?: unknown[] }>(
+          `${this.API_BASE}/v4/product/info/stocks`,
+          request,
+          { headers: this.ozonHeaders(), timeout: 15000, validateStatus: () => true },
+        ),
+      );
+      const items = (data?.result?.items ?? data?.items ?? []) as Array<{
+        offer_id?: string;
+        product_id?: number;
+        stock?: number;
+        stocks?: Array<{ warehouse_id?: number; type?: string; present?: number }>;
+      }>;
+      const parsed: Record<string, number> = {};
+      for (const item of items) {
+        const key = item.offer_id ?? (item.product_id != null ? String(item.product_id) : '');
+        if (!key) continue;
+        let fboStock = 0;
+        if (Array.isArray(item.stocks) && item.stocks.length > 0) {
+          for (const s of item.stocks) {
+            const type = (s.type ?? '').toLowerCase();
+            if (type === 'fbo') fboStock += Number(s.present ?? 0);
+          }
+        } else if (item.stock != null) {
+          fboStock = Number(item.stock);
+        }
+        if (fboStock > 0) parsed[key] = fboStock;
+      }
+      return { request, response: data, parsed };
+    } catch (err) {
+      return { request, response: { error: err instanceof Error ? err.message : String(err) }, parsed: {} };
     }
   }
 

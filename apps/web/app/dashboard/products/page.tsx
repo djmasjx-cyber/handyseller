@@ -612,6 +612,25 @@ export default function ProductsPage() {
   const handleImportFromWb = () => handleImportFromMarketplace("WILDBERRIES")
   const handleImportFromOzon = () => handleImportFromMarketplace("OZON")
 
+  const handleOzonFboDebug = async () => {
+    if (!token || !isOzonConnected) return
+    try {
+      const res = await fetch("/api/marketplaces/ozon-fbo-stock-debug", { headers: { Authorization: `Bearer ${token}` } })
+      const data = await res.json().catch(() => ({}))
+      const msg = [
+        `Маппингов Ozon: ${data.mappings?.length ?? 0}`,
+        `Идентификаторов: ${data.identifiers?.join(", ") || "—"}`,
+        `warehouseId: ${data.warehouseId ?? "не задан"}`,
+        `Распарсено: ${JSON.stringify(data.resultByProductId ?? data.diagnostic?.parsed ?? {})}`,
+        data.diagnostic?.response ? `Ответ API: ${JSON.stringify(data.diagnostic.response).slice(0, 500)}...` : "",
+      ].filter(Boolean).join("\n")
+      console.log("Ozon FBO диагностика:", data)
+      alert(msg)
+    } catch (e) {
+      alert("Ошибка: " + (e instanceof Error ? e.message : String(e)))
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-16">
@@ -662,14 +681,19 @@ export default function ProductsPage() {
             </Button>
           )}
           {isOzonConnected && (
-            <Button variant="outline" className="border-[#005BFF] text-[#005BFF] hover:bg-[#005BFF]/10 hover:text-[#005BFF]" onClick={handleImportFromOzon} disabled={!!importingMarketplace || atProductLimit} title={atProductLimit ? "Достигнут лимит товаров" : undefined}>
-              {importingMarketplace === "OZON" ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Download className="mr-2 h-4 w-4" />
-              )}
-              Импорт с Ozon
-            </Button>
+            <>
+              <Button variant="outline" className="border-[#005BFF] text-[#005BFF] hover:bg-[#005BFF]/10 hover:text-[#005BFF]" onClick={handleImportFromOzon} disabled={!!importingMarketplace || atProductLimit} title={atProductLimit ? "Достигнут лимит товаров" : undefined}>
+                {importingMarketplace === "OZON" ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="mr-2 h-4 w-4" />
+                )}
+                Импорт с Ozon
+              </Button>
+              <Button variant="ghost" size="sm" onClick={handleOzonFboDebug} title="Диагностика остатков FBO Ozon">
+                FBO debug
+              </Button>
+            </>
           )}
         </div>
       </div>

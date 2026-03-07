@@ -21,10 +21,25 @@ export class OrdersController {
     return this.ordersService.createManualOrder(userId, dto);
   }
 
-  /** Синхронизация заказов с маркетплейсов в БД (с идемпотентностью) */
+  /** Синхронизация заказов с маркетплейсов в БД (с идемпотентностью).
+   * ?since=ISO_DATE — с указанной даты.
+   * ?days=365 — за последние N дней (для полной синхронизации FBO за весь период).
+   */
   @Post('sync')
-  async sync(@CurrentUser('userId') userId: string, @Query('since') since?: string) {
-    const sinceDate = since ? new Date(since) : undefined;
+  async sync(
+    @CurrentUser('userId') userId: string,
+    @Query('since') since?: string,
+    @Query('days') days?: string,
+  ) {
+    let sinceDate: Date | undefined;
+    if (since) {
+      sinceDate = new Date(since);
+    } else if (days) {
+      const n = parseInt(days, 10);
+      if (!isNaN(n) && n > 0) {
+        sinceDate = new Date(Date.now() - n * 24 * 60 * 60 * 1000);
+      }
+    }
     return this.ordersService.syncFromMarketplaces(userId, sinceDate);
   }
 

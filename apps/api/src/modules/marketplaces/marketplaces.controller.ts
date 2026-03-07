@@ -43,6 +43,12 @@ export class MarketplacesController {
     return this.marketplacesService.getOzonStockFbo(userId);
   }
 
+  /** Диагностика: сырой ответ Ozon v4/product/info/stocks для отладки остатков FBO */
+  @Get('ozon-fbo-stock-debug')
+  async getOzonFboStockDebug(@CurrentUser('userId') userId: string) {
+    return this.marketplacesService.getOzonFboStockDiagnostic(userId);
+  }
+
   /** Справочник цветов WB (для выпадающего списка при создании/редактировании товара) */
   @Get('wb-colors')
   async getWbColors() {

@@ -231,12 +231,13 @@ export default function OrdersPage() {
     return () => clearInterval(t)
   }, [orders, tick])
 
-  const handleSync = async () => {
+  const doSync = async (days?: number) => {
     if (!token) return
     setSyncing(true)
     setSyncingError(null)
     try {
-      const res = await fetch("/api/orders/sync", {
+      const url = days ? `/api/orders/sync?days=${days}` : "/api/orders/sync"
+      const res = await fetch(url, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       })
@@ -259,6 +260,9 @@ export default function OrdersPage() {
       setSyncing(false)
     }
   }
+
+  const handleSync = () => doSync()
+  const handleFullSync = () => doSync(365)
 
   const handleStatusChange = async (orderId: string, newStatus: string) => {
     if (!token) return
@@ -340,13 +344,16 @@ export default function OrdersPage() {
           Заказы синхронизируются каждые 5 мин. Холд 1 ч — после него автоматический переход в «На сборке» при наличии остатка.
         </p>
         <div className="hidden md:flex gap-2">
-          <Button variant="outline" size="sm" onClick={handleSync} disabled={syncing} title="Обновить сейчас">
+          <Button variant="outline" size="sm" onClick={handleSync} disabled={syncing} title="Обновить сейчас (14 дней)">
             {syncing ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (
               <RefreshCw className="mr-2 h-4 w-4" />
             )}
             Синхронизировать
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleFullSync} disabled={syncing} title="Подтянуть все заказы FBO за год">
+            Полная синхр. (365 дн.)
           </Button>
           <Button variant="ghost" size="sm" onClick={handleWbDebug} title="Проверить заказы с WB">
             Диагностика WB
