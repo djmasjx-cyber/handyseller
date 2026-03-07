@@ -14,8 +14,10 @@ import {
   Lightbulb,
   Store,
   Target,
+  ChevronRight,
 } from "lucide-react"
 import Link from "next/link"
+import { MonthDrilldownModal } from "@/components/month-drilldown-modal"
 
 const MARKETPLACE_META: Record<string, { label: string; color: string }> = {
   wildberries: { label: "WB", color: "!bg-[#CB11AB] !border-[#CB11AB] text-white" },
@@ -78,6 +80,11 @@ export default function AnalyticsPage() {
   const [productStats, setProductStats] = useState<ProductAnalyticsRow[]>([])
   const [loading, setLoading] = useState(true)
   const [mounted, setMounted] = useState(false)
+  const [drilldown, setDrilldown] = useState<{
+    type: "revenue" | "orders"
+    month: string
+    year: number
+  } | null>(null)
 
   useEffect(() => {
     setMounted(true)
@@ -199,10 +206,18 @@ export default function AnalyticsPage() {
       {/* Блок Выручка — 3 месяца */}
       <div className="grid gap-4 md:grid-cols-3">
         {monthsToShow.map((m, i) => (
-          <Card key={i}>
+          <Card
+            key={i}
+            className="cursor-pointer transition-all hover:shadow-md hover:border-primary/20 active:scale-[0.99]"
+            onClick={() => m.year && setDrilldown({ type: "revenue", month: m.month, year: m.year })}
+            title="Нажмите, чтобы увидеть топ товаров"
+          >
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Выручка · {m.month}</CardTitle>
-              <TrendingUp className="h-4 w-4 text-muted-foreground" />
+              <div className="flex items-center gap-1">
+                <TrendingUp className="h-4 w-4 text-muted-foreground" />
+                <ChevronRight className="h-4 w-4 text-muted-foreground/70" />
+              </div>
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
@@ -222,10 +237,18 @@ export default function AnalyticsPage() {
       {/* Блок Заказы — 3 месяца */}
       <div className="grid gap-4 md:grid-cols-3">
         {monthsToShow.map((m, i) => (
-          <Card key={i}>
+          <Card
+            key={i}
+            className="cursor-pointer transition-all hover:shadow-md hover:border-primary/20 active:scale-[0.99]"
+            onClick={() => m.year && setDrilldown({ type: "orders", month: m.month, year: m.year })}
+            title="Нажмите, чтобы увидеть топ товаров"
+          >
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Заказы · {m.month}</CardTitle>
-              <ShoppingCart className="h-4 w-4 text-muted-foreground" />
+              <div className="flex items-center gap-1">
+                <ShoppingCart className="h-4 w-4 text-muted-foreground" />
+                <ChevronRight className="h-4 w-4 text-muted-foreground/70" />
+              </div>
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{m.orders ?? 0}</div>
@@ -409,6 +432,15 @@ export default function AnalyticsPage() {
           </div>
         </CardContent>
       </Card>
+
+      <MonthDrilldownModal
+        open={!!drilldown}
+        onOpenChange={(open) => !open && setDrilldown(null)}
+        type={drilldown?.type ?? "revenue"}
+        month={drilldown?.month ?? "—"}
+        year={drilldown?.year ?? 0}
+        token={token}
+      />
     </div>
   )
 }
