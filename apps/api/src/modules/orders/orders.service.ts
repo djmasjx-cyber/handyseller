@@ -941,8 +941,10 @@ export class OrdersService {
       return (await this.productsService.findByArticle(userId, marketplaceProductId)) ?? null;
     }
 
-    // 3. Fallback для Ozon: по product_id получить offer_id, найти по артикулу, создать связку
-    if (marketplace === 'OZON') {
+    // 3. Fallback для Ozon: автосоздание товара из Ozon при синхронизации заказа (FBO и др.)
+    if (marketplace === 'OZON' && marketplaceProductId?.trim()) {
+      const created = await this.marketplacesService.ensureOzonProductInCatalog(userId, marketplaceProductId.trim());
+      if (created) return created;
       const offerId = await this.marketplacesService.getOzonOfferIdByProductId(userId, marketplaceProductId);
       if (offerId) {
         const byArticle = await this.productsService.findByArticle(userId, offerId);

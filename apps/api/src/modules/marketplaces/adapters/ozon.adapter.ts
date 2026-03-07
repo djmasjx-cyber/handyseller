@@ -1020,7 +1020,7 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
 
     type Posting = {
       posting_number: string;
-      products?: Array<{ product_id?: number; price?: number }>;
+      products?: Array<{ product_id?: number; sku?: number; offer_id?: string; price?: number }>;
       customer_name?: string;
       phone?: string;
       address?: { address_tail?: string };
@@ -1028,10 +1028,15 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
       created_at: string;
     };
 
-    const toOrderData = (posting: Posting, isFbo = false): OrderData => ({
+    const toOrderData = (posting: Posting, isFbo = false): OrderData => {
+      const p0 = posting.products?.[0];
+      const productId = p0?.product_id != null ? String(p0.product_id)
+        : p0?.sku != null ? String(p0.sku)
+        : '';
+      return {
       id: posting.posting_number,
       marketplaceOrderId: posting.posting_number,
-      productId: posting.products?.[0]?.product_id?.toString() ?? '',
+      productId,
       customerName: posting.customer_name ?? 'Аноним',
       customerPhone: posting.phone,
       deliveryAddress: posting.address?.address_tail,
@@ -1040,7 +1045,8 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
       amount: posting.products?.reduce((sum: number, p) => sum + (p.price ?? 0), 0) ?? 0,
       createdAt: new Date(posting.created_at),
       isFbo,
-    });
+    };
+    };
 
     const seen = new Set<string>();
     const result: OrderData[] = [];
@@ -1558,6 +1564,97 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
     }
     this.logger.log(`[getProductsFromOzon] Returning ${out.length} products`);
     return out;
+  }
+
+  /**
+   * Получить один товар с Ozon по product_id — для автосоздания при синхронизации заказа.
+   */
+  async getProductFromOzonByProductId(ozonProductId: string): Promise<{
+    productId: number;
+    offerId: string;
+    name: string;
+    description?: string;
+    imageUrl?: string;
+    price?: number;
+    barcode?: string;
+    weight?: number;
+    width?: number;
+    height?: number;
+    length?: number;
+    ozonCategoryId?: number;
+    ozonTypeId?: number;
+  } | null> {
+    const pid = parseInt(ozonProductId, 10);
+    if (isNaN(pid) || pid <= 0) return null;
+    try {
+      const { data } = await firstValueFrom(
+        this.httpService.post(
+          `${this.API_BASE}/v3/product/info/list`,
+          { product_id: [pid] },
+          {
+            headers: this.ozonHeaders(),
+            timeout: 10000,
+          },
+        ),
+      );
+      const result = (data as Record<string, unknown>)?.result ?? data;
+      const items = ((result as Record<string, unknown>)?.items ?? []) as Array<{
+        id?: number;
+        offer_id?: string;
+        name?: string;
+        description?: string;
+        source?: { attribute_id?: number; value?: string }[];
+        images?: string[];
+        marketing_price?: string;
+        price?: string;
+        old_price?: string;
+        weight?: number;
+        height?: number;
+        width?: number;
+        depth?: number;
+        description_category_id?: number;
+        type_id?: number;
+      }>;
+      const inf = items[0];
+      if (!inf) return null;
+      const offerId = (inf.offer_id ?? '').toString().trim();
+      const name = (inf.name ?? `Товар ${pid}`).trim().slice(0, 500);
+      if (!name) return null;
+      let description: string | undefined;
+      if (typeof inf.description === 'string' && inf.description.trim()) {
+        description = inf.description.slice(0, 5000);
+      } else if (Array.isArray(inf.source)) {
+        const attr4190 = inf.source.find((a) => a?.attribute_id === 4190);
+        if (attr4190?.value) description = attr4190.value.slice(0, 5000);
+      }
+      const images = inf.images ?? [];
+      const imageUrl = Array.isArray(images) && images.length > 0
+        ? (typeof images[0] === 'string' ? images[0] : (images[0] as { url?: string })?.url)
+        : undefined;
+      const priceStr = inf.marketing_price ?? inf.price ?? inf.old_price;
+      const price = priceStr != null ? parseFloat(String(priceStr)) : undefined;
+      const barcode = this.extractBarcode(inf);
+      const catId = inf.description_category_id;
+      const typeId = inf.type_id;
+      return {
+        productId: pid,
+        offerId,
+        name,
+        description,
+        imageUrl: imageUrl || undefined,
+        price: typeof price === 'number' && !isNaN(price) ? price : undefined,
+        barcode: barcode || undefined,
+        weight: inf.weight,
+        width: inf.width,
+        height: inf.height,
+        length: inf.depth,
+        ozonCategoryId: typeof catId === 'number' && catId > 0 ? catId : undefined,
+        ozonTypeId: typeof typeId === 'number' && typeId > 0 ? typeId : undefined,
+      };
+    } catch (err) {
+      this.logError(err, 'getProductFromOzonByProductId');
+      return null;
+    }
   }
 
   async syncProducts(products: ProductData[]): Promise<SyncResult> {

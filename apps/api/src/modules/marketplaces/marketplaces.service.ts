@@ -1935,6 +1935,59 @@ export class MarketplacesService {
   }
 
   /**
+   * Обеспечить наличие товара в каталоге для Ozon product_id.
+   * Если товар не найден — загружает с Ozon и создаёт Product + mapping.
+   * Используется при синхронизации заказов FBO, когда товар ещё не в каталоге.
+   */
+  async ensureOzonProductInCatalog(
+    userId: string,
+    ozonProductId: string,
+  ): Promise<{ id: string; userId: string } | null> {
+    const existing = await this.productMappingService.findProductByExternalId(userId, 'OZON', ozonProductId);
+    if (existing) return existing;
+    const conn = await this.getMarketplaceConnection(userId, 'OZON');
+    if (!conn?.token) return null;
+    const adapter = this.adapterFactory.createAdapter('OZON', {
+      encryptedToken: conn.token,
+      encryptedRefreshToken: conn.refreshToken,
+      sellerId: conn.sellerId ?? undefined,
+      warehouseId: conn.warehouseId ?? undefined,
+    });
+    if (!adapter || !(adapter instanceof OzonAdapter)) return null;
+    const p = await adapter.getProductFromOzonByProductId(ozonProductId);
+    if (!p) return null;
+    const byArticle = await this.productsService.findByArticle(userId, p.offerId);
+    if (byArticle) {
+      await this.productMappingService.upsertMapping(byArticle.id, userId, 'OZON', String(p.productId), {
+        externalArticle: p.offerId,
+      });
+      return byArticle;
+    }
+    try {
+      const created = await this.productsService.create(userId, {
+        title: p.name,
+        description: p.description?.slice(0, 5000),
+        cost: 0,
+        imageUrl: p.imageUrl,
+        article: p.offerId,
+        barcodeOzon: p.barcode,
+        weight: p.weight,
+        width: p.width,
+        height: p.height,
+        length: p.length,
+        ozonCategoryId: p.ozonCategoryId,
+        ozonTypeId: p.ozonTypeId,
+      });
+      await this.productMappingService.upsertMapping(created.id, userId, 'OZON', String(p.productId), {
+        externalArticle: p.offerId,
+      });
+      return created;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Получить offer_id (артикул) по product_id Ozon — для fallback-связки по артикулу при заказах.
    * Используется, когда маппинг отсутствует, но товар на Ozon создан с тем же артикулом.
    */
