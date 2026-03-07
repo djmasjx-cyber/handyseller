@@ -32,6 +32,54 @@ export class AnalyticsService {
     return { productsCount, ordersCount };
   }
 
+  /** Выручка и заказы за последние 3 календарных месяца (текущий, предыдущий, предпредыдущий). */
+  async getMonthlyBreakdown(userId: string): Promise<
+    Array<{ month: string; year: number; revenue: number; orders: number }>
+  > {
+    const now = new Date();
+    const months: Array<{ from: Date; to: Date; monthName: string; year: number }> = [];
+    for (let i = 0; i < 3; i++) {
+      const y = now.getFullYear();
+      const m = now.getMonth() - i;
+      const year = m >= 0 ? y : y - 1;
+      const month = m >= 0 ? m : m + 12;
+      months.push({
+        from: new Date(year, month, 1),
+        to: new Date(year, month + 1, 0, 23, 59, 59),
+        monthName: this.getMonthName(month),
+        year,
+      });
+    }
+    const results = await Promise.all(
+      months.map(async ({ from, to, monthName, year }) => {
+        const agg = await this.prisma.order.aggregate({
+          where: {
+            userId,
+            createdAt: { gte: from, lte: to },
+            status: { not: OrderStatus.CANCELLED },
+          },
+          _sum: { totalAmount: true },
+          _count: true,
+        });
+        return {
+          month: monthName,
+          year,
+          revenue: Math.round((Number(agg._sum.totalAmount ?? 0)) * 100) / 100,
+          orders: agg._count,
+        };
+      }),
+    );
+    return results;
+  }
+
+  private getMonthName(monthIndex: number): string {
+    const names = [
+      'январь', 'февраль', 'март', 'апрель', 'май', 'июнь',
+      'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь',
+    ];
+    return names[monthIndex] ?? '';
+  }
+
   /**
    * Агрегаты по товарам за период (по умолчанию — текущий календарный месяц).
    * Источник: все товары пользователя + заказы в БД (Order + OrderItem).

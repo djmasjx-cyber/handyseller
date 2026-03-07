@@ -45,6 +45,13 @@ interface DashboardData {
   statistics?: Record<string, MarketplaceStats>
 }
 
+interface MonthlyData {
+  month: string
+  year: number
+  revenue: number
+  orders: number
+}
+
 interface ProductMarketplaceStats {
   revenue: number
   orders: number
@@ -66,6 +73,7 @@ interface ProductAnalyticsRow {
 export default function AnalyticsPage() {
   const router = useRouter()
   const [data, setData] = useState<DashboardData | null>(null)
+  const [monthlyData, setMonthlyData] = useState<MonthlyData[]>([])
   const [productsLoading, setProductsLoading] = useState(true)
   const [productStats, setProductStats] = useState<ProductAnalyticsRow[]>([])
   const [loading, setLoading] = useState(true)
@@ -95,6 +103,15 @@ export default function AnalyticsPage() {
           .join(" · ")
       : null
 
+  const monthsToShow = useMemo(() => {
+    const empty = { month: "—", year: 0, revenue: 0, orders: 0 }
+    return [
+      monthlyData[0] ?? empty,
+      monthlyData[1] ?? empty,
+      monthlyData[2] ?? empty,
+    ]
+  }, [monthlyData])
+
   const perMarketplaceOrdersLabel =
     perMarketplace.length > 0
       ? perMarketplace
@@ -105,33 +122,32 @@ export default function AnalyticsPage() {
           .join(" · ")
       : null
 
-  const perMarketplaceProductsLabel =
-    perMarketplace.length > 0
-      ? perMarketplace
-          .map(([key, stat]) => {
-            const meta = MARKETPLACE_META[key] ?? { label: key, color: "" }
-            const count = stat.linkedProductsCount ?? 0
-            return `${meta.label}: ${count}`
-          })
-          .join(" · ")
-      : null
-
   const fetchData = () => {
     if (!token) return
     setLoading(true)
-    fetch("/api/dashboard", { headers: { Authorization: `Bearer ${token}` } })
-      .then((r) => {
-        if (r.status === 401) {
+    Promise.all([
+      fetch("/api/dashboard", { headers: { Authorization: `Bearer ${token}` } }),
+      fetch("/api/analytics/monthly", { headers: { Authorization: `Bearer ${token}` } }),
+    ])
+      .then(([dashboardRes, monthlyRes]) => {
+        if (dashboardRes.status === 401) {
           router.replace("/login?from=" + encodeURIComponent("/dashboard/analytics"))
           throw new Error("401")
         }
-        return r.ok ? r.json() : Promise.reject(new Error(`${r.status}`))
+        return Promise.all([
+          dashboardRes.ok ? dashboardRes.json() : Promise.resolve(null),
+          monthlyRes.ok ? monthlyRes.json() : Promise.resolve([]),
+        ])
       })
-      .then((d) => {
+      .then(([d, monthly]) => {
         if (d?.summary) setData(d)
         else setData(null)
+        setMonthlyData(Array.isArray(monthly) ? monthly : [])
       })
-      .catch(() => setData(null))
+      .catch(() => {
+        setData(null)
+        setMonthlyData([])
+      })
       .finally(() => setLoading(false))
   }
 
@@ -172,7 +188,7 @@ export default function AnalyticsPage() {
             Аналитика
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Сводка по продажам и заказам с маркетплейсов за текущий календарный месяц.
+            Сводка по продажам и заказам с маркетплейсов за последние 3 месяца.
           </p>
         </div>
         <Button variant="outline" size="sm" onClick={() => { fetchData(); fetchProductStats(); }} title="Обновить данные">
@@ -180,56 +196,48 @@ export default function AnalyticsPage() {
         </Button>
       </div>
 
-      {/* KPI по площадкам */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Выручка</CardTitle>
-            <TrendingUp className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {(s.totalRevenue ?? 0).toLocaleString("ru-RU")} ₽
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              за текущий месяц · {s.totalOrders ?? 0} заказов
-            </p>
-            {perMarketplaceRevenueLabel && (
-              <p className="text-xs text-muted-foreground mt-1">{perMarketplaceRevenueLabel}</p>
-            )}
-          </CardContent>
-        </Card>
+      {/* Блок Выручка — 3 месяца */}
+      <div className="grid gap-4 md:grid-cols-3">
+        {monthsToShow.map((m, i) => (
+          <Card key={i}>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Выручка · {m.month}</CardTitle>
+              <TrendingUp className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {(m.revenue ?? 0).toLocaleString("ru-RU")} ₽
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                {m.year ? `${m.month} ${m.year}` : "—"}
+              </p>
+              {i === 0 && perMarketplaceRevenueLabel && (
+                <p className="text-xs text-muted-foreground mt-1">{perMarketplaceRevenueLabel}</p>
+              )}
+            </CardContent>
+          </Card>
+        ))}
+      </div>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Заказы</CardTitle>
-            <ShoppingCart className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{s.totalOrders ?? 0}</div>
-            <p className="text-xs text-muted-foreground mt-1">
-              {s.newOrdersCount ?? 0} новых требуют внимания
-            </p>
-            {perMarketplaceOrdersLabel && (
-              <p className="text-xs text-muted-foreground mt-1">{perMarketplaceOrdersLabel}</p>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Товары на площадках</CardTitle>
-            <Package className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{s.totalProductsOnMarketplaces ?? 0}</div>
-            {perMarketplaceProductsLabel ? (
-              <p className="text-xs text-muted-foreground mt-1">По площадкам: {perMarketplaceProductsLabel}</p>
-            ) : (
-              <p className="text-xs text-muted-foreground mt-1">{s.marketplaceLabel ?? "—"}</p>
-            )}
-          </CardContent>
-        </Card>
+      {/* Блок Заказы — 3 месяца */}
+      <div className="grid gap-4 md:grid-cols-3">
+        {monthsToShow.map((m, i) => (
+          <Card key={i}>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Заказы · {m.month}</CardTitle>
+              <ShoppingCart className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{m.orders ?? 0}</div>
+              <p className="text-xs text-muted-foreground mt-1">
+                {i === 0 ? `${s.newOrdersCount ?? 0} новых требуют внимания` : (m.year ? `${m.month} ${m.year}` : "—")}
+              </p>
+              {i === 0 && perMarketplaceOrdersLabel && (
+                <p className="text-xs text-muted-foreground mt-1">{perMarketplaceOrdersLabel}</p>
+              )}
+            </CardContent>
+          </Card>
+        ))}
       </div>
 
       {/* Сравнение WB / Ozon */}

@@ -13,6 +13,12 @@ export class AnalyticsController {
     return this.analyticsService.getSummary(userId);
   }
 
+  /** Выручка и заказы за последние 3 календарных месяца. */
+  @Get('monthly')
+  async getMonthly(@CurrentUser('userId') userId: string) {
+    return this.analyticsService.getMonthlyBreakdown(userId);
+  }
+
   /** Агрегаты по товарам за период (календарный месяц по умолчанию). */
   @Get('products')
   async getProducts(
