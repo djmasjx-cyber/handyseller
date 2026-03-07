@@ -1567,7 +1567,8 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
   }
 
   /**
-   * Получить один товар с Ozon по product_id — для автосоздания при синхронизации заказа.
+   * Получить один товар с Ozon по product_id или sku — для автосоздания при синхронизации заказа.
+   * FBO posting может возвращать sku вместо product_id; v3/product/info/list принимает оба.
    */
   async getProductFromOzonByProductId(ozonProductId: string): Promise<{
     productId: number;
@@ -1586,19 +1587,16 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
   } | null> {
     const pid = parseInt(ozonProductId, 10);
     if (isNaN(pid) || pid <= 0) return null;
-    try {
+    const tryFetch = async (body: { product_id?: number[]; sku?: number[] }) => {
       const { data } = await firstValueFrom(
         this.httpService.post(
           `${this.API_BASE}/v3/product/info/list`,
-          { product_id: [pid] },
-          {
-            headers: this.ozonHeaders(),
-            timeout: 10000,
-          },
+          body,
+          { headers: this.ozonHeaders(), timeout: 10000 },
         ),
       );
       const result = (data as Record<string, unknown>)?.result ?? data;
-      const items = ((result as Record<string, unknown>)?.items ?? []) as Array<{
+      return ((result as Record<string, unknown>)?.items ?? []) as Array<{
         id?: number;
         offer_id?: string;
         name?: string;
@@ -1615,8 +1613,8 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
         description_category_id?: number;
         type_id?: number;
       }>;
-      const inf = items[0];
-      if (!inf) return null;
+    };
+    const parseItem = (inf: { id?: number; offer_id?: string; name?: string; description?: string; source?: { attribute_id?: number; value?: string }[]; images?: string[]; marketing_price?: string; price?: string; old_price?: string; weight?: number; height?: number; width?: number; depth?: number; description_category_id?: number; type_id?: number }) => {
       const offerId = (inf.offer_id ?? '').toString().trim();
       const name = (inf.name ?? `Товар ${pid}`).trim().slice(0, 500);
       if (!name) return null;
@@ -1637,7 +1635,7 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
       const catId = inf.description_category_id;
       const typeId = inf.type_id;
       return {
-        productId: pid,
+        productId: inf.id ?? pid,
         offerId,
         name,
         description,
@@ -1651,6 +1649,13 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
         ozonCategoryId: typeof catId === 'number' && catId > 0 ? catId : undefined,
         ozonTypeId: typeof typeId === 'number' && typeId > 0 ? typeId : undefined,
       };
+    };
+    try {
+      let items = await tryFetch({ product_id: [pid] });
+      if (!items.length) items = await tryFetch({ sku: [pid] });
+      const inf = items[0];
+      if (!inf) return null;
+      return parseItem(inf);
     } catch (err) {
       this.logError(err, 'getProductFromOzonByProductId');
       return null;

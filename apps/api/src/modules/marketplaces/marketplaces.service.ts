@@ -1955,7 +1955,32 @@ export class MarketplacesService {
     });
     if (!adapter || !(adapter instanceof OzonAdapter)) return null;
     const p = await adapter.getProductFromOzonByProductId(ozonProductId);
-    if (!p) return null;
+    if (!p) {
+      console.warn(`[ensureOzonProductInCatalog] Ozon API не вернул товар для product_id/sku=${ozonProductId}, создаём placeholder`);
+      // Fallback: товар не найден в Ozon (архив, другой аккаунт, FBO cross-dock) — создаём placeholder, чтобы заказ синхронизировался
+      const placeholderArticle = `OZON_${ozonProductId}`;
+      const existingPlaceholder = await this.productsService.findByArticle(userId, placeholderArticle);
+      if (existingPlaceholder) {
+        await this.productMappingService.upsertMapping(existingPlaceholder.id, userId, 'OZON', ozonProductId, {
+          externalArticle: placeholderArticle,
+        });
+        return existingPlaceholder;
+      }
+      try {
+        const created = await this.productsService.create(userId, {
+          title: `Товар Ozon ${ozonProductId}`,
+          article: placeholderArticle,
+          cost: 0,
+        });
+        await this.productMappingService.upsertMapping(created.id, userId, 'OZON', ozonProductId, {
+          externalArticle: placeholderArticle,
+        });
+        return created;
+      } catch (err) {
+        console.warn(`[ensureOzonProductInCatalog] Не удалось создать placeholder для ${ozonProductId}:`, err);
+        return null;
+      }
+    }
     const byArticle = await this.productsService.findByArticle(userId, p.offerId);
     if (byArticle) {
       await this.productMappingService.upsertMapping(byArticle.id, userId, 'OZON', String(p.productId), {
