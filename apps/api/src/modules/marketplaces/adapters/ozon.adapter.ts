@@ -683,6 +683,66 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
   }
 
   /**
+   * Остатки FBO (на складах Ozon) — товар на складах Ozon, не на нашем FBS-складе.
+   * POST /v4/product/info/stocks возвращает items с stocks[] по складам.
+   * Суммируем present где type='fbo' или warehouse_id != наш FBS warehouse_id.
+   * Резервы FBO считаются из заказов в БД (isFbo=true).
+   * @param identifiers — offer_id или product_id (Ozon принимает оба в filter)
+   */
+  async getStocksFbo(identifiers: string[]): Promise<Record<string, number>> {
+    if (identifiers.length === 0) return {};
+    const ourWarehouseId = this.config.warehouseId ? parseInt(this.config.warehouseId, 10) : 0;
+    const result: Record<string, number> = {};
+    const productIds = identifiers.filter((id) => /^\d+$/.test(id)).map((id) => parseInt(id, 10));
+    const offerIds = identifiers.filter((id) => !/^\d+$/.test(id));
+    const filter: { visibility: string; offer_id?: string[]; product_id?: number[] } = { visibility: 'ALL' };
+    if (productIds.length > 0) filter.product_id = productIds;
+    else if (offerIds.length > 0) filter.offer_id = offerIds;
+    else return {};
+    try {
+      const { data } = await firstValueFrom(
+        this.httpService.post<{ result?: { items?: unknown[] } }>(
+          `${this.API_BASE}/v4/product/info/stocks`,
+          { filter },
+          { headers: this.ozonHeaders(), timeout: 15000 },
+        ),
+      );
+      const items = (data?.result?.items ?? []) as Array<{
+        offer_id?: string;
+        product_id?: number;
+        stock?: number;
+        stocks?: Array<{ warehouse_id?: number; type?: string; present?: number; reserved?: number }>;
+      }>;
+      for (const item of items) {
+        const key = item.offer_id ?? (item.product_id != null ? String(item.product_id) : '');
+        if (!key) continue;
+        let fboStock = 0;
+        if (Array.isArray(item.stocks) && item.stocks.length > 0) {
+          for (const s of item.stocks) {
+            const type = (s.type ?? '').toLowerCase();
+            const whId = s.warehouse_id ?? 0;
+            const present = Number(s.present ?? 0);
+            if (type === 'fbo') {
+              fboStock += present;
+            } else if (ourWarehouseId > 0 && whId > 0 && whId !== ourWarehouseId) {
+              fboStock += present;
+            } else if (ourWarehouseId <= 0 && type !== 'fbs') {
+              fboStock += present;
+            }
+          }
+        } else if (item.stock != null && ourWarehouseId <= 0) {
+          fboStock = Number(item.stock);
+        }
+        if (fboStock > 0) result[key] = fboStock;
+      }
+      return result;
+    } catch (error) {
+      this.logError(error, 'getStocksFbo');
+      return {};
+    }
+  }
+
+  /**
    * Отправить остатки на Ozon и вернуть полный ответ (для диагностики).
    */
   async setStockWithResponse(
@@ -968,24 +1028,30 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
 
     // FBO — склады Ozon (Fulfillment by Ozon). Товар со склада Ozon — не списывать «Мой склад».
     try {
-      const { data } = await firstValueFrom(
-        this.httpService.post(
-          `${this.API_BASE}/v2/posting/fbo/list`,
-          {
-            dir: 'asc',
-            filter: { since: dateFrom.toISOString(), to: new Date().toISOString() },
-            limit: 1000,
-            offset: 0,
-          },
-          { headers, timeout: 15000 },
-        ),
-      );
-      for (const p of data?.result ?? []) {
-        const posting = p as Posting;
-        if (!seen.has(posting.posting_number)) {
-          seen.add(posting.posting_number);
-          result.push(toOrderData(posting, true));
+      let offset = 0;
+      const limit = 500;
+      while (true) {
+        const { data } = await firstValueFrom(
+          this.httpService.post(
+            `${this.API_BASE}/v2/posting/fbo/list`,
+            {
+              dir: 'asc',
+              filter: { since: dateFrom.toISOString(), to: new Date().toISOString() },
+              limit,
+              offset,
+            },
+            { headers, timeout: 15000 },
+          ),
+        );
+        const items = (data?.result ?? data?.postings ?? []) as Posting[];
+        for (const posting of items) {
+          if (posting?.posting_number && !seen.has(posting.posting_number)) {
+            seen.add(posting.posting_number);
+            result.push(toOrderData(posting, true));
+          }
         }
+        if (items.length < limit) break;
+        offset += limit;
       }
     } catch (error) {
       this.logError(error, 'getOrders FBO');

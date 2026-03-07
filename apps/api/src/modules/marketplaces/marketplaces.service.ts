@@ -343,12 +343,12 @@ export class MarketplacesService {
         marketplace: 'OZON',
         isActive: true,
       },
-      select: { productId: true, externalSystemId: true },
+      select: { productId: true, externalSystemId: true, externalArticle: true },
     });
-    const offerIds = mappings
-      .map((m) => m.externalSystemId)
+    const identifiers = mappings
+      .map((m) => m.externalArticle ?? m.externalSystemId)
       .filter((id): id is string => !!id);
-    if (offerIds.length === 0) return {};
+    if (identifiers.length === 0) return {};
     const adapter = this.adapterFactory.createAdapter('OZON', {
       encryptedToken: conn.token,
       encryptedRefreshToken: conn.refreshToken,
@@ -357,14 +357,12 @@ export class MarketplacesService {
     });
     if (!adapter || !(adapter instanceof OzonAdapter)) return {};
     try {
-      const stocksData = await adapter.getProductStocks(offerIds);
+      const byProductOrOffer = await adapter.getStocksFbo(identifiers);
       const result: Record<string, number> = {};
       for (const m of mappings) {
-        const stockItem = stocksData.items.find(
-          (item) => item.offer_id === m.externalSystemId || String(item.product_id) === m.externalSystemId
-        );
-        if (stockItem?.stock != null) {
-          result[m.productId] = stockItem.stock;
+        const key = m.externalArticle ?? m.externalSystemId;
+        if (key && byProductOrOffer[key] != null) {
+          result[m.productId] = byProductOrOffer[key];
         }
       }
       return result;

@@ -176,8 +176,9 @@ export default function ProductsPage() {
     fetchProducts()
     fetchConnections()
     fetchSubscription()
-    // Загружаем остатки FBO при инициализации
+    // Загружаем остатки FBO при инициализации (WB и Ozon)
     fetchWbStockFbo()
+    fetchOzonStockFbo()
     setLoading(false)
     const t = setInterval(fetchProducts, 60000)
     return () => clearInterval(t)
@@ -224,10 +225,13 @@ export default function ProductsPage() {
       setEditingFieldId(null)
       setEditingField(null)
     }
-    // Загружаем остатки FBO для выбранного маркетплейса
+    // Загружаем остатки FBO для выбранного маркетплейса (для "Мой склад" — оба, для суммы)
     if (warehouseFilter === "WILDBERRIES") {
       fetchWbStockFbo()
     } else if (warehouseFilter === "OZON") {
+      fetchOzonStockFbo()
+    } else if (warehouseFilter === "local") {
+      fetchWbStockFbo()
       fetchOzonStockFbo()
     }
   }, [warehouseFilter])
@@ -858,9 +862,11 @@ export default function ProductsPage() {
                           } else if (warehouseFilter === "OZON") {
                             return ozonStockFbo[product.id] != null ? ozonStockFbo[product.id] : "—"
                           } else {
-                            // Для "Мой склад" — сумма по всем маркетплейсам (пока только WB)
+                            // Для "Мой склад" — сумма FBO по всем маркетплейсам (WB + Ozon)
                             const wbStock = wbStockFbo[product.id] ?? 0
-                            return wbStock > 0 ? wbStock : "—"
+                            const ozonStock = ozonStockFbo[product.id] ?? 0
+                            const total = wbStock + ozonStock
+                            return total > 0 ? total : "—"
                           }
                         })()}
                       </td>
