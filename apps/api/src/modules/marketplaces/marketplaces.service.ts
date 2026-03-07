@@ -886,6 +886,7 @@ export class MarketplacesService {
   /**
    * Статистика заказов по маркетплейсам — только БД, один оптимизированный запрос.
    * Период: календарный месяц по умолчанию.
+   * totalOrders: без отменённых (CANCELLED), чтобы не вносить путаницу.
    */
   async getOrdersStatsByMarketplace(
     userId: string,
@@ -914,7 +915,7 @@ export class MarketplacesService {
     >`
       SELECT 
         marketplace::text,
-        COUNT(*)::bigint as total_orders,
+        COUNT(*) FILTER (WHERE status <> 'CANCELLED')::bigint as total_orders,
         COUNT(*) FILTER (WHERE status = 'DELIVERED')::bigint as delivered_count,
         COUNT(*) FILTER (WHERE status = 'CANCELLED' AND (
           raw_status IS NULL
