@@ -1249,6 +1249,36 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
   }
 
   /**
+   * Диагностика: сырой ответ /v3/product/list для отладки импорта.
+   */
+  async getProductListRaw(): Promise<{ status: number; data: unknown; error?: string }> {
+    try {
+      const res = await firstValueFrom(
+        this.httpService.post(
+          `${this.API_BASE}/v3/product/list`,
+          { filter: { visibility: 'ALL' }, limit: 10 },
+          {
+            headers: {
+              'Client-Id': this.config.sellerId ?? '',
+              'Api-Key': this.config.apiKey,
+              'Content-Type': 'application/json',
+            },
+            timeout: 15000,
+            validateStatus: () => true,
+          },
+        ),
+      );
+      return { status: res.status, data: res.data };
+    } catch (err) {
+      return {
+        status: 0,
+        data: null,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
+
+  /**
    * Получение списка товаров с Ozon для импорта в каталог.
    * v3/product/list → v3/product/info/list (пачками).
    */
@@ -1272,36 +1302,46 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
     const items: Array<{ product_id: number; offer_id: string }> = [];
     let lastId: string | undefined;
     do {
-      const body: { filter: { visibility: string }; limit: number; last_id?: string } = {
+      const body: Record<string, unknown> = {
         filter: { visibility: 'ALL' },
         limit: 100,
       };
       if (lastId) body.last_id = lastId;
-      console.log(`[OzonAdapter.getProductsFromOzon] Calling /v3/product/list with lastId=${lastId}, sellerId=${this.config.sellerId}`);
-      const { data } = await firstValueFrom(
-        this.httpService.post(`${this.API_BASE}/v3/product/list`, body, {
-          headers: {
-            'Client-Id': this.config.sellerId ?? '',
-            'Api-Key': this.config.apiKey,
-            'Content-Type': 'application/json',
-          },
-          timeout: 15000,
-        }),
-      );
-      const result = data?.result;
-      console.log(`[OzonAdapter.getProductsFromOzon] /v3/product/list response: total=${result?.total}, items count=${result?.items?.length}`);
-      console.log(`[OzonAdapter.getProductsFromOzon] /v3/product/list raw items: ${JSON.stringify(result?.items?.slice(0, 2))}`);
-      const pageItems = (result?.items ?? []) as Array<{ product_id?: number; offer_id?: string; name?: string; sku?: number }>;
+      this.logger.log(`[getProductsFromOzon] /v3/product/list lastId=${lastId ?? 'none'}, sellerId=${this.config.sellerId}`);
+      let data: unknown;
+      try {
+        const res = await firstValueFrom(
+          this.httpService.post(`${this.API_BASE}/v3/product/list`, body, {
+            headers: {
+              'Client-Id': this.config.sellerId ?? '',
+              'Api-Key': this.config.apiKey,
+              'Content-Type': 'application/json',
+            },
+            timeout: 15000,
+          }),
+        );
+        data = res.data;
+      } catch (err) {
+        this.logger.error(`[getProductsFromOzon] /v3/product/list error: ${err instanceof Error ? err.message : String(err)}`);
+        throw err;
+      }
+      const result = (data as Record<string, unknown>)?.result ?? data;
+      const total = (result as Record<string, unknown>)?.total;
+      const pageItems = ((result as Record<string, unknown>)?.items ?? (data as Record<string, unknown>)?.items ?? []) as Array<{
+        product_id?: number;
+        offer_id?: string;
+        sku?: number;
+      }>;
+      this.logger.log(`[getProductsFromOzon] /v3/product/list total=${total}, items=${pageItems.length}`);
       for (const it of pageItems) {
-        const pid = it?.product_id ?? 0;
+        const pid = it?.product_id ?? it?.sku ?? 0;
         const oid = (it?.offer_id ?? '').toString().trim();
         if (pid && oid) items.push({ product_id: pid, offer_id: oid });
-        else console.log(`[OzonAdapter.getProductsFromOzon] Skipping item: pid=${pid}, oid=${oid}`);
       }
-      lastId = result?.last_id;
+      lastId = (result as Record<string, unknown>)?.last_id as string | undefined;
       if (!lastId || pageItems.length === 0) break;
     } while (true);
-    console.log(`[OzonAdapter.getProductsFromOzon] Total items collected: ${items.length}`);
+    this.logger.log(`[getProductsFromOzon] Total items collected: ${items.length}`);
 
     const out: Array<{
       productId: number;
@@ -1318,26 +1358,29 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
       ozonCategoryId?: number;
       ozonTypeId?: number;
     }> = [];
-    // Используем /v3/product/info/list с sku (product_id)
-    const skus = items.map((it) => it.product_id).filter((id): id is number => id > 0);
-    console.log(`[OzonAdapter.getProductsFromOzon] Calling /v3/product/info/list for ${skus.length} skus`);
-    try {
-      const { data } = await firstValueFrom(
-        this.httpService.post(
-          `${this.API_BASE}/v3/product/info/list`,
-          { sku: skus },
-          {
-            headers: {
-              'Client-Id': this.config.sellerId ?? '',
-              'Api-Key': this.config.apiKey,
-              'Content-Type': 'application/json',
+    // Используем /v3/product/info/list с product_id (Ozon API принимает product_id или offer_id)
+    const productIds = items.map((it) => it.product_id).filter((id): id is number => id > 0);
+    this.logger.log(`[getProductsFromOzon] Fetching details for ${productIds.length} products via /v3/product/info/list`);
+    const BATCH_SIZE = 100;
+    for (let i = 0; i < productIds.length; i += BATCH_SIZE) {
+      const batch = productIds.slice(i, i + BATCH_SIZE);
+      try {
+        const { data } = await firstValueFrom(
+          this.httpService.post(
+            `${this.API_BASE}/v3/product/info/list`,
+            { product_id: batch },
+            {
+              headers: {
+                'Client-Id': this.config.sellerId ?? '',
+                'Api-Key': this.config.apiKey,
+                'Content-Type': 'application/json',
+              },
+              timeout: 30000,
             },
-            timeout: 20000,
-          },
-        ),
-      );
-      console.log(`[OzonAdapter.getProductsFromOzon] /v3/product/info/list raw response: ${JSON.stringify(data?.result)?.slice(0, 500)}`);
-      const infoItems = (data?.result?.items ?? []) as Array<{
+          ),
+        );
+        const result = (data as Record<string, unknown>)?.result ?? data;
+        const infoItems = ((result as Record<string, unknown>)?.items ?? []) as Array<{
         id?: number;
         offer_id?: string;
         name?: string;
@@ -1356,13 +1399,13 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
         description_category_id?: number;
         type_id?: number;
       }>;
-      console.log(`[OzonAdapter.getProductsFromOzon] /v3/product/info/list returned ${infoItems.length} items`);
+      this.logger.log(`[getProductsFromOzon] /v3/product/info/list batch returned ${infoItems.length} items`);
       for (const inf of infoItems) {
         const pid = inf?.id ?? 0;
         const offerId = (inf?.offer_id ?? '').toString().trim();
         const name = (inf?.name ?? `Товар ${pid}`).trim().slice(0, 500);
         if (!name) {
-          console.log(`[OzonAdapter.getProductsFromOzon] Skipping product ${pid}: empty name`);
+          this.logger.warn(`[getProductsFromOzon] Skipping product ${pid}: empty name`);
           continue;
         }
         let description: string | undefined;
@@ -1397,10 +1440,12 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
           ozonTypeId: typeof typeId === 'number' && typeId > 0 ? typeId : undefined,
         });
       }
-    } catch (err) {
-      console.log(`[OzonAdapter.getProductsFromOzon] Error calling /v3/product/info/list: ${err instanceof Error ? err.message : String(err)}`);
+      } catch (err) {
+        this.logger.error(`[getProductsFromOzon] /v3/product/info/list batch error: ${err instanceof Error ? err.message : String(err)}`);
+        throw err;
+      }
     }
-    console.log(`[OzonAdapter.getProductsFromOzon] Returning ${out.length} products`);
+    this.logger.log(`[getProductsFromOzon] Returning ${out.length} products`);
     return out;
   }
 

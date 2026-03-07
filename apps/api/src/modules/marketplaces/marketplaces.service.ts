@@ -2269,6 +2269,26 @@ export class MarketplacesService {
   }
 
   /**
+   * Диагностика импорта с Ozon: сырой ответ /v3/product/list.
+   */
+  async getOzonImportDiagnostic(userId: string): Promise<{ status: number; data: unknown; error?: string }> {
+    const conn = await this.getMarketplaceConnection(userId, 'OZON');
+    if (!conn?.token) {
+      throw new BadRequestException('Ozon не подключён');
+    }
+    const adapter = this.adapterFactory.createAdapter('OZON', {
+      encryptedToken: conn.token,
+      encryptedRefreshToken: conn.refreshToken,
+      sellerId: conn.sellerId ?? undefined,
+      warehouseId: conn.warehouseId ?? undefined,
+    });
+    if (!adapter || !(adapter instanceof OzonAdapter)) {
+      throw new BadRequestException('Ошибка доступа к Ozon');
+    }
+    return adapter.getProductListRaw();
+  }
+
+  /**
    * Импорт товаров с маркетплейса в каталог. Поддерживается Wildberries и Ozon.
    */
   async importProductsFromMarketplace(
@@ -2291,7 +2311,12 @@ export class MarketplacesService {
       warehouseId: conn.warehouseId ?? undefined,
     });
 
+    console.log(`[importProductsFromMarketplace] marketplace=${marketplace}, adapter=${adapter?.constructor?.name}, isOzonAdapter=${adapter instanceof OzonAdapter}`);
+
     if (marketplace === 'OZON') {
+      if (!adapter || !(adapter instanceof OzonAdapter)) {
+        throw new BadRequestException('Ошибка загрузки товаров с Ozon: неверный адаптер');
+      }
       return this.importFromOzon(userId, conn, adapter);
     }
 
@@ -2392,12 +2417,11 @@ export class MarketplacesService {
   private async importFromOzon(
     userId: string,
     conn: { id: string },
-    adapter: unknown,
+    adapter: OzonAdapter,
   ): Promise<{ imported: number; skipped: number; articlesUpdated?: number; errors: string[] }> {
-    if (!adapter || !(adapter instanceof OzonAdapter)) {
-      throw new BadRequestException('Ошибка загрузки товаров с Ozon');
-    }
+    console.log(`[importFromOzon] Starting import for userId=${userId}, connId=${conn.id}`);
     const ozonProducts = await withRetry(() => adapter.getProductsFromOzon(), 'getProductsFromOzon');
+    console.log(`[importFromOzon] Fetched ${ozonProducts.length} products from Ozon`);
     let imported = 0;
     let skipped = 0;
     let articlesUpdated = 0;
@@ -2465,6 +2489,8 @@ export class MarketplacesService {
         data: { lastSyncAt: new Date(), lastError: null },
       });
     }
+
+    console.log(`[importFromOzon] Completed: imported=${imported}, skipped=${skipped}, articlesUpdated=${articlesUpdated}, errors=${errors.length}`);
 
     return { imported, skipped, articlesUpdated: articlesUpdated > 0 ? articlesUpdated : undefined, errors };
   }

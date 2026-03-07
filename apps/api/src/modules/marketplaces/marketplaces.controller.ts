@@ -489,6 +489,12 @@ export class MarketplacesController {
     return result;
   }
 
+  /** Диагностика импорта с Ozon: сырой ответ API /v3/product/list */
+  @Get('ozon-import-diagnostic')
+  async getOzonImportDiagnostic(@CurrentUser('userId') userId: string) {
+    return this.marketplacesService.getOzonImportDiagnostic(userId);
+  }
+
   @Post('import')
   async importProducts(
     @CurrentUser('userId') userId: string,
