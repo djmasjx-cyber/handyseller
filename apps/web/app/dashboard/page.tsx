@@ -12,7 +12,6 @@ import {
   ShoppingCart,
   RefreshCw,
   AlertCircle,
-  CheckCircle,
   Store,
   Loader2,
 } from "lucide-react"
@@ -27,6 +26,14 @@ interface Order {
   amount: number
   createdAt: string
   marketplace?: string
+}
+
+type StatusStats = { count: number; sum: number }
+type MarketplaceOrderStats = {
+  delivered: StatusStats
+  shipped: StatusStats
+  inProgress: StatusStats
+  cancelled: StatusStats
 }
 
 interface DashboardData {
@@ -44,6 +51,7 @@ interface DashboardData {
     monthlyRevenue?: number
   }
   orders: Order[]
+  ordersStatsByStatus?: Record<string, MarketplaceOrderStats>
 }
 
 const EMPTY_SUMMARY = {
@@ -231,7 +239,7 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center">
@@ -261,26 +269,55 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center">
-              <CheckCircle className="mr-2 h-5 w-5 text-green-500" />
-              Сводка
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="p-3 bg-muted rounded-lg">
-              <p className="font-medium mb-2">Выручка</p>
-              <p className="text-sm text-muted-foreground">
-                {(s.totalRevenue ?? 0).toLocaleString("ru-RU")} ₽ за последние 30 дней
-              </p>
-            </div>
-            <div className="p-3 bg-muted rounded-lg">
-              <p className="font-medium mb-2">Подключённые площадки</p>
-              <p className="text-sm text-muted-foreground">{s.marketplaceLabel || "Нет подключений"}</p>
-            </div>
-          </CardContent>
-        </Card>
+        {(() => {
+          const stats = data.ordersStatsByStatus ?? {}
+          const ozon = stats.OZON ?? stats.ozon
+          const wb = stats.WILDBERRIES ?? stats.wildberries ?? stats.WB ?? stats.wb
+          const emptyStats: MarketplaceOrderStats = {
+            delivered: { count: 0, sum: 0 },
+            shipped: { count: 0, sum: 0 },
+            inProgress: { count: 0, sum: 0 },
+            cancelled: { count: 0, sum: 0 },
+          }
+          const StatusBlock = ({
+            title,
+            data,
+          }: {
+            title: string
+            data: MarketplaceOrderStats | undefined
+          }) => {
+            const d = data ?? emptyStats
+            const rows = [
+              { label: "Получен клиентом", key: "delivered" as const },
+              { label: "Доставляется", key: "shipped" as const },
+              { label: "На сборке", key: "inProgress" as const },
+              { label: "Отменён", key: "cancelled" as const },
+            ]
+            return (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">{title}</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {rows.map(({ label, key }) => (
+                    <div key={key} className="flex justify-between items-center py-2 border-b border-muted last:border-0">
+                      <span className="text-sm">{label}</span>
+                      <span className="text-sm font-medium">
+                        {d[key].count} шт · {(d[key].sum ?? 0).toLocaleString("ru-RU")} ₽
+                      </span>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            )
+          }
+          return (
+            <>
+              <StatusBlock title="Озон" data={ozon} />
+              <StatusBlock title="ВБ" data={wb} />
+            </>
+          )
+        })()}
       </div>
     </div>
   )

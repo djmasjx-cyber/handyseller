@@ -17,14 +17,16 @@ export async function GET(req: NextRequest) {
     // Календарный месяц: с 1-го числа текущего месяца
     const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
     const since = monthStart.toISOString()
-    const [productsRes, ordersRes, statisticsRes, linkedProductsRes, connectionsRes, userRes] = await Promise.all([
-      fetch(`${API_BASE}/products`, { headers }),
-      fetch(`${API_BASE}/marketplaces/orders?since=${encodeURIComponent(since)}`, { headers }),
-      fetch(`${API_BASE}/marketplaces/statistics`, { headers }),
-      fetch(`${API_BASE}/marketplaces/linked-products-stats`, { headers }),
-      fetch(`${API_BASE}/marketplaces/user`, { headers }),
-      fetch(`${API_BASE}/users/me`, { headers }),
-    ])
+    const [productsRes, ordersRes, statisticsRes, linkedProductsRes, connectionsRes, userRes, ordersStatsRes] =
+      await Promise.all([
+        fetch(`${API_BASE}/products`, { headers }),
+        fetch(`${API_BASE}/marketplaces/orders?since=${encodeURIComponent(since)}`, { headers }),
+        fetch(`${API_BASE}/marketplaces/statistics`, { headers }),
+        fetch(`${API_BASE}/marketplaces/linked-products-stats`, { headers }),
+        fetch(`${API_BASE}/marketplaces/user`, { headers }),
+        fetch(`${API_BASE}/users/me`, { headers }),
+        fetch(`${API_BASE}/marketplaces/orders-stats-by-status`, { headers }),
+      ])
 
     const products = productsRes.ok ? await productsRes.json().catch(() => []) : []
     const orders = ordersRes.ok ? await ordersRes.json().catch(() => []) : []
@@ -110,12 +112,15 @@ export async function GET(req: NextRequest) {
         ? marketplaceNames.join(", ").replace(/WILDBERRIES/gi, "WB").replace(/YANDEX/gi, "Яндекс")
         : "—"
 
+    const ordersStatsByStatus = ordersStatsRes.ok ? await ordersStatsRes.json().catch(() => ({})) : {}
+
     return NextResponse.json({
       products: productsList,
       orders: ordersList,
       statistics: mergedStats,
       connections: conns,
       userName,
+      ordersStatsByStatus,
       summary: {
         totalProducts: productsList.length,
         totalProductsOnMarketplaces,

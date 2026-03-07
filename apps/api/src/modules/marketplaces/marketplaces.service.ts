@@ -942,6 +942,80 @@ export class MarketplacesService {
   }
 
   /**
+   * Статистика заказов по маркетплейсу и статусу — для блока «Озон» / «ВБ» на Главной.
+   * Текущий календарный месяц, FBO+FBS.
+   * delivered = Получен клиентом, shipped = Доставляется, inProgress = На сборке, cancelled = Отменен.
+   */
+  async getOrdersStatsByStatus(
+    userId: string,
+    from?: Date,
+    to?: Date,
+  ): Promise<
+    Record<
+      string,
+      {
+        delivered: { count: number; sum: number };
+        shipped: { count: number; sum: number };
+        inProgress: { count: number; sum: number };
+        cancelled: { count: number; sum: number };
+      }
+    >
+  > {
+    const ids = await this.getEffectiveUserIds(userId);
+    const now = new Date();
+    const fromDate = from ?? new Date(now.getFullYear(), now.getMonth(), 1);
+    const toDate = to ?? new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        marketplace: string;
+        status_group: string;
+        cnt: bigint;
+        sum_amount: string;
+      }>
+    >`
+      SELECT 
+        marketplace::text,
+        CASE 
+          WHEN status = 'DELIVERED' THEN 'delivered'
+          WHEN status IN ('SHIPPED', 'READY_FOR_PICKUP') THEN 'shipped'
+          WHEN status IN ('NEW', 'IN_PROGRESS') THEN 'inProgress'
+          WHEN status = 'CANCELLED' THEN 'cancelled'
+          ELSE 'other'
+        END as status_group,
+        COUNT(*)::bigint as cnt,
+        COALESCE(SUM(total_amount), 0)::text as sum_amount
+      FROM "Order"
+      WHERE user_id IN (${Prisma.join(ids)})
+        AND created_at >= ${fromDate}
+        AND created_at <= ${toDate}
+      GROUP BY marketplace, status_group
+    `;
+
+    const empty = () => ({ count: 0, sum: 0 });
+    const result: Record<
+      string,
+      { delivered: { count: number; sum: number }; shipped: { count: number; sum: number }; inProgress: { count: number; sum: number }; cancelled: { count: number; sum: number } }
+    > = {};
+
+    const groups = ['delivered', 'shipped', 'inProgress', 'cancelled'] as const;
+    for (const r of rows) {
+      const key = r.marketplace.toUpperCase();
+      if (!result[key]) {
+        result[key] = { delivered: empty(), shipped: empty(), inProgress: empty(), cancelled: empty() };
+      }
+      const group = r.status_group as (typeof groups)[number];
+      if (groups.includes(group)) {
+        result[key][group] = {
+          count: Number(r.cnt) || 0,
+          sum: Math.round(Number(r.sum_amount || 0) * 100) / 100,
+        };
+      }
+    }
+    return result;
+  }
+
+  /**
    * Синхронизация логистики и комиссий по выкупленным заказам из API WB и Ozon.
    * Обновляет Order.logisticsCost, Order.commissionAmount, Order.costsSyncedAt.
    */

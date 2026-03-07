@@ -226,6 +226,18 @@ export class MarketplacesController {
     return this.marketplacesService.getOrdersFromAllMarketplaces(userId, sinceDate);
   }
 
+  /** Статистика заказов по маркету и статусу — для блоков Озон/ВБ на Главной (текущий месяц) */
+  @Get('orders-stats-by-status')
+  async getOrdersStatsByStatus(
+    @CurrentUser('userId') userId: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    const fromDate = from ? new Date(from) : undefined;
+    const toDate = to ? new Date(to) : undefined;
+    return this.marketplacesService.getOrdersStatsByStatus(userId, fromDate, toDate);
+  }
+
   @Get('statistics')
   async getStatistics(@CurrentUser('userId') userId: string) {
     return this.marketplacesService.getStatistics(userId);
