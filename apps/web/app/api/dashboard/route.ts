@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
     // Календарный месяц: с 1-го числа текущего месяца
     const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
     const since = monthStart.toISOString()
-    const [productsRes, ordersRes, statisticsRes, linkedProductsRes, connectionsRes, userRes, ordersStatsRes] =
+    const [productsRes, ordersRes, statisticsRes, linkedProductsRes, connectionsRes, userRes] =
       await Promise.all([
         fetch(`${API_BASE}/products`, { headers }),
         fetch(`${API_BASE}/marketplaces/orders?since=${encodeURIComponent(since)}`, { headers }),
@@ -25,7 +25,6 @@ export async function GET(req: NextRequest) {
         fetch(`${API_BASE}/marketplaces/linked-products-stats`, { headers }),
         fetch(`${API_BASE}/marketplaces/user`, { headers }),
         fetch(`${API_BASE}/users/me`, { headers }),
-        fetch(`${API_BASE}/marketplaces/orders-stats-by-status`, { headers }),
       ])
 
     const products = productsRes.ok ? await productsRes.json().catch(() => []) : []
@@ -112,7 +111,35 @@ export async function GET(req: NextRequest) {
         ? marketplaceNames.join(", ").replace(/WILDBERRIES/gi, "WB").replace(/YANDEX/gi, "Яндекс")
         : "—"
 
-    const ordersStatsByStatus = ordersStatsRes.ok ? await ordersStatsRes.json().catch(() => ({})) : {}
+    // Агрегация по статусам из уже загруженных заказов — без доп. запроса к БД
+    const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0, 23, 59, 59)
+    const rawToGroup = (s: string): "delivered" | "shipped" | "inProgress" | "cancelled" | null => {
+      const k = (s ?? "").toLowerCase().replace(/\s/g, "")
+      if (["sold", "receive", "delivered"].includes(k)) return "delivered"
+      if (["complete", "deliver", "sorted", "shipped", "ready_for_pickup", "delivering", "delivery", "pickup"].includes(k)) return "shipped"
+      if (["new", "confirm", "confirmed", "waiting", "awaiting_packaging", "awaiting_deliver", "processing"].includes(k)) return "inProgress"
+      if (["cancelled", "canceled", "cancel", "reject", "rejected", "awaiting_packaging_cancelled", "cancelled_by_seller", "cancelled_by_client", "canceled_by_seller", "canceled_by_client", "declined_by_client", "customer_refused"].includes(k)) return "cancelled"
+      return null
+    }
+    const ordersStatsByStatus: Record<string, { delivered: { count: number; sum: number }; shipped: { count: number; sum: number }; inProgress: { count: number; sum: number }; cancelled: { count: number; sum: number } }> = {}
+    const empty = () => ({ count: 0, sum: 0 })
+    for (const o of ordersList as Array<{ status?: string; rawStatus?: string; amount?: number; marketplace?: string; createdAt?: string }>) {
+      const createdAt = o.createdAt ? new Date(o.createdAt) : null
+      if (!createdAt || createdAt < monthStart || createdAt > monthEnd) continue
+      const mp = (o.marketplace ?? "").toUpperCase()
+      if (!mp || mp === "MANUAL") continue
+      const statusRaw = (o.rawStatus ?? o.status ?? "").toString()
+      const group = rawToGroup(statusRaw) ?? "inProgress"
+      if (!ordersStatsByStatus[mp]) ordersStatsByStatus[mp] = { delivered: empty(), shipped: empty(), inProgress: empty(), cancelled: empty() }
+      const stats = ordersStatsByStatus[mp][group]
+      stats.count += 1
+      stats.sum += Math.round((Number(o.amount ?? 0) || 0) * 100) / 100
+    }
+    for (const key of Object.keys(ordersStatsByStatus)) {
+      for (const g of ["delivered", "shipped", "inProgress", "cancelled"] as const) {
+        ordersStatsByStatus[key][g].sum = Math.round(ordersStatsByStatus[key][g].sum * 100) / 100
+      }
+    }
 
     return NextResponse.json({
       products: productsList,
