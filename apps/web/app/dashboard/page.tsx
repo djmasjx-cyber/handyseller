@@ -282,9 +282,11 @@ export default function DashboardPage() {
           const StatusBlock = ({
             title,
             data,
+            cardClassName,
           }: {
             title: string
             data: MarketplaceOrderStats | undefined
+            cardClassName?: string
           }) => {
             const d = data ?? emptyStats
             const rows = [
@@ -294,7 +296,7 @@ export default function DashboardPage() {
               { label: "Отменён", key: "cancelled" as const },
             ]
             return (
-              <Card>
+              <Card className={cardClassName}>
                 <CardHeader>
                   <CardTitle className="text-base">{title}</CardTitle>
                 </CardHeader>
@@ -313,8 +315,8 @@ export default function DashboardPage() {
           }
           return (
             <>
-              <StatusBlock title="Озон" data={ozon} />
-              <StatusBlock title="ВБ" data={wb} />
+              <StatusBlock title="Озон" data={ozon} cardClassName="bg-[#005BFF]/5 border-[#005BFF]/15" />
+              <StatusBlock title="ВБ" data={wb} cardClassName="bg-[#CB11AB]/5 border-[#CB11AB]/15" />
             </>
           )
         })()}
