@@ -736,7 +736,8 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
         let lastId: string | undefined;
         do {
           const f = { visibility: 'ALL' as const, ...(isProductId ? { product_id: batch } : { offer_id: batch }) };
-          const body = lastId ? { filter: f, last_id: lastId } : { filter: f };
+          const body: { filter: typeof f; limit?: number; last_id?: string } = { filter: f, limit: 1000 };
+          if (lastId) body.last_id = lastId;
           const { data } = await firstValueFrom(
             this.httpService.post<{ result?: { items?: unknown[]; last_id?: string }; items?: unknown[] }>(
               `${this.API_BASE}/v4/product/info/stocks`,
@@ -781,7 +782,7 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
     const filter: { visibility: string; product_id?: number[]; offer_id?: string[] } = { visibility: 'ALL' };
     if (productIds.length > 0) filter.product_id = productIds.slice(0, 100);
     else if (offerIds.length > 0) filter.offer_id = offerIds.slice(0, 100);
-    const request = { filter };
+    const request = { filter, limit: 1000 };
     try {
       const { data } = await firstValueFrom(
         this.httpService.post<{ result?: { items?: unknown[] }; items?: unknown[] }>(
