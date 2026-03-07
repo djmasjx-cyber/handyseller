@@ -1,8 +1,8 @@
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useMemo, useRef } from "react"
 import { Button } from "@handyseller/ui"
-import { X, Package, TrendingUp, ChevronUp, ChevronDown, ShoppingCart } from "lucide-react"
+import { X, Package, TrendingUp, ChevronUp, ChevronDown, ShoppingCart, Loader2 } from "lucide-react"
 import Link from "next/link"
 
 interface ProductMarketplaceStats {
@@ -49,28 +49,50 @@ export function MonthDrilldownModal({
   const [loading, setLoading] = useState(false)
   const [sortBy, setSortBy] = useState<"revenue" | "orders">(type)
   const [sortDesc, setSortDesc] = useState(true)
+  const fetchIdRef = useRef(0)
 
   const monthIndex = MONTH_NAMES.indexOf(month)
-  const fromDate = monthIndex >= 0 && year ? new Date(year, monthIndex, 1) : null
-  const toDate = monthIndex >= 0 && year ? new Date(year, monthIndex + 1, 0, 23, 59, 59) : null
+  const canFetch = open && !!token && monthIndex >= 0 && year > 0
 
   useEffect(() => {
-    if (!open || !token || !fromDate || !toDate) {
+    if (!canFetch) {
       setProducts([])
+      setLoading(false)
       return
     }
-    setLoading(true)
-    setSortBy(type)
+    const fromDate = new Date(year, monthIndex, 1)
+    const toDate = new Date(year, monthIndex + 1, 0, 23, 59, 59)
     const from = fromDate.toISOString()
     const to = toDate.toISOString()
+
+    setSortBy(type)
+    setLoading(true)
+    setProducts([])
+
+    const id = ++fetchIdRef.current
+    const abort = new AbortController()
+
     fetch(`/api/analytics/products?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`, {
       headers: { Authorization: `Bearer ${token}` },
+      signal: abort.signal,
     })
-      .then((r) => (r.ok ? r.json() : []))
-      .then((list) => setProducts(Array.isArray(list) ? list : []))
-      .catch(() => setProducts([]))
-      .finally(() => setLoading(false))
-  }, [open, token, fromDate, toDate, type])
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("fetch failed"))))
+      .then((list) => {
+        if (id !== fetchIdRef.current) return
+        setProducts(Array.isArray(list) ? list : [])
+      })
+      .catch((err) => {
+        if (id !== fetchIdRef.current || err?.name === "AbortError") return
+        setProducts([])
+      })
+      .finally(() => {
+        if (id === fetchIdRef.current) setLoading(false)
+      })
+
+    return () => {
+      abort.abort()
+    }
+  }, [canFetch, monthIndex, year, type, token])
 
   const sortedProducts = useMemo(() => {
     const withSales = products.filter((p) => (p.totalRevenue ?? 0) > 0 || (p.totalOrders ?? 0) > 0)
@@ -100,41 +122,41 @@ export function MonthDrilldownModal({
   const SortIcon = sortDesc ? ChevronDown : ChevronUp
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
       <div
-        className="fixed inset-0 bg-black/50 transition-opacity"
+        className="fixed inset-0 bg-black/50"
         onClick={() => onOpenChange(false)}
         aria-hidden
       />
       <div
-        className="relative z-10 w-full max-w-2xl max-h-[85vh] flex flex-col rounded-xl border bg-background shadow-xl overflow-hidden"
+        className="relative z-10 w-full sm:max-w-2xl max-h-[90vh] sm:max-h-[85vh] flex flex-col rounded-t-2xl sm:rounded-xl border bg-background shadow-xl overflow-hidden pb-[env(safe-area-inset-bottom)]"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between p-4 border-b bg-muted/30">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
+        <div className="flex items-center justify-between p-4 border-b bg-muted/30 shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
               {type === "revenue" ? (
                 <TrendingUp className="h-5 w-5" />
               ) : (
                 <ShoppingCart className="h-5 w-5" />
               )}
             </div>
-            <div>
-              <h2 className="font-semibold text-lg">{title} · {month} {year}</h2>
-              <p className="text-sm text-muted-foreground">
-                Топ товаров по {type === "revenue" ? "выручке" : "количеству заказов"}
+            <div className="min-w-0">
+              <h2 className="font-semibold text-base sm:text-lg truncate">{title} · {month} {year}</h2>
+              <p className="text-xs sm:text-sm text-muted-foreground">
+                Топ товаров по {type === "revenue" ? "выручке" : "заказам"}
               </p>
             </div>
           </div>
-          <Button variant="ghost" size="icon" onClick={() => onOpenChange(false)} aria-label="Закрыть">
-            <X className="h-4 w-4" />
+          <Button variant="ghost" size="icon" className="shrink-0 h-10 w-10" onClick={() => onOpenChange(false)} aria-label="Закрыть">
+            <X className="h-5 w-5" />
           </Button>
         </div>
 
-        <div className="flex-1 overflow-auto min-h-0">
+        <div className="flex-1 overflow-auto min-h-[200px]">
           {loading ? (
-            <div className="flex items-center justify-center py-16">
-              <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+            <div className="flex items-center justify-center py-16 min-h-[240px]">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
             </div>
           ) : sortedProducts.length === 0 ? (
             <div className="p-8 text-center text-muted-foreground">
@@ -143,13 +165,13 @@ export function MonthDrilldownModal({
               <p className="text-sm mt-1">Данные появятся после синхронизации заказов</p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="sticky top-0 bg-muted/80 backdrop-blur-sm border-b">
+            <div className="overflow-x-auto -mx-px">
+              <table className="w-full text-sm min-w-[320px]">
+                <thead className="sticky top-0 bg-muted/95 backdrop-blur-sm border-b z-10">
                   <tr>
-                    <th className="text-left font-medium p-3">Товар</th>
+                    <th className="text-left font-medium p-2 sm:p-3">Товар</th>
                     <th
-                      className="text-right font-medium p-3 cursor-pointer hover:text-primary transition-colors select-none"
+                      className="text-right font-medium p-2 sm:p-3 cursor-pointer hover:text-primary transition-colors select-none touch-manipulation"
                       onClick={() => toggleSort("revenue")}
                     >
                       <span className="inline-flex items-center gap-1">
@@ -158,7 +180,7 @@ export function MonthDrilldownModal({
                       </span>
                     </th>
                     <th
-                      className="text-right font-medium p-3 cursor-pointer hover:text-primary transition-colors select-none"
+                      className="text-right font-medium p-2 sm:p-3 cursor-pointer hover:text-primary transition-colors select-none touch-manipulation"
                       onClick={() => toggleSort("orders")}
                     >
                       <span className="inline-flex items-center gap-1">
@@ -166,7 +188,7 @@ export function MonthDrilldownModal({
                         {sortBy === "orders" && <SortIcon className="h-4 w-4" />}
                       </span>
                     </th>
-                    <th className="text-right font-medium p-3 text-muted-foreground">Выкуп %</th>
+                    <th className="text-right font-medium p-2 sm:p-3 text-muted-foreground hidden sm:table-cell">Выкуп %</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -179,32 +201,32 @@ export function MonthDrilldownModal({
                     return (
                       <tr
                         key={row?.productId ?? index}
-                        className="border-b last:border-0 hover:bg-muted/40 transition-colors"
+                        className="border-b last:border-0 hover:bg-muted/40 active:bg-muted/50 transition-colors"
                       >
-                        <td className="p-3">
+                        <td className="p-2 sm:p-3">
                           <Link
                             href={`/dashboard/products/${row?.productId ?? ""}`}
-                            className="flex items-center gap-3 hover:opacity-80 transition-opacity"
+                            className="flex items-center gap-2 sm:gap-3 hover:opacity-80 transition-opacity py-1"
                           >
                             {row?.imageUrl ? (
                               <img
                                 src={String(row.imageUrl)}
                                 alt=""
-                                className="h-10 w-10 object-cover rounded-lg shrink-0"
+                                className="h-9 w-9 sm:h-10 sm:w-10 object-cover rounded-lg shrink-0"
                               />
                             ) : (
-                              <div className="h-10 w-10 rounded-lg bg-muted flex items-center justify-center shrink-0">
-                                <Package className="h-5 w-5 text-muted-foreground" />
+                              <div className="h-9 w-9 sm:h-10 sm:w-10 rounded-lg bg-muted flex items-center justify-center shrink-0">
+                                <Package className="h-4 w-4 sm:h-5 sm:w-5 text-muted-foreground" />
                               </div>
                             )}
-                            <span className="font-medium truncate max-w-[200px]">{productName}</span>
+                            <span className="font-medium truncate max-w-[140px] sm:max-w-[200px]">{productName}</span>
                           </Link>
                         </td>
-                        <td className="p-3 text-right font-medium">
+                        <td className="p-2 sm:p-3 text-right font-medium whitespace-nowrap">
                           {totalRevenue.toLocaleString("ru-RU")} ₽
                         </td>
-                        <td className="p-3 text-right">{totalOrders}</td>
-                        <td className="p-3 text-right text-muted-foreground">{deliveredPct}%</td>
+                        <td className="p-2 sm:p-3 text-right whitespace-nowrap">{totalOrders}</td>
+                        <td className="p-2 sm:p-3 text-right text-muted-foreground hidden sm:table-cell">{deliveredPct}%</td>
                       </tr>
                     )
                   })}
