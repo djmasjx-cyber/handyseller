@@ -369,10 +369,10 @@ export class MarketplacesService {
       const byProductOrOffer = await adapter.getStocksFbo({ productIds, offerIds });
       const result: Record<string, number> = {};
       for (const m of mappings) {
-        const stock =
-          (m.externalSystemId && byProductOrOffer[m.externalSystemId]) ??
-          (m.externalArticle && byProductOrOffer[m.externalArticle]);
-        if (stock != null) result[m.productId] = stock;
+        const stock: number | undefined =
+          (m.externalSystemId ? byProductOrOffer[m.externalSystemId] : undefined) ??
+          (m.externalArticle ? byProductOrOffer[m.externalArticle] : undefined);
+        if (typeof stock === 'number') result[m.productId] = stock;
       }
       return result;
     } catch {
@@ -436,10 +436,10 @@ export class MarketplacesService {
     const diagnostic = await adapter.getStocksFboRaw({ productIds, offerIds });
     const resultByProductId: Record<string, number> = {};
     for (const m of mappings) {
-      const stock =
-        (m.externalSystemId && diagnostic.parsed[m.externalSystemId]) ??
-        (m.externalArticle && diagnostic.parsed[m.externalArticle]);
-      if (stock != null) resultByProductId[m.productId] = stock;
+      const stock: number | undefined =
+        (m.externalSystemId ? diagnostic.parsed[m.externalSystemId] : undefined) ??
+        (m.externalArticle ? diagnostic.parsed[m.externalArticle] : undefined);
+      if (typeof stock === 'number') resultByProductId[m.productId] = stock;
     }
     return {
       mappings: mappings.map((m) => ({ ...m, externalArticle: m.externalArticle })),
