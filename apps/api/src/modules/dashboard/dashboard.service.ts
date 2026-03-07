@@ -28,7 +28,7 @@ export class DashboardService {
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
 
-    const [user, activeProductsCount, totalProductsCount, connections, ordersFromDb, monthlyAgg, monthlyRevenue, linkedStats, ordersStatsByMp] = await Promise.all([
+    const [user, activeProductsCount, totalProductsCount, connections, ordersFromDb, monthlyAgg, monthlyRevenue, linkedStats, ordersStatsByMp, ordersStatsByStatus] = await Promise.all([
       this.prisma.user.findUnique({ where: { id: userId }, select: { name: true, role: true } }).catch((e) => {
         console.warn('[Dashboard] user.findUnique:', e instanceof Error ? e.message : String(e));
         return null;
@@ -76,6 +76,10 @@ export class DashboardService {
       this.marketplacesService.getOrdersStatsByMarketplace(userId, monthStart, monthEnd).catch((e) => {
         console.warn('[Dashboard] getOrdersStatsByMarketplace:', e instanceof Error ? e.message : String(e));
         return {} as Record<string, { totalOrders: number; delivered: number; cancelled: number; revenue: number }>;
+      }),
+      this.marketplacesService.getOrdersStatsByStatus(userId, monthStart, monthEnd).catch((e) => {
+        console.warn('[Dashboard] getOrdersStatsByStatus:', e instanceof Error ? e.message : String(e));
+        return {} as Record<string, { delivered: { count: number; sum: number }; shipped: { count: number; sum: number }; inProgress: { count: number; sum: number }; cancelled: { count: number; sum: number } }>;
       }),
     ]);
 
@@ -165,6 +169,7 @@ export class DashboardService {
       },
       statistics,
       orders,
+      ordersStatsByStatus: ordersStatsByStatus ?? {},
     };
   }
 
