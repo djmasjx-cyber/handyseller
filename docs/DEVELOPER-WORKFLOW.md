@@ -124,6 +124,43 @@ GIT_SSH_COMMAND="ssh -i ~/.ssh/id_ed25519_github -o IdentitiesOnly=yes" git push
 
 ---
 
+## Dev-режим на сервере (один разработчик)
+
+Разработка на сервере через Cursor Remote-SSH. Hot reload без полного билда.
+
+### Запуск dev
+
+```bash
+npm run dev:start
+# или
+./scripts/dev-start.sh
+```
+
+- Останавливает prod (API + Web в Docker)
+- Запускает API (`nest start --watch`) на порту 4000
+- Запускает Web (`next dev`) на порту 3001
+- Поднимает Redis для dev (порт 6379)
+
+Изменения в коде подхватываются автоматически. Nginx проксирует app.handyseller.ru → localhost.
+
+### Остановка dev и возврат prod
+
+```bash
+npm run dev:stop
+# или
+./scripts/dev-stop.sh
+```
+
+### Цикл разработки
+
+1. `npm run dev:start`
+2. Редактируй код в Cursor
+3. Проверяй в браузере (app.handyseller.ru)
+4. Когда готово: `git add`, `git commit`, `git push origin main`
+5. `npm run dev:stop` — вернуть prod
+
+---
+
 ## Первоначальная настройка (один раз)
 
 ```bash

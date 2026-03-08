@@ -28,6 +28,7 @@
 | Файл | Назначение |
 |------|------------|
 | `docs/DEVELOPER-WORKFLOW.md` | Полный workflow, роли, команды |
+| `docs/QODER-DEV-WORKFLOW.md` | **Dev-режим на сервере — обязательно для Qoder** |
 | `docs/CURSOR-QODER-PROTOCOL.md` | Формат задач, отчётов, чеклисты |
 | `docs/ARCHITECTURE.md` | Архитектура проекта |
 | `scripts/install-git-hooks.sh` | Pre-commit: блокировка dist/ |
@@ -37,4 +38,6 @@
 
 ## Точка входа для Qoder
 
-При старте задачи: прочитай `docs/DEVELOPER-WORKFLOW.md`. Следуй разделу «Роль Qoder». После PR — сообщи пользователю, что готово к merge.
+1. **При старте задачи:** прочитай `docs/DEVELOPER-WORKFLOW.md`. Следуй разделу «Роль Qoder».
+2. **При разработке на сервере:** прочитай `docs/QODER-DEV-WORKFLOW.md`. Используй `npm run dev:start` / `npm run dev:stop`, коммить и пушить только после проверки.
+3. **После PR:** сообщи пользователю, что готово к merge.
