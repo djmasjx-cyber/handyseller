@@ -34,7 +34,7 @@ export function WbColorSelectModal({
     if (!open || !token) return
     setLoading(true)
     setError(null)
-    fetch("/api/marketplaces/wb/colors", {
+    fetch("/api/marketplaces/wb-colors", {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((r) => r.json())
