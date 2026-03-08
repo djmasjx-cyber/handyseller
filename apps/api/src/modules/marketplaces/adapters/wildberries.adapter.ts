@@ -165,55 +165,31 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       throw new Error('WB: категория (subjectId) обязательна для создания карточки товара');
     }
 
-    const good: Record<string, unknown> = {
-      nomenclature: 0,
-      variant: 0,
-      vendorCode: `${vendorCode}-1`,
+    const priceRub = Math.round(canonical.price ?? 1);
+    const variant: Record<string, unknown> = {
+      vendorCode,
       title: title || 'Товар',
       description: descriptionText?.trim() || 'Описание товара',
+      brand: canonical.brand_name ?? 'Ручная работа',
       characteristics,
-      weightBrutto,
-      length: l,
-      width: w,
-      height: h,
     };
-
-    // Штрих-код и sizes — WB требует sizes[].skus для идентификации размера
     if (barcode?.trim()) {
-      good.barcode = barcode.trim();
-      const priceRub = Math.round(canonical.price ?? 1);
-      good.sizes = [
-        {
-          techSize: 'Без размера',
-          wbSize: 'RU',
-          price: priceRub,
-          skus: [barcode.trim()],
-        },
+      variant.sizes = [
+        { techSize: 'Без размера', wbSize: 'RU', price: priceRub, skus: [barcode.trim()] },
       ];
     }
 
-    // content-api.wildberries.ru: формат cards + goods (как в get cards list)
-    const card: Record<string, unknown> = {
-      nomenclature: 0,
+    // Формат Habr: массив в корне. Добавляем dimensions и countryProduction для обязательных полей.
+    // https://habr.com/ru/articles/897548/
+    const habrItem: Record<string, unknown> = {
+      subjectID: canonical.wb_subject_id,
       supplierVendorCode: vendorCode,
       countryProduction: this.normalizeCountry(canonical.country_of_origin),
-      brand: canonical.brand_name ?? 'Ручная работа',
       dimensions: { width: w, height: h, length: l, weightBrutto },
-      subjectID: canonical.wb_subject_id,
-      goods: [good],
+      variants: [variant],
     };
 
-    // Фото НЕ передаём в cards/upload — WB не принимает addin при создании.
-    // Загрузка фото отдельно через POST /content/v3/media/save после создания карточки (uploadImages).
-
-    if (canonical.seo_title || canonical.seo_description || canonical.seo_keywords) {
-      card.seoText = {
-        title: canonical.seo_title ?? canonical.title,
-        description: canonical.seo_description ?? '',
-        keywords: canonical.seo_keywords ?? '',
-      };
-    }
-    return { cards: [card] };
+    return [habrItem] as unknown as PlatformProductPayload;
   }
 
   /**
