@@ -2401,6 +2401,37 @@ export class MarketplacesService {
   }
 
   /**
+   * Диагностика выгрузки на WB: попытка загрузки с возвратом полного запроса и ответа API.
+   * POST /api/marketplaces/wb-export-diagnostic/:productId
+   */
+  async getWbExportDiagnostic(userId: string, productId: string) {
+    const product = await this.productsService.findByIdWithMappings(userId, productId);
+    if (!product) throw new BadRequestException('Товар не найден');
+    const validation = this.validateProductForWb(product, { wbColorNames: await this.getWbColorNames() });
+    if (!validation.valid) {
+      return { success: false, error: validation.errors.join('; '), validationErrors: validation.errors };
+    }
+    const conn = await this.getMarketplaceConnection(userId, 'WILDBERRIES');
+    if (!conn?.token) {
+      return { success: false, error: 'WB не подключён. Подключите в разделе Маркетплейсы.' };
+    }
+    const canonical = productToCanonical(product);
+    const productData = canonicalToProductData(canonical);
+    const adapter = this.adapterFactory.createAdapter('WILDBERRIES', {
+      encryptedToken: conn.token,
+      encryptedRefreshToken: conn.refreshToken,
+      encryptedStatsToken: conn.statsToken ?? undefined,
+      sellerId: conn.sellerId ?? undefined,
+      warehouseId: conn.warehouseId ?? undefined,
+    });
+    if (!adapter || !(adapter instanceof WildberriesAdapter)) {
+      return { success: false, error: 'Ошибка доступа к WB' };
+    }
+    const result = await adapter.tryUploadWithFullResponse(productData);
+    return result;
+  }
+
+  /**
    * Предпросмотр выгрузки на WB: payload, маппинг полей.
    * GET /api/marketplaces/wb-export-preview/:productId
    */

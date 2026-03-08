@@ -233,6 +233,14 @@ export default function ProductCardPage() {
   const [loadingOzonPreview, setLoadingOzonPreview] = useState(false)
   const [ozonCategoryModalOpen, setOzonCategoryModalOpen] = useState(false)
   const [wbCategoryModalOpen, setWbCategoryModalOpen] = useState(false)
+  const [wbDiagnostic, setWbDiagnostic] = useState<{
+    success?: boolean;
+    error?: string;
+    wbRequest?: unknown;
+    wbResponse?: unknown;
+    nmId?: number;
+  } | null>(null)
+  const [loadingWbDiagnostic, setLoadingWbDiagnostic] = useState(false)
   const [ozonDiagnostic, setOzonDiagnostic] = useState<{
     success?: boolean;
     error?: string;
@@ -379,6 +387,31 @@ export default function ProductCardPage() {
       setWbPreview({ error: "Ошибка запроса" })
     } finally {
       setLoadingWbPreview(false)
+    }
+  }
+
+  const handleWbDiagnostic = async () => {
+    if (!token || !product?.id || loadingWbDiagnostic) return
+    setLoadingWbDiagnostic(true)
+    setWbDiagnostic(null)
+    setExportError(null)
+    try {
+      const r = await fetch(`/api/marketplaces/wb-export-diagnostic/${product.id}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const data = await r.json().catch(() => ({}))
+      setWbDiagnostic(data)
+      if (data.success) {
+        const r2 = await fetch(`/api/products/${product.id}`, { headers: { Authorization: `Bearer ${token}` } })
+        if (r2.ok) setProduct(await r2.json())
+      } else if (data.error) {
+        setExportError(data.error)
+      }
+    } catch {
+      setWbDiagnostic({ success: false, error: "Ошибка запроса" })
+    } finally {
+      setLoadingWbDiagnostic(false)
     }
   }
 
@@ -836,6 +869,17 @@ export default function ProductCardPage() {
                       >
                         {loadingWbPreview ? <Loader2 className="h-4 w-4 animate-spin" /> : "Предпросмотр WB"}
                       </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleWbDiagnostic}
+                        disabled={loadingWbDiagnostic || !!exportLoadingMarketplace}
+                        className="shrink-0 h-8 px-2 text-xs touch-manipulation text-muted-foreground"
+                        title="Попытка выгрузки с полным ответом WB при ошибке"
+                      >
+                        {loadingWbDiagnostic ? <Loader2 className="h-4 w-4 animate-spin" /> : "Диагностика WB"}
+                      </Button>
                     </div>
                     <p className="text-xs text-muted-foreground">WB требует предмет (subject) для выгрузки. На WB передаётся «Ваша цена», не себестоимость.</p>
                     {wbPreview && (
@@ -862,6 +906,42 @@ export default function ProductCardPage() {
                               <details className="cursor-pointer">
                                 <summary className="font-medium">Payload (JSON)</summary>
                                 <pre className="mt-2 p-2 bg-black/5 rounded text-[10px] overflow-auto max-h-48 whitespace-pre-wrap">{JSON.stringify(wbPreview.payload, null, 2)}</pre>
+                              </details>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    )}
+                    {wbDiagnostic && (
+                      <div className={`rounded-lg border p-3 text-xs space-y-2 mt-2 ${wbDiagnostic.success ? "border-green-500/50 bg-green-500/10" : "border-destructive/50 bg-destructive/10"}`}>
+                        {wbDiagnostic.success ? (
+                          <p className="text-green-700 dark:text-green-400">
+                            ✓ Товар выгружен на WB. nmId: {wbDiagnostic.nmId}
+                          </p>
+                        ) : (
+                          <>
+                            <p className="text-destructive font-medium">{wbDiagnostic.error}</p>
+                            {(wbDiagnostic.wbRequest != null || wbDiagnostic.wbResponse != null) && (
+                              <details className="mt-1">
+                                <summary className="cursor-pointer text-muted-foreground">Запрос и ответ WB</summary>
+                                <div className="mt-1 space-y-2">
+                                  {wbDiagnostic.wbRequest != null && (
+                                    <div>
+                                      <p className="font-medium">Запрос:</p>
+                                      <pre className="mt-0.5 p-2 bg-muted rounded text-[10px] overflow-x-auto max-h-40 overflow-y-auto">
+                                        {JSON.stringify(wbDiagnostic.wbRequest, null, 2)}
+                                      </pre>
+                                    </div>
+                                  )}
+                                  {wbDiagnostic.wbResponse != null && (
+                                    <div>
+                                      <p className="font-medium">Ответ WB:</p>
+                                      <pre className="mt-0.5 p-2 bg-muted rounded text-[10px] overflow-x-auto max-h-40 overflow-y-auto">
+                                        {JSON.stringify(wbDiagnostic.wbResponse, null, 2)}
+                                      </pre>
+                                    </div>
+                                  )}
+                                </div>
                               </details>
                             )}
                           </>

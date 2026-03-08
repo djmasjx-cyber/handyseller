@@ -402,6 +402,15 @@ export class MarketplacesController {
     return this.marketplacesService.validateProductForWb(product, { wbColorNames });
   }
 
+  /** Диагностика выгрузки на WB: попытка загрузки с полным ответом API */
+  @Post('wb-export-diagnostic/:productId')
+  async getWbExportDiagnostic(
+    @CurrentUser('userId') userId: string,
+    @Param('productId') productId: string,
+  ) {
+    return this.marketplacesService.getWbExportDiagnostic(userId, productId);
+  }
+
   /** Предпросмотр выгрузки на WB: payload и маппинг полей */
   @Get('wb-export-preview/:productId')
   async getWbExportPreview(

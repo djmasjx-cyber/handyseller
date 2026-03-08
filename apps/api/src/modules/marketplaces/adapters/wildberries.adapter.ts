@@ -446,6 +446,78 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
   }
 
   /**
+   * Диагностика выгрузки: попытка загрузки с возвратом полного запроса и ответа WB.
+   * Для отладки ошибок 400 — показывает что именно отправлено и что вернул WB.
+   */
+  async tryUploadWithFullResponse(
+    product: ProductData,
+  ): Promise<{ success: boolean; nmId?: string; error?: string; wbRequest?: unknown; wbResponse?: unknown }> {
+    const canonical: CanonicalProduct = {
+      canonical_sku: product.id,
+      vendor_code: product.vendorCode ?? product.id,
+      title: product.name,
+      long_description_plain: product.description,
+      brand_name: product.brand,
+      weight_grams: product.weight,
+      width_mm: product.width,
+      length_mm: product.length,
+      height_mm: product.height,
+      color: product.color,
+      items_per_pack: product.itemsPerPack,
+      material: product.material,
+      craft_type: product.craftType,
+      country_of_origin: product.countryOfOrigin,
+      package_contents: product.packageContents,
+      long_description_html: product.richContent,
+      wb_subject_id: product.wbSubjectId,
+      attributes: undefined,
+      images: (product.images ?? []).map((url) => ({ url })),
+      price: product.price ?? 1,
+      stock_quantity: product.stock ?? 0,
+    };
+    let wbProduct: unknown;
+    try {
+      const barcodes = await this.generateBarcodes(1);
+      const barcode = barcodes[0];
+      if (!barcode?.trim()) {
+        return { success: false, error: 'Не удалось сгенерировать штрих-код WB' };
+      }
+      let wbCharcs: Array<{ charcID: number; name: string; required?: boolean }> | undefined;
+      if (canonical.wb_subject_id && canonical.wb_subject_id > 0) {
+        await new Promise((r) => setTimeout(r, 300));
+        wbCharcs = await this.getCharcsForSubject(canonical.wb_subject_id);
+      }
+      wbProduct = this.convertToPlatform(canonical, barcode, wbCharcs);
+      const { data } = await firstValueFrom(
+        this.httpService.post(`${this.CONTENT_API}/content/v2/cards/upload`, wbProduct, {
+          headers: { ...this.authHeader(), 'Content-Type': 'application/json' },
+        }),
+      );
+      const nmId = data?.cards?.[0]?.nmID;
+      return { success: true, nmId: nmId ? String(nmId) : undefined, wbRequest: wbProduct, wbResponse: data };
+    } catch (error) {
+      const axErr = error as { response?: { status?: number; data?: unknown } };
+      const wbData = axErr?.response?.data;
+      let msg = error instanceof Error ? error.message : String(error);
+      const parts: string[] = [];
+      if (wbData && typeof wbData === 'object') {
+        const obj = wbData as Record<string, unknown>;
+        if (typeof obj.detail === 'string') parts.push(obj.detail);
+        if (typeof obj.message === 'string') parts.push(obj.message);
+        const errs = obj.errors ?? obj.Errors ?? obj.error;
+        if (Array.isArray(errs)) {
+          for (const e of errs) {
+            const s = typeof e === 'string' ? e : (e && typeof e === 'object' && 'message' in e ? (e as { message?: string }).message : null);
+            if (s?.trim()) parts.push(s.trim());
+          }
+        }
+      }
+      if (parts.length > 0) msg = parts.join('. ');
+      return { success: false, error: msg, wbRequest: wbProduct, wbResponse: wbData };
+    }
+  }
+
+  /**
    * Выгрузка на WB из канонической модели.
    * Генерирует штрих-код на стороне WB перед созданием карточки.
    */
@@ -500,35 +572,42 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       const status = axErr?.response?.status;
       const wbData = axErr?.response?.data as Record<string, unknown> | undefined;
       let msg = error instanceof Error ? error.message : String(error);
+      const parts: string[] = [];
       if (status === 404) {
         msg = `HTTP 404 — endpoint не найден. Проверьте, что WB Content API доступен (content-api.wildberries.ru).`;
       } else if (wbData && typeof wbData === 'object') {
-        const parts: string[] = [];
         if (typeof wbData.detail === 'string') parts.push(wbData.detail);
         if (typeof wbData.message === 'string') parts.push(wbData.message);
         if (typeof wbData.title === 'string') parts.push(wbData.title);
         const errs = wbData.errors ?? wbData.Errors ?? wbData.error;
         if (Array.isArray(errs) && errs.length > 0) {
           for (const e of errs) {
-            const s = typeof e === 'string' ? e : (e && typeof e === 'object' && 'message' in e ? (e as { message?: string }).message : null);
+            const s = typeof e === 'string' ? e : (e && typeof e === 'object' && 'message' in e ? (e as { message?: string }).message : (e as { text?: string })?.text ?? null);
             if (s?.trim()) parts.push(s.trim());
           }
         } else if (typeof errs === 'string' && errs.trim()) {
           parts.push(errs.trim());
         }
         const dataErr = wbData.data as Record<string, unknown> | undefined;
-        if (dataErr && typeof dataErr === 'object' && Array.isArray(dataErr.errors)) {
-          for (const e of dataErr.errors) {
-            const s = typeof e === 'string' ? e : (e && typeof e === 'object' && 'message' in e ? (e as { message?: string }).message : null);
-            if (s?.trim()) parts.push(s.trim());
+        if (dataErr && typeof dataErr === 'object') {
+          const dataErrs = dataErr.errors ?? dataErr.Errors ?? dataErr.error;
+          if (Array.isArray(dataErrs)) {
+            for (const e of dataErrs) {
+              const s = typeof e === 'string' ? e : (e && typeof e === 'object' && 'message' in e ? (e as { message?: string }).message : (e as { text?: string })?.text ?? null);
+              if (s?.trim()) parts.push(s.trim());
+            }
           }
         }
         if (parts.length > 0) msg = [...new Set(parts)].join('. ');
         if (status === 400) {
-          console.warn('[WildberriesAdapter] uploadProduct 400:', JSON.stringify(wbData));
-          if (!msg || msg.includes('status code')) {
+          const rawJson = JSON.stringify(wbData, null, 2);
+          console.warn('[WildberriesAdapter] uploadProduct 400:', rawJson);
+          if (!msg || msg.includes('status code') || msg.length < 20) {
             msg = parts.length > 0 ? msg : 'HTTP 400 — неверный формат. Выберите категорию WB, добавьте фото и заполните обязательные поля (название, артикул, габариты, вес).';
           }
+          // Добавляем сырой ответ WB для диагностики (первые 800 символов)
+          const rawPreview = rawJson.length > 800 ? rawJson.slice(0, 800) + '...' : rawJson;
+          msg += ` [Ответ WB: ${rawPreview}]`;
         }
       }
       throw new Error(`Ошибка выгрузки товара на Wildberries: ${msg}`);
