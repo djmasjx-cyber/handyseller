@@ -319,6 +319,12 @@ export class MarketplacesController {
     return this.marketplacesService.getWbCategoryList(userId);
   }
 
+  /** Справочник цветов WB — для выбора цвета товара */
+  @Get('wb/colors')
+  async getWbColors(@CurrentUser('userId') userId: string) {
+    return this.marketplacesService.getWbColors(userId);
+  }
+
   /** Атрибуты категории Ozon (по categoryId и typeId) */
   @Get('ozon/categories/attributes')
   async getOzonCategoryAttributes(

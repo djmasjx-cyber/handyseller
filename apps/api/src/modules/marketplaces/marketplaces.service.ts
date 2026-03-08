@@ -1644,6 +1644,24 @@ export class MarketplacesService {
     return rows.map((r) => r.name);
   }
 
+  /** Справочник цветов WB из API — для выбора в UI */
+  async getWbColors(userId: string): Promise<Array<{ id: number; name: string }>> {
+    const conn = await this.getMarketplaceConnection(userId, 'WILDBERRIES');
+    if (!conn?.token) {
+      throw new Error('WB не подключён');
+    }
+    const adapter = this.adapterFactory.createAdapter('WILDBERRIES', {
+      encryptedToken: conn.token,
+      encryptedRefreshToken: conn.refreshToken,
+      sellerId: conn.sellerId ?? undefined,
+      warehouseId: conn.warehouseId ?? undefined,
+    });
+    if (!adapter || !(adapter instanceof WildberriesAdapter)) {
+      throw new Error('Ошибка доступа к WB');
+    }
+    return adapter.getColors();
+  }
+
   /**
    * Проверка перед выгрузкой на WB: обязательные поля.
    * Маппинг: title→Наименование, article→supplierVendorCode, imageUrl→Фото, wbSubjectId→subjectId.
