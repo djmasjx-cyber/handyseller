@@ -162,20 +162,24 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       throw new Error('WB: категория (subjectId) обязательна для создания карточки товара');
     }
 
-    const variant: Record<string, unknown> = {
+    const good: Record<string, unknown> = {
+      nomenclature: 0,
+      variant: 0,
       vendorCode: `${vendorCode}-1`,
       title: title || 'Товар',
       description: descriptionText?.trim() || 'Описание товара',
-      brand: canonical.brand_name ?? 'Ручная работа',
-      dimensions: { length: l, width: w, height: h, weightBrutto },
       characteristics,
+      weightBrutto,
+      length: l,
+      width: w,
+      height: h,
     };
 
     // Штрих-код и sizes — WB требует sizes[].skus для идентификации размера
     if (barcode?.trim()) {
-      variant.barcode = barcode.trim();
+      good.barcode = barcode.trim();
       const priceRub = Math.round(canonical.price ?? 1);
-      variant.sizes = [
+      good.sizes = [
         {
           techSize: 'Без размера',
           wbSize: 'RU',
@@ -185,13 +189,15 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       ];
     }
 
-    // Формат Habr/WBSeller: subjectID + variants (без nomenclature, goods)
+    // content-api.wildberries.ru: формат cards + goods (как в get cards list)
     const card: Record<string, unknown> = {
-      subjectID: canonical.wb_subject_id,
+      nomenclature: 0,
       supplierVendorCode: vendorCode,
       countryProduction: this.normalizeCountry(canonical.country_of_origin),
       brand: canonical.brand_name ?? 'Ручная работа',
-      variants: [variant],
+      dimensions: { width: w, height: h, length: l, weightBrutto },
+      subjectID: canonical.wb_subject_id,
+      goods: [good],
     };
 
     // Фото НЕ передаём в cards/upload — WB не принимает addin при создании.
@@ -204,9 +210,7 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
         keywords: canonical.seo_keywords ?? '',
       };
     }
-    // WB Content API: принимает и { cards: [...] }, и массив [card] в корне.
-    // Пробуем массив — Habr и WBSeller используют этот формат.
-    return [card] as unknown as PlatformProductPayload;
+    return { cards: [card] };
   }
 
   /**
@@ -493,6 +497,11 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
           headers: { ...this.authHeader(), 'Content-Type': 'application/json' },
         }),
       );
+      const resp = data as Record<string, unknown> | undefined;
+      if (resp && resp.error === true) {
+        const errText = String(resp.errorText ?? resp.message ?? resp.detail ?? 'Неизвестная ошибка WB');
+        return { success: false, error: errText, wbRequest: wbProduct, wbResponse: data };
+      }
       let nmId = this.extractNmIdFromUploadResponse(data);
       if (!nmId) {
         nmId = await this.findNmIdByVendorCode(canonical.vendor_code ?? canonical.canonical_sku);
@@ -559,11 +568,21 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       // Логируем ответ
       console.log('[WildberriesAdapter] uploadFromCanonical RESPONSE:', JSON.stringify(data, null, 2));
 
+      // WB может вернуть 200 с error: true в теле — карточка не создана
+      const resp = data as Record<string, unknown> | undefined;
+      if (resp && resp.error === true) {
+        const errText = String(resp.errorText ?? resp.message ?? resp.detail ?? 'Неизвестная ошибка WB');
+        throw new Error(`WB отклонил карточку: ${errText}`);
+      }
+
       let nmId = this.extractNmIdFromUploadResponse(data);
       if (!nmId) {
         nmId = await this.findNmIdByVendorCode(canonical.vendor_code ?? canonical.canonical_sku);
       }
-      if (!nmId) throw new Error('WB не вернул nmID созданной карточки. Проверьте карточки в ЛК WB.');
+      if (!nmId) {
+        const raw = JSON.stringify(data).slice(0, 500);
+        throw new Error(`WB не вернул nmID. Ответ: ${raw}`);
+      }
       const imageUrls = canonical.images?.map((i) => i.url) ?? [];
       await this.uploadImages(nmId, imageUrls);
       if (this.config.sellerId) {
