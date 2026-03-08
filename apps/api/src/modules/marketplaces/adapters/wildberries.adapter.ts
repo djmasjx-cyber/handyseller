@@ -554,12 +554,12 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
             timeout: 15000,
           }),
         );
-        this.logger.log(`[WildberriesAdapter] Фото ${i + 1}/${urls.length} загружено для nmId=${nmId}`);
+        console.log(`[WildberriesAdapter] Фото ${i + 1}/${urls.length} загружено для nmId=${nmId}`);
       } catch (err) {
         const axErr = err as { response?: { status?: number; data?: unknown } };
         const wbData = axErr?.response?.data as Record<string, unknown> | undefined;
         const msg = typeof wbData?.detail === 'string' ? wbData.detail : (err instanceof Error ? err.message : String(err));
-        this.logger.warn(`[WildberriesAdapter] Ошибка загрузки фото для nmId=${nmId}: ${msg}. Попробуйте загрузить фото вручную в ЛК WB.`);
+        console.warn(`[WildberriesAdapter] Ошибка загрузки фото для nmId=${nmId}: ${msg}. Попробуйте загрузить фото вручную в ЛК WB.`);
       }
     }
   }
