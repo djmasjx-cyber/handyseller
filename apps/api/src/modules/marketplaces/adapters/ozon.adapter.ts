@@ -1570,10 +1570,21 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
         if (typeof inf?.description === 'string' && inf.description.trim()) {
           description = inf.description.slice(0, 5000);
         }
-        if (Array.isArray(inf?.source)) {
-          for (const a of inf.source) {
-            const aid = a?.attribute_id;
-            const val = (a?.value ?? '').toString().trim();
+        // Ozon API может возвращать source, sources или attributes — проверяем все варианты
+        const attrList =
+          (inf as Record<string, unknown>).source ??
+          (inf as Record<string, unknown>).sources ??
+          (inf as Record<string, unknown>).attributes;
+        if (!description && !brand && !color && (!Array.isArray(attrList) || attrList.length === 0)) {
+          this.logger.debug(`[getProductsFromOzon] product ${pid} (${offerId}): no attrs, keys=${Object.keys(inf ?? {}).join(',')}`);
+        }
+        if (Array.isArray(attrList)) {
+          for (const a of attrList) {
+            const item = a as { attribute_id?: number; id?: number; value?: string; values?: Array<{ value?: string }> };
+            const aid = item?.attribute_id ?? item?.id;
+            const val =
+              (item?.value ?? '').toString().trim() ||
+              (Array.isArray(item?.values) && item.values[0] ? (item.values[0]?.value ?? '').toString().trim() : '');
             if (!val) continue;
             if (aid === 4190 && !description) description = val.slice(0, 5000);
             if (aid === OzonAdapter.ATTR_BRAND) brand = val.slice(0, 200);
@@ -1589,6 +1600,11 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
         const barcode = this.extractBarcode(inf);
         const catId = inf?.description_category_id;
         const typeId = inf?.type_id;
+        // Product.weight/width/height/length — Int (граммы, мм). Ozon может вернуть float — округляем.
+        const toInt = (v: unknown): number | undefined => {
+          const n = typeof v === 'number' && !isNaN(v) ? Math.round(v) : parseInt(String(v ?? ''), 10);
+          return !isNaN(n) && n >= 0 ? n : undefined;
+        };
         out.push({
           productId: pid,
           offerId,
@@ -1597,10 +1613,10 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
           imageUrl: imageUrl || undefined,
           price: typeof price === 'number' && !isNaN(price) ? price : undefined,
           barcode: barcode || undefined,
-          weight: inf?.weight,
-          width: inf?.width,
-          height: inf?.height,
-          length: inf?.depth,
+          weight: toInt(inf?.weight),
+          width: toInt(inf?.width),
+          height: toInt(inf?.height),
+          length: toInt(inf?.depth),
           brand: brand || undefined,
           color: color || undefined,
           ozonCategoryId: typeof catId === 'number' && catId > 0 ? catId : undefined,
@@ -1610,6 +1626,51 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
       } catch (err) {
         this.logger.error(`[getProductsFromOzon] /v3/product/info/list batch error: ${err instanceof Error ? err.message : String(err)}`);
         throw err;
+      }
+    }
+    // Дополнительный запрос /v4/products/info/attributes для товаров без brand/color/description
+    const needAttrs = out.filter((o) => !o.brand && !o.color && !o.description);
+    if (needAttrs.length > 0) {
+      try {
+        const offerIds = needAttrs.map((o) => o.offerId).filter(Boolean);
+        const ATTR_BATCH = 100;
+        for (let j = 0; j < offerIds.length; j += ATTR_BATCH) {
+          const batch = offerIds.slice(j, j + ATTR_BATCH);
+          const { data } = await firstValueFrom(
+            this.httpService.post(
+              `${this.API_BASE}/v4/product/info/attributes`,
+              { filter: { offer_id: batch, visibility: 'ALL' }, limit: ATTR_BATCH },
+              {
+                headers: {
+                  'Client-Id': this.config.sellerId ?? '',
+                  'Api-Key': this.config.apiKey,
+                  'Content-Type': 'application/json',
+                },
+                timeout: 15000,
+              },
+            ),
+          );
+          const attrResult = (data as Record<string, unknown>)?.result ?? data;
+          const attrItems = ((attrResult as Record<string, unknown>)?.items ?? []) as Array<{
+            offer_id?: string;
+            attributes?: Array<{ attribute_id?: number; id?: number; values?: Array<{ value?: string }> }>;
+          }>;
+          for (const ai of attrItems) {
+            const oid = (ai?.offer_id ?? '').toString().trim();
+            const prod = out.find((o) => o.offerId === oid);
+            if (!prod || !Array.isArray(ai?.attributes)) continue;
+            for (const a of ai.attributes) {
+              const aid = a?.attribute_id ?? a?.id;
+              const val = Array.isArray(a?.values) && a.values[0] ? (a.values[0]?.value ?? '').toString().trim() : '';
+              if (!val) continue;
+              if (aid === 4190 && !prod.description) prod.description = val.slice(0, 5000);
+              if (aid === OzonAdapter.ATTR_BRAND && !prod.brand) prod.brand = val.slice(0, 200);
+              if (aid === OzonAdapter.ATTR_COLOR && !prod.color) prod.color = val.slice(0, 100);
+            }
+          }
+        }
+      } catch (attrErr) {
+        this.logger.warn(`[getProductsFromOzon] v4/products/info/attributes fallback failed: ${attrErr instanceof Error ? attrErr.message : String(attrErr)}`);
       }
     }
     this.logger.log(`[getProductsFromOzon] Returning ${out.length} products`);

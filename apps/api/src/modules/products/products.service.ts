@@ -190,6 +190,19 @@ export class ProductsService {
     });
   }
 
+  /** Поиск по артикулу среди нескольких userId (для linked-аккаунтов). Сначала точное совпадение, затем без учёта регистра. */
+  async findByArticleForUserIds(userIds: string[], article: string) {
+    const art = (article ?? '').toString().trim();
+    if (!art || userIds.length === 0) return null;
+    const exact = await this.prisma.product.findFirst({
+      where: { userId: { in: userIds }, article: art },
+    });
+    if (exact) return exact;
+    return this.prisma.product.findFirst({
+      where: { userId: { in: userIds }, article: { equals: art, mode: 'insensitive' } },
+    });
+  }
+
   /** Поиск товаров для autocomplete: id (точное), displayId, article (ILIKE), title (ILIKE). Лимит 10, без архива. */
   async search(userId: string, q: string, limit = 10) {
     const trimmed = q?.trim() ?? '';

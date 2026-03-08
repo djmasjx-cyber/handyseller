@@ -19,6 +19,44 @@ export class ProductMappingService {
     return mapping?.product ?? null;
   }
 
+  /** Найти Product по externalSystemId, проверяя несколько userId (для linked-аккаунтов) */
+  async findProductByExternalIdForUserIds(
+    userIds: string[],
+    marketplace: MarketplaceType,
+    externalSystemId: string,
+  ) {
+    const mapping = await this.prisma.productMarketplaceMapping.findFirst({
+      where: {
+        userId: { in: userIds },
+        marketplace,
+        externalSystemId: String(externalSystemId),
+        isActive: true,
+      },
+      include: { product: true },
+    });
+    return mapping?.product ?? null;
+  }
+
+  /** Найти Product по externalArticle (offer_id) в маппинге — для импорта с Ozon, когда product_id не совпадает */
+  async findProductByExternalArticle(
+    userIds: string[],
+    marketplace: MarketplaceType,
+    externalArticle: string,
+  ) {
+    const art = String(externalArticle ?? '').trim();
+    if (!art) return null;
+    const mapping = await this.prisma.productMarketplaceMapping.findFirst({
+      where: {
+        userId: { in: userIds },
+        marketplace,
+        externalArticle: art,
+        isActive: true,
+      },
+      include: { product: true },
+    });
+    return mapping?.product ?? null;
+  }
+
   /** Получить все маппинги товара для синхронизации остатков */
   async getMappingsForProduct(productId: string, userId: string) {
     return this.prisma.productMarketplaceMapping.findMany({

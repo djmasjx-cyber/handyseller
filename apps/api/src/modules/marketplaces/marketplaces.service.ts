@@ -2675,6 +2675,7 @@ export class MarketplacesService {
     ]);
     const categoryPathMap = this.buildOzonCategoryPathMap(categoryTree);
     console.log(`[importFromOzon] Fetched ${ozonProducts.length} products from Ozon`);
+    const userIds = await this.getEffectiveUserIds(userId);
     let imported = 0;
     let skipped = 0;
     let articlesUpdated = 0;
@@ -2684,9 +2685,11 @@ export class MarketplacesService {
       const ozonCategoryPath = (p.ozonCategoryId && p.ozonTypeId)
         ? categoryPathMap.get(`${p.ozonCategoryId}-${p.ozonTypeId}`)
         : undefined;
+      // Матчинг: 1) по product_id в маппинге, 2) по offer_id в маппинге, 3) по артикулу (с учётом linked-аккаунтов)
       const existing =
-        (await this.productMappingService.findProductByExternalId(userId, 'OZON', String(p.productId))) ??
-        (await this.productsService.findByArticle(userId, p.offerId));
+        (await this.productMappingService.findProductByExternalIdForUserIds(userIds, 'OZON', String(p.productId))) ??
+        (await this.productMappingService.findProductByExternalArticle(userIds, 'OZON', p.offerId)) ??
+        (await this.productsService.findByArticleForUserIds(userIds, p.offerId));
       if (existing) {
         const updates: {
           article?: string; title?: string; description?: string; imageUrl?: string; barcodeOzon?: string;
