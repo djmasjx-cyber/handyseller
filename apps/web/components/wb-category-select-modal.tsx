@@ -1,26 +1,24 @@
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
-import { Input } from "@handyseller/ui"
+import { useState, useEffect } from "react"
+import { Button, Input } from "@handyseller/ui"
 import { Loader2, Search } from "lucide-react"
 
 interface WbCategorySelectModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onSelect: (params: {
-    wbSubjectId: number
-    wbCategoryPath: string
-  }) => void
+  onSelect: (params: { wbSubjectId: number; wbCategoryPath: string }) => void
   token: string | null
 }
 
+/** Модальное окно выбора категории WB. WB возвращает плоский список предметов (subject) из /content/v2/object/all. */
 export function WbCategorySelectModal({
   open,
   onOpenChange,
   onSelect,
   token,
 }: WbCategorySelectModalProps) {
-  const [list, setList] = useState<Array<{ subjectId: number; subjectName: string }>>([])
+  const [categories, setCategories] = useState<Array<{ subjectId: number; subjectName: string }>>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState("")
@@ -32,45 +30,25 @@ export function WbCategorySelectModal({
     fetch("/api/marketplaces/wb/categories", {
       headers: { Authorization: `Bearer ${token}` },
     })
-      .then(async (r) => {
-        const data = await r.json().catch(() => ({}))
-        if (!r.ok) {
-          const msg = (data as { message?: string | string[] }).message ?? (data as { error?: string }).error ?? `Ошибка ${r.status}`
-          throw new Error(Array.isArray(msg) ? msg.join(". ") : String(msg))
-        }
-        return data
-      })
+      .then((r) => r.json())
       .then((data) => {
-        if (Array.isArray(data)) {
-          setList(
-            data.map((item: { subjectId?: number; subjectName?: string }) => ({
-              subjectId: item.subjectId ?? 0,
-              subjectName: item.subjectName ?? "",
-            })).filter((x: { subjectId: number; subjectName: string }) => x.subjectId > 0)
-          )
-        } else {
-          setList([])
-        }
+        if (Array.isArray(data)) setCategories(data)
+        else setCategories([])
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "Не удалось загрузить категории WB"))
+      .catch(() => setError("Не удалось загрузить категории WB"))
       .finally(() => setLoading(false))
   }, [open, token])
 
-  const filteredList = useMemo(() => {
-    if (!search.trim()) return list
-    const q = search.toLowerCase().trim()
-    return list.filter(
-      (item) =>
-        item.subjectName.toLowerCase().includes(q) ||
-        String(item.subjectId).includes(q)
-    )
-  }, [list, search])
+  const filteredList = search.trim()
+    ? categories.filter(
+        (c) =>
+          c.subjectName.toLowerCase().includes(search.toLowerCase()) ||
+          String(c.subjectId).includes(search)
+      )
+    : categories
 
   const handleSelect = (item: { subjectId: number; subjectName: string }) => {
-    onSelect({
-      wbSubjectId: item.subjectId,
-      wbCategoryPath: item.subjectName,
-    })
+    onSelect({ wbSubjectId: item.subjectId, wbCategoryPath: item.subjectName })
     onOpenChange(false)
   }
 
@@ -83,47 +61,47 @@ export function WbCategorySelectModal({
         <div className="p-4 border-b shrink-0">
           <h2 className="font-semibold text-lg">Выберите категорию WB</h2>
           <p className="text-sm text-muted-foreground mt-1">
-            Выберите предмет (subject) для товара на Wildberries.
+            Предмет (subject) — обязательное поле для выгрузки на Wildberries.
           </p>
         </div>
         <div className="p-4 overflow-y-auto flex-1">
           {loading ? (
-            <div className="flex items-center justify-center py-12">
+            <div className="flex justify-center py-12">
               <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
             </div>
           ) : error ? (
             <p className="text-destructive py-4">{error}</p>
           ) : (
             <>
-              <div className="relative">
+              <div className="relative mb-4">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
-                  placeholder="Название категории или ID..."
+                  placeholder="Поиск по названию или ID..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   className="pl-9"
                 />
               </div>
-              <div className="border rounded-lg overflow-y-auto min-h-[280px] max-h-[400px] mt-4">
-                <ul className="p-2 space-y-1">
-                  {filteredList.length === 0 ? (
-                    <li className="py-4 text-center text-muted-foreground text-sm">
-                      {list.length === 0 ? "Категории не загружены" : "Ничего не найдено"}
-                    </li>
-                  ) : (
-                    filteredList.map((item) => (
+              <div className="border rounded-lg overflow-y-auto min-h-[280px] max-h-[400px]">
+                {filteredList.length === 0 ? (
+                  <div className="py-8 text-center text-muted-foreground text-sm">
+                    {search.trim() ? "Ничего не найдено" : "Категории не загружены"}
+                  </div>
+                ) : (
+                  <ul className="p-2 space-y-1">
+                    {filteredList.map((item) => (
                       <li key={item.subjectId}>
                         <button
                           type="button"
                           onClick={() => handleSelect(item)}
-                          className="w-full text-left px-3 py-2 rounded hover:bg-[#CB11AB]/10 text-[#CB11AB] text-sm"
+                          className="w-full text-left px-3 py-2 rounded hover:bg-[#CB11AB]/10 text-[#CB11AB] hover:text-[#CB11AB] text-sm"
                         >
                           {item.subjectName} <span className="text-muted-foreground">(ID: {item.subjectId})</span>
                         </button>
                       </li>
-                    ))
-                  )}
-                </ul>
+                    ))}
+                  </ul>
+                )}
               </div>
             </>
           )}

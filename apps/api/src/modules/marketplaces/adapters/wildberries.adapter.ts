@@ -535,10 +535,32 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
     }
   }
 
+  /**
+   * Загрузка фото на WB через POST /content/v3/media/save.
+   * WB не принимает URL при создании карточки — фото загружаются отдельно по nmID.
+   * Формат: { nmID, data: [{ url }] } или { nmID, media: [{ url }] }.
+   */
   private async uploadImages(nmId: number, images: string[]): Promise<void> {
-    // WB требует загрузку фото через отдельный эндпоинт
-    if (images.length > 0) {
-      console.log(`[WildberriesAdapter] Загрузка ${images.length} изображений для товара ${nmId}`);
+    const urls = images.filter((u) => typeof u === 'string' && u.trim().startsWith('http'));
+    if (urls.length === 0) return;
+    for (let i = 0; i < urls.length; i++) {
+      const url = urls[i].trim();
+      try {
+        await new Promise((r) => setTimeout(r, 500)); // rate limit
+        const body = { nmID: nmId, data: [{ url }] };
+        await firstValueFrom(
+          this.httpService.post(`${this.CONTENT_API}/content/v3/media/save`, body, {
+            headers: { ...this.authHeader(), 'Content-Type': 'application/json' },
+            timeout: 15000,
+          }),
+        );
+        this.logger.log(`[WildberriesAdapter] Фото ${i + 1}/${urls.length} загружено для nmId=${nmId}`);
+      } catch (err) {
+        const axErr = err as { response?: { status?: number; data?: unknown } };
+        const wbData = axErr?.response?.data as Record<string, unknown> | undefined;
+        const msg = typeof wbData?.detail === 'string' ? wbData.detail : (err instanceof Error ? err.message : String(err));
+        this.logger.warn(`[WildberriesAdapter] Ошибка загрузки фото для nmId=${nmId}: ${msg}. Попробуйте загрузить фото вручную в ЛК WB.`);
+      }
     }
   }
 

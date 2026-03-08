@@ -200,6 +200,16 @@ export default function ProductCardPage() {
     if (!form.imageUrl?.trim() || !form.imageUrl.startsWith("http")) wbMissingFields.push("Фото (URL)")
     const wbPriceVal = form.price ? parseFloat(form.price) : NaN
     if (isNaN(wbPriceVal) || wbPriceVal <= 0) wbMissingFields.push("Ваша цена (₽)")
+    if (!form.brand?.trim()) wbMissingFields.push("Бренд")
+    if (!form.description?.trim()) wbMissingFields.push("Описание")
+    const wbWeight = form.weight ? parseInt(form.weight, 10) : NaN
+    if (isNaN(wbWeight) || wbWeight <= 0) wbMissingFields.push("Вес (г)")
+    const wbWidth = form.width ? parseInt(form.width, 10) : NaN
+    if (isNaN(wbWidth) || wbWidth <= 0) wbMissingFields.push("Ширина (мм)")
+    const wbLength = form.length ? parseInt(form.length, 10) : NaN
+    if (isNaN(wbLength) || wbLength <= 0) wbMissingFields.push("Длина (мм)")
+    const wbHeight = form.height ? parseInt(form.height, 10) : NaN
+    if (isNaN(wbHeight) || wbHeight <= 0) wbMissingFields.push("Высота (мм)")
   }
   const [loadingWbBarcode, setLoadingWbBarcode] = useState(false)
   const [wbPreview, setWbPreview] = useState<{
@@ -706,6 +716,14 @@ export default function ProductCardPage() {
           ))}</ul>
         </div>
       )}
+      {isWbConnected && wbMissingFields.length > 0 && !exportLoadingMarketplace && (
+        <div className="rounded-lg border border-[#CB11AB]/50 bg-[#CB11AB]/10 p-3 text-sm text-[#CB11AB]">
+          <p className="font-medium mb-1">Для выгрузки на WB заполните:</p>
+          <ul className="list-disc list-inside">{wbMissingFields.map((f) => (
+            <li key={f}>{f}</li>
+          ))}</ul>
+        </div>
+      )}
 
       {product.marketplaceMappings && product.marketplaceMappings.length > 0 && (
         <div className="flex flex-wrap items-center gap-2">
@@ -742,7 +760,7 @@ export default function ProductCardPage() {
                 value={form.title}
                 onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
                 placeholder="Наименование товара"
-                className={ozonMissingFields.includes("Название") ? "border-destructive ring-destructive" : undefined}
+                className={(ozonMissingFields.includes("Название") || wbMissingFields.includes("Название")) ? "border-destructive ring-destructive" : undefined}
               />
               <p className="text-xs text-muted-foreground">WB: до 60 символов. Ozon: name.</p>
             </div>
@@ -753,7 +771,7 @@ export default function ProductCardPage() {
                 value={form.article}
                 onChange={(e) => setForm((f) => ({ ...f, article: e.target.value }))}
                 placeholder="БУС-001"
-                className={ozonMissingFields.includes("Артикул") ? "border-destructive ring-destructive" : undefined}
+                className={(ozonMissingFields.includes("Артикул") || wbMissingFields.includes("Артикул")) ? "border-destructive ring-destructive" : undefined}
               />
               <p className="text-xs text-muted-foreground">Используется для поиска и при синхронизации с маркетплейсами.</p>
             </div>
@@ -1135,12 +1153,13 @@ export default function ProductCardPage() {
               </p>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="brand">Бренд</Label>
+              <Label htmlFor="brand">Бренд {isWbConnected && "*"}</Label>
               <Input
                 id="brand"
                 value={form.brand}
                 onChange={(e) => setForm((f) => ({ ...f, brand: e.target.value }))}
                 placeholder="Ручная работа"
+                className={wbMissingFields.includes("Бренд") ? "border-destructive ring-destructive" : undefined}
               />
               <p className="text-xs text-muted-foreground">Обязателен для WB. Используется как vendor на Яндексе.</p>
             </div>
@@ -1217,7 +1236,7 @@ export default function ProductCardPage() {
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div className="space-y-2">
-                <Label htmlFor="weight">Вес (г) {isOzonConnected && "*"}</Label>
+                <Label htmlFor="weight">Вес (г) {(isOzonConnected || isWbConnected) && "*"}</Label>
                 <Input
                   id="weight"
                   type="number"
@@ -1225,11 +1244,11 @@ export default function ProductCardPage() {
                   value={form.weight}
                   onChange={(e) => setForm((f) => ({ ...f, weight: e.target.value }))}
                   placeholder="100"
-                  className={ozonMissingFields.includes("Вес (г)") ? "border-destructive ring-destructive" : undefined}
+                  className={(ozonMissingFields.includes("Вес (г)") || wbMissingFields.includes("Вес (г)")) ? "border-destructive ring-destructive" : undefined}
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="width">Ширина (мм) {isOzonConnected && "*"}</Label>
+                <Label htmlFor="width">Ширина (мм) {(isOzonConnected || isWbConnected) && "*"}</Label>
                 <Input
                   id="width"
                   type="number"
@@ -1237,11 +1256,11 @@ export default function ProductCardPage() {
                   value={form.width}
                   onChange={(e) => setForm((f) => ({ ...f, width: e.target.value }))}
                   placeholder="100"
-                  className={ozonMissingFields.includes("Ширина (мм)") ? "border-destructive ring-destructive" : undefined}
+                  className={(ozonMissingFields.includes("Ширина (мм)") || wbMissingFields.includes("Ширина (мм)")) ? "border-destructive ring-destructive" : undefined}
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="length">Длина (мм) {isOzonConnected && "*"}</Label>
+                <Label htmlFor="length">Длина (мм) {(isOzonConnected || isWbConnected) && "*"}</Label>
                 <Input
                   id="length"
                   type="number"
@@ -1249,11 +1268,11 @@ export default function ProductCardPage() {
                   value={form.length}
                   onChange={(e) => setForm((f) => ({ ...f, length: e.target.value }))}
                   placeholder="100"
-                  className={ozonMissingFields.includes("Длина (мм)") ? "border-destructive ring-destructive" : undefined}
+                  className={(ozonMissingFields.includes("Длина (мм)") || wbMissingFields.includes("Длина (мм)")) ? "border-destructive ring-destructive" : undefined}
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="height">Высота (мм) {isOzonConnected && "*"}</Label>
+                <Label htmlFor="height">Высота (мм) {(isOzonConnected || isWbConnected) && "*"}</Label>
                 <Input
                   id="height"
                   type="number"
@@ -1261,7 +1280,7 @@ export default function ProductCardPage() {
                   value={form.height}
                   onChange={(e) => setForm((f) => ({ ...f, height: e.target.value }))}
                   placeholder="100"
-                  className={ozonMissingFields.includes("Высота (мм)") ? "border-destructive ring-destructive" : undefined}
+                  className={(ozonMissingFields.includes("Высота (мм)") || wbMissingFields.includes("Высота (мм)")) ? "border-destructive ring-destructive" : undefined}
                 />
               </div>
             </div>
@@ -1369,7 +1388,7 @@ export default function ProductCardPage() {
                     value={form.imageUrl}
                     onChange={(e) => setForm((f) => ({ ...f, imageUrl: e.target.value }))}
                     placeholder="https://..."
-                    className={`min-w-0 ${ozonMissingFields.includes("Фото (URL)") ? "border-destructive ring-destructive" : ""}`}
+                    className={`min-w-0 ${(ozonMissingFields.includes("Фото (URL)") || wbMissingFields.includes("Фото (URL)")) ? "border-destructive ring-destructive" : ""}`}
                   />
                   <p className="text-xs text-muted-foreground mt-1">WB: /content/v3/media/save. Ozon: images[].</p>
                 </div>
@@ -1438,11 +1457,11 @@ export default function ProductCardPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2 w-full">
-            <Label htmlFor="description">Описание</Label>
+            <Label htmlFor="description">Описание {(isOzonConnected || isWbConnected) && "*"}</Label>
             <Textarea
               id="description"
               rows={12}
-              className="w-full min-h-[200px] resize-y max-h-[50vh]"
+              className={`w-full min-h-[200px] resize-y max-h-[50vh] ${wbMissingFields.includes("Описание") ? "border-destructive ring-destructive" : ""}`}
               value={form.description}
               onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
               placeholder="Подробное описание. WB: 1000–5000 символов. Ozon: technicalDetails."

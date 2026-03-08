@@ -1647,6 +1647,7 @@ export class MarketplacesService {
   /**
    * Проверка перед выгрузкой на WB: обязательные поля.
    * Маппинг: title→Наименование, article→supplierVendorCode, imageUrl→Фото, wbSubjectId→subjectId.
+   * WB требует: название, артикул, категория, фото, цена, бренд, описание, вес, габариты (мм).
    * @param options.wbColorNames — если задан и у товара указан цвет, он должен быть из справочника WB.
    */
   validateProductForWb(
@@ -1658,6 +1659,12 @@ export class MarketplacesService {
       sku?: string | null;
       wbSubjectId?: number | null;
       color?: string | null;
+      brand?: string | null;
+      description?: string | null;
+      weight?: number | null;
+      width?: number | null;
+      length?: number | null;
+      height?: number | null;
     },
     options?: { wbColorNames?: string[] },
   ): { valid: boolean; errors: string[] } {
@@ -1672,6 +1679,18 @@ export class MarketplacesService {
     const subjectId = product.wbSubjectId != null ? Number(product.wbSubjectId) : NaN;
     if (isNaN(subjectId) || subjectId <= 0)
       errors.push('Выберите категорию WB (обязательное поле для выгрузки)');
+    const brand = (product.brand ?? '').toString().trim();
+    if (!brand) errors.push('Укажите бренд (WB: обязательное поле)');
+    const desc = (product.description ?? '').toString().trim();
+    if (!desc) errors.push('Добавьте описание товара (WB: обязательное поле)');
+    const weight = product.weight != null ? Number(product.weight) : NaN;
+    if (isNaN(weight) || weight <= 0) errors.push('Укажите вес в граммах (WB: обязательное поле)');
+    const width = product.width != null ? Number(product.width) : NaN;
+    if (isNaN(width) || width <= 0) errors.push('Укажите ширину в мм (WB: обязательное поле)');
+    const length = product.length != null ? Number(product.length) : NaN;
+    if (isNaN(length) || length <= 0) errors.push('Укажите длину в мм (WB: обязательное поле)');
+    const height = product.height != null ? Number(product.height) : NaN;
+    if (isNaN(height) || height <= 0) errors.push('Укажите высоту в мм (WB: обязательное поле)');
     const color = (product.color ?? '').toString().trim();
     if (color && options?.wbColorNames?.length) {
       if (!options.wbColorNames.includes(color)) {
