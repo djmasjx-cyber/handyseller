@@ -179,17 +179,29 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       ];
     }
 
-    // Формат Habr: массив в корне. Добавляем dimensions и countryProduction для обязательных полей.
-    // https://habr.com/ru/articles/897548/
-    const habrItem: Record<string, unknown> = {
+    // Правильный формат WB API /content/v2/cards/upload — объект с полем cards
+    // https://dev.wildberries.ru/docs/openapi/work-with-products
+    const card: Record<string, unknown> = {
+      vendorCode,
       subjectID: canonical.wb_subject_id,
-      supplierVendorCode: vendorCode,
-      countryProduction: this.normalizeCountry(canonical.country_of_origin),
+      brand: canonical.brand_name ?? 'Ручная работа',
+      title: title || 'Товар',
+      description: descriptionText?.trim() || 'Описание товара',
+      characteristics: characteristics.map((c) => ({ id: c.id, value: c.value })),
       dimensions: { width: w, height: h, length: l, weightBrutto },
-      variants: [variant],
+    };
+    
+    if (barcode?.trim()) {
+      card.sizes = [
+        { techSize: 'Без размера', wbSize: 'RU', price: priceRub, skus: [barcode.trim()] },
+      ];
+    }
+
+    const payload = {
+      cards: [card],
     };
 
-    return [habrItem] as unknown as PlatformProductPayload;
+    return payload as unknown as PlatformProductPayload;
   }
 
   /**
