@@ -100,53 +100,56 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       : plainDesc;
     const title = (canonical.title || '').trim();
 
-    const characteristics: Array<{ id: number; name?: string; value: string | string[] }> = [];
+    // WB ожидает value как массив: value: ["значение"] (см. ответ get cards/list)
+    const toValue = (v: string | string[]): string[] =>
+      Array.isArray(v) ? v.filter(Boolean).map((s) => String(s).trim()) : (v?.trim() ? [v.trim()] : []);
+    const characteristics: Array<{ id: number; name?: string; value: string[] }> = [];
 
     if (wbCharcs && wbCharcs.length > 0) {
-      // Используем charcID из API WB — обязательные поля зависят от категории
       const addChar = (names: string[], value: string | string[] | undefined) => {
         if (value === undefined || value === null || (typeof value === 'string' && !value.trim())) return;
         const id = this.findCharcIdByNames(wbCharcs!, names);
-        if (id) characteristics.push({ id, value: Array.isArray(value) ? value : value.trim() });
+        if (id) characteristics.push({ id, value: toValue(Array.isArray(value) ? value : value) });
       };
       addChar(['Наименование', 'наименование', 'Название', 'title'], title || 'Товар');
       addChar(['Описание', 'описание', 'description'], descriptionText?.trim() || 'Описание товара');
       addChar(['Цвет', 'цвет', 'color'], canonical.color?.trim());
       addChar(['Количество предметов в упаковке', 'количество'], canonical.items_per_pack != null && canonical.items_per_pack > 0 ? String(canonical.items_per_pack) : undefined);
       addChar(['Материал изделия', 'материал', 'material'], canonical.material?.trim());
-      addChar(['Вид творчества', 'вид творчества', 'craft'], canonical.craft_type?.trim());
+      // Вид творчества — multi-select, через запятую → массив
+      addChar(['Вид творчества', 'вид творчества', 'craft'], canonical.craft_type?.trim()
+        ? (canonical.craft_type.includes(',') ? canonical.craft_type.split(',').map((s) => s.trim()).filter(Boolean) : canonical.craft_type.trim())
+        : undefined);
       addChar(['Комплектация', 'комплектация'], canonical.package_contents?.trim());
       for (const a of canonical.attributes ?? []) {
         const id = this.findCharcIdByNames(wbCharcs, [a.name]);
-        if (id && a.value?.trim()) characteristics.push({ id, value: a.value.trim() });
+        if (id && a.value?.trim()) characteristics.push({ id, value: toValue(a.value) });
       }
-      // Добавляем обязательные характеристики, которые не заполнены (дефолт для прохождения модерации)
       const addedIds = new Set(characteristics.map((c) => c.id));
       for (const c of wbCharcs) {
         if (c.required && !addedIds.has(c.charcID)) {
-          characteristics.push({ id: c.charcID, value: 'Не указано' });
+          characteristics.push({ id: c.charcID, value: ['Не указано'] });
           addedIds.add(c.charcID);
         }
       }
     }
 
     if (characteristics.length === 0) {
-      // Fallback: фиксированные ID (могут не подходить для всех категорий)
-      characteristics.push({ id: 0, name: 'Наименование', value: title || 'Товар' });
-      characteristics.push({ id: 3, name: 'Описание', value: descriptionText || '' });
-      if (canonical.color?.trim()) characteristics.push({ id: 1, name: 'Цвет', value: canonical.color.trim() });
+      characteristics.push({ id: 0, name: 'Наименование', value: [title || 'Товар'] });
+      characteristics.push({ id: 3, name: 'Описание', value: [descriptionText || ''] });
+      if (canonical.color?.trim()) characteristics.push({ id: 1, name: 'Цвет', value: [canonical.color.trim()] });
       if (canonical.items_per_pack != null && canonical.items_per_pack > 0) {
-        characteristics.push({ id: 4, name: 'Количество предметов в упаковке', value: String(canonical.items_per_pack) });
+        characteristics.push({ id: 4, name: 'Количество предметов в упаковке', value: [String(canonical.items_per_pack)] });
       }
-      if (canonical.material?.trim()) characteristics.push({ id: 5, name: 'Материал изделия', value: canonical.material.trim() });
-      if (canonical.craft_type?.trim()) characteristics.push({ id: 6, name: 'Вид творчества', value: canonical.craft_type.trim() });
-      if (canonical.package_contents?.trim()) characteristics.push({ id: 7, name: 'Комплектация', value: canonical.package_contents.trim() });
+      if (canonical.material?.trim()) characteristics.push({ id: 5, name: 'Материал изделия', value: [canonical.material.trim()] });
+      if (canonical.craft_type?.trim()) characteristics.push({ id: 6, name: 'Вид творчества', value: [canonical.craft_type.trim()] });
+      if (canonical.package_contents?.trim()) characteristics.push({ id: 7, name: 'Комплектация', value: [canonical.package_contents.trim()] });
       if (canonical.attributes?.length) {
         let nextId = 100;
         for (const a of canonical.attributes) {
           const skip = ['Артикул', 'Наименование', 'Описание', 'Цвет', 'Количество предметов в упаковке', 'Материал изделия', 'Вид творчества', 'Комплектация'];
-          if (!skip.includes(a.name)) {
-            characteristics.push({ id: nextId++, name: a.name, value: a.value });
+          if (!skip.includes(a.name) && a.value?.trim()) {
+            characteristics.push({ id: nextId++, name: a.name, value: toValue(a.value) });
           }
         }
       }
