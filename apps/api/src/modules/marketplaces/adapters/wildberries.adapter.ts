@@ -187,13 +187,14 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       ];
     }
 
+    // subjectID (capital ID) — WB API чувствителен к регистру
     const card: Record<string, unknown> = {
       nomenclature: 0,
       supplierVendorCode: vendorCode,
       countryProduction: this.normalizeCountry(canonical.country_of_origin),
       brand: canonical.brand_name ?? 'Ручная работа',
       dimensions: { width: w, height: h, length: l, weightBrutto },
-      subjectId: canonical.wb_subject_id,
+      subjectID: canonical.wb_subject_id,
       goods: [good],
     };
 
@@ -494,7 +495,7 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
           headers: { ...this.authHeader(), 'Content-Type': 'application/json' },
         }),
       );
-      const nmId = data?.cards?.[0]?.nmID;
+      const nmId = data?.cards?.[0]?.nmID ?? data?.cards?.[0]?.nmId ?? data?.nmID ?? data?.nmId;
       return { success: true, nmId: nmId ? String(nmId) : undefined, wbRequest: wbProduct, wbResponse: data };
     } catch (error) {
       const axErr = error as { response?: { status?: number; data?: unknown } };
@@ -557,16 +558,15 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       // Логируем ответ
       console.log('[WildberriesAdapter] uploadFromCanonical RESPONSE:', JSON.stringify(data, null, 2));
 
-      if (data?.cards?.[0]) {
-        const nmId = Number(data.cards[0].nmID);
-        const imageUrls = canonical.images?.map((i) => i.url) ?? [];
-        await this.uploadImages(nmId, imageUrls);
-        if (this.config.sellerId) {
-          await this.setStock(nmId, canonical.stock_quantity);
-        }
+      const firstCard = data?.cards?.[0];
+      const nmId = firstCard ? Number(firstCard.nmID ?? firstCard.nmId) : undefined;
+      if (!nmId) throw new Error('WB не вернул nmID созданной карточки');
+      const imageUrls = canonical.images?.map((i) => i.url) ?? [];
+      await this.uploadImages(nmId, imageUrls);
+      if (this.config.sellerId) {
+        await this.setStock(nmId, canonical.stock_quantity);
       }
-
-      return String(data.cards[0].nmID);
+      return String(nmId);
     } catch (error) {
       this.logError(error, 'uploadProduct');
       const axErr = error as { response?: { status?: number; data?: unknown } };
