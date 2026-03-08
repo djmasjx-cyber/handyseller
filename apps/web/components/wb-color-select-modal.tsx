@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react"
 import { Button, Input } from "@handyseller/ui"
-import { Loader2, Search } from "lucide-react"
+import { Loader2, Search, RefreshCw } from "lucide-react"
 
 interface WbColor {
   id: number
@@ -27,11 +27,12 @@ export function WbColorSelectModal({
 }: WbColorSelectModalProps) {
   const [colors, setColors] = useState<WbColor[]>([])
   const [loading, setLoading] = useState(false)
+  const [syncing, setSyncing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState("")
 
-  useEffect(() => {
-    if (!open || !token) return
+  const loadColors = () => {
+    if (!token) return
     setLoading(true)
     setError(null)
     fetch("/api/marketplaces/wb-colors", {
@@ -44,6 +45,33 @@ export function WbColorSelectModal({
       })
       .catch(() => setError("Не удалось загрузить цвета"))
       .finally(() => setLoading(false))
+  }
+
+  const syncColors = async () => {
+    if (!token) return
+    setSyncing(true)
+    setError(null)
+    try {
+      const r = await fetch("/api/marketplaces/wb-colors/sync", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const data = await r.json().catch(() => ({}))
+      if (r.ok) {
+        loadColors()
+      } else {
+        setError(data.message || "Ошибка синхронизации цветов")
+      }
+    } catch {
+      setError("Не удалось синхронизировать цвета")
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!open || !token) return
+    loadColors()
   }, [open, token])
 
   const filteredColors = useMemo(() => {
@@ -97,7 +125,28 @@ export function WbColorSelectModal({
                 <ul className="p-2 space-y-1">
                   {filteredColors.length === 0 ? (
                     <li className="py-4 text-center text-muted-foreground text-sm">
-                      Ничего не найдено
+                      {colors.length === 0 ? (
+                        <div className="space-y-3">
+                          <p>Справочник цветов пуст</p>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={syncColors}
+                            disabled={syncing}
+                            className="border-[#CB11AB] text-[#CB11AB] hover:bg-[#CB11AB]/10"
+                          >
+                            {syncing ? (
+                              <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                            ) : (
+                              <RefreshCw className="h-4 w-4 mr-2" />
+                            )}
+                            Загрузить цвета из WB
+                          </Button>
+                        </div>
+                      ) : (
+                        "Ничего не найдено"
+                      )}
                     </li>
                   ) : (
                     filteredColors.map((color) => (
