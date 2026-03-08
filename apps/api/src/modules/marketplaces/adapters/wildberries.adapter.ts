@@ -695,30 +695,48 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
 
   /**
    * Найти nmID созданной карточки по артикулу (fallback, если WB не вернул nmID в ответе upload).
+   * WB создаёт карточку асинхронно — делаем несколько попыток с увеличенной задержкой.
    */
-  private async findNmIdByVendorCode(vendorCode: string): Promise<number | null> {
-    try {
-      await new Promise((r) => setTimeout(r, 2000)); // WB может задержать появление карточки
-      const { data } = await firstValueFrom(
-        this.httpService.post(
-          `${this.CONTENT_API}/content/v2/get/cards/list`,
-          { settings: { cursor: { limit: 20 }, filter: { withPhoto: -1, textSearch: vendorCode } } },
-          { headers: { ...this.authHeader(), 'Content-Type': 'application/json' }, timeout: 15000 },
-        ),
-      );
-      const cards = (data?.cards ?? []) as Array<Record<string, unknown>>;
-      const card = cards.find((c) => {
-        const vc = String(c?.vendorCode ?? c?.supplierVendorCode ?? '').trim();
-        const goods = (c?.goods ?? []) as Array<{ vendorCode?: string }>;
-        const gVc = goods[0]?.vendorCode?.trim();
-        return vc === vendorCode || gVc === `${vendorCode}-1`;
-      });
-      const nmId = card ? Number(card.nmID ?? card.nmId) : undefined;
-      return nmId && !isNaN(nmId) ? nmId : null;
-    } catch (err) {
-      this.logError(err, 'findNmIdByVendorCode');
-      return null;
+  private async findNmIdByVendorCode(vendorCode: string, maxAttempts = 5): Promise<number | null> {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        // Увеличиваем задержку с каждой попыткой: 3, 5, 7, 9, 11 секунд
+        const delayMs = 3000 + (attempt - 1) * 2000;
+        console.log(`[WildberriesAdapter] findNmIdByVendorCode: попытка ${attempt}/${maxAttempts}, ожидание ${delayMs}ms...`);
+        await new Promise((r) => setTimeout(r, delayMs));
+        
+        const { data } = await firstValueFrom(
+          this.httpService.post(
+            `${this.CONTENT_API}/content/v2/get/cards/list`,
+            { settings: { cursor: { limit: 20 }, filter: { withPhoto: -1, textSearch: vendorCode } } },
+            { headers: { ...this.authHeader(), 'Content-Type': 'application/json' }, timeout: 15000 },
+          ),
+        );
+        const cards = (data?.cards ?? []) as Array<Record<string, unknown>>;
+        console.log(`[WildberriesAdapter] findNmIdByVendorCode: получено ${cards.length} карточек`);
+        
+        const card = cards.find((c) => {
+          const vc = String(c?.vendorCode ?? c?.supplierVendorCode ?? '').trim();
+          const goods = (c?.goods ?? []) as Array<{ vendorCode?: string }>;
+          const gVc = goods[0]?.vendorCode?.trim();
+          return vc === vendorCode || gVc === `${vendorCode}-1` || gVc === vendorCode;
+        });
+        
+        const nmId = card ? Number(card.nmID ?? card.nmId) : undefined;
+        if (nmId && !isNaN(nmId)) {
+          console.log(`[WildberriesAdapter] findNmIdByVendorCode: найден nmID=${nmId} на попытке ${attempt}`);
+          return nmId;
+        }
+        
+        console.log(`[WildberriesAdapter] findNmIdByVendorCode: nmID не найден на попытке ${attempt}`);
+      } catch (err) {
+        console.warn(`[WildberriesAdapter] findNmIdByVendorCode: ошибка на попытке ${attempt}:`, err instanceof Error ? err.message : String(err));
+        if (attempt === maxAttempts) {
+          this.logError(err, 'findNmIdByVendorCode');
+        }
+      }
     }
+    return null;
   }
 
   /**
