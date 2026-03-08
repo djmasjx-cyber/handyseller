@@ -493,8 +493,10 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
           headers: { ...this.authHeader(), 'Content-Type': 'application/json' },
         }),
       );
-      const first = Array.isArray(data) ? data[0] : data?.cards?.[0];
-      const nmId = first?.nmID ?? first?.nmId ?? data?.nmID ?? data?.nmId;
+      let nmId = this.extractNmIdFromUploadResponse(data);
+      if (!nmId) {
+        nmId = await this.findNmIdByVendorCode(canonical.vendor_code ?? canonical.canonical_sku);
+      }
       return { success: true, nmId: nmId ? String(nmId) : undefined, wbRequest: wbProduct, wbResponse: data };
     } catch (error) {
       const axErr = error as { response?: { status?: number; data?: unknown } };
@@ -557,9 +559,11 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       // Логируем ответ
       console.log('[WildberriesAdapter] uploadFromCanonical RESPONSE:', JSON.stringify(data, null, 2));
 
-      const firstCard = Array.isArray(data) ? data[0] : data?.cards?.[0];
-      const nmId = firstCard ? Number(firstCard.nmID ?? firstCard.nmId) : undefined;
-      if (!nmId) throw new Error('WB не вернул nmID созданной карточки');
+      let nmId = this.extractNmIdFromUploadResponse(data);
+      if (!nmId) {
+        nmId = await this.findNmIdByVendorCode(canonical.vendor_code ?? canonical.canonical_sku);
+      }
+      if (!nmId) throw new Error('WB не вернул nmID созданной карточки. Проверьте карточки в ЛК WB.');
       const imageUrls = canonical.images?.map((i) => i.url) ?? [];
       await this.uploadImages(nmId, imageUrls);
       if (this.config.sellerId) {
@@ -661,6 +665,61 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       );
     } catch (error) {
       this.logError(error, 'setPrice');
+    }
+  }
+
+  /**
+   * Извлечь nmID из ответа POST /content/v2/cards/upload.
+   * WB может возвращать разные форматы: { cards: [...] }, { data: { cards: [...] } }, массив и т.д.
+   */
+  private extractNmIdFromUploadResponse(data: unknown): number | null {
+    if (!data || typeof data !== 'object') return null;
+    const tryCard = (card: unknown): number | null => {
+      if (!card || typeof card !== 'object') return null;
+      const c = card as Record<string, unknown>;
+      const id = c.nmID ?? c.nmId;
+      return id != null && !isNaN(Number(id)) ? Number(id) : null;
+    };
+    const dig = (obj: unknown): number | null => {
+      if (!obj || typeof obj !== 'object') return null;
+      const o = obj as Record<string, unknown>;
+      const cards = o.cards ?? o.data ?? o.result;
+      if (Array.isArray(cards) && cards.length > 0) {
+        const id = tryCard(cards[0]);
+        if (id) return id;
+      }
+      if (typeof o.data === 'object' && o.data) return dig(o.data);
+      return tryCard(o) ?? (o.nmID != null || o.nmId != null ? Number(o.nmID ?? o.nmId) : null);
+    };
+    if (Array.isArray(data) && data.length > 0) return tryCard(data[0]);
+    return dig(data);
+  }
+
+  /**
+   * Найти nmID созданной карточки по артикулу (fallback, если WB не вернул nmID в ответе upload).
+   */
+  private async findNmIdByVendorCode(vendorCode: string): Promise<number | null> {
+    try {
+      await new Promise((r) => setTimeout(r, 2000)); // WB может задержать появление карточки
+      const { data } = await firstValueFrom(
+        this.httpService.post(
+          `${this.CONTENT_API}/content/v2/get/cards/list`,
+          { settings: { cursor: { limit: 20 }, filter: { withPhoto: -1, textSearch: vendorCode } } },
+          { headers: { ...this.authHeader(), 'Content-Type': 'application/json' }, timeout: 15000 },
+        ),
+      );
+      const cards = (data?.cards ?? []) as Array<Record<string, unknown>>;
+      const card = cards.find((c) => {
+        const vc = String(c?.vendorCode ?? c?.supplierVendorCode ?? '').trim();
+        const goods = (c?.goods ?? []) as Array<{ vendorCode?: string }>;
+        const gVc = goods[0]?.vendorCode?.trim();
+        return vc === vendorCode || gVc === `${vendorCode}-1`;
+      });
+      const nmId = card ? Number(card.nmID ?? card.nmId) : undefined;
+      return nmId && !isNaN(nmId) ? nmId : null;
+    } catch (err) {
+      this.logError(err, 'findNmIdByVendorCode');
+      return null;
     }
   }
 
