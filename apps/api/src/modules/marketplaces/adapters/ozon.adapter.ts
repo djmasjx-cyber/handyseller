@@ -1430,6 +1430,10 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
    * Получение списка товаров с Ozon для импорта в каталог.
    * v3/product/list → v3/product/info/list (пачками).
    */
+  /** Атрибуты Ozon: 4180 = Бренд, 10096 = Цвет */
+  private static readonly ATTR_BRAND = 4180;
+  private static readonly ATTR_COLOR = 10096;
+
   async getProductsFromOzon(): Promise<
     Array<{
       productId: number;
@@ -1443,6 +1447,8 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
       width?: number;
       height?: number;
       length?: number;
+      brand?: string;
+      color?: string;
       ozonCategoryId?: number;
       ozonTypeId?: number;
     }>
@@ -1503,6 +1509,8 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
       width?: number;
       height?: number;
       length?: number;
+      brand?: string;
+      color?: string;
       ozonCategoryId?: number;
       ozonTypeId?: number;
     }> = [];
@@ -1557,11 +1565,20 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
           continue;
         }
         let description: string | undefined;
+        let brand: string | undefined;
+        let color: string | undefined;
         if (typeof inf?.description === 'string' && inf.description.trim()) {
           description = inf.description.slice(0, 5000);
-        } else if (Array.isArray(inf?.source)) {
-          const attr4190 = inf.source.find((a: { attribute_id?: number; value?: string }) => a?.attribute_id === 4190);
-          if (attr4190?.value) description = attr4190.value.slice(0, 5000);
+        }
+        if (Array.isArray(inf?.source)) {
+          for (const a of inf.source) {
+            const aid = a?.attribute_id;
+            const val = (a?.value ?? '').toString().trim();
+            if (!val) continue;
+            if (aid === 4190 && !description) description = val.slice(0, 5000);
+            if (aid === OzonAdapter.ATTR_BRAND) brand = val.slice(0, 200);
+            if (aid === OzonAdapter.ATTR_COLOR) color = val.slice(0, 100);
+          }
         }
         const images = inf?.images ?? [];
         const imageUrl = Array.isArray(images) && images.length > 0
@@ -1584,6 +1601,8 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
           width: inf?.width,
           height: inf?.height,
           length: inf?.depth,
+          brand: brand || undefined,
+          color: color || undefined,
           ozonCategoryId: typeof catId === 'number' && catId > 0 ? catId : undefined,
           ozonTypeId: typeof typeId === 'number' && typeId > 0 ? typeId : undefined,
         });

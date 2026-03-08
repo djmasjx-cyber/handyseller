@@ -2644,6 +2644,24 @@ export class MarketplacesService {
     return { imported, skipped, articlesUpdated: articlesUpdated > 0 ? articlesUpdated : undefined, errors };
   }
 
+  /** Построить карту (description_category_id, type_id) -> путь категории из дерева Ozon */
+  private buildOzonCategoryPathMap(tree: OzonCategoryNode[]): Map<string, string> {
+    const map = new Map<string, string>();
+    const walk = (nodes: OzonCategoryNode[], path: string[] = [], parentCatId?: number) => {
+      for (const n of nodes) {
+        const name = n.category_name || n.type_name || '';
+        const currentPath = [...path, name].filter(Boolean);
+        const catId = n.description_category_id ?? parentCatId;
+        if (n.type_id != null && n.type_id > 0 && catId) {
+          map.set(`${catId}-${n.type_id}`, currentPath.join(' > '));
+        }
+        if (n.children?.length) walk(n.children, currentPath, catId ?? parentCatId);
+      }
+    };
+    walk(tree);
+    return map;
+  }
+
   /** Импорт товаров с Ozon */
   private async importFromOzon(
     userId: string,
@@ -2651,7 +2669,11 @@ export class MarketplacesService {
     adapter: OzonAdapter,
   ): Promise<{ imported: number; skipped: number; articlesUpdated?: number; errors: string[] }> {
     console.log(`[importFromOzon] Starting import for userId=${userId}, connId=${conn.id}`);
-    const ozonProducts = await withRetry(() => adapter.getProductsFromOzon(), 'getProductsFromOzon');
+    const [ozonProducts, categoryTree] = await Promise.all([
+      withRetry(() => adapter.getProductsFromOzon(), 'getProductsFromOzon'),
+      adapter.getCategoryTree().catch(() => [] as OzonCategoryNode[]),
+    ]);
+    const categoryPathMap = this.buildOzonCategoryPathMap(categoryTree);
     console.log(`[importFromOzon] Fetched ${ozonProducts.length} products from Ozon`);
     let imported = 0;
     let skipped = 0;
@@ -2659,12 +2681,19 @@ export class MarketplacesService {
     const errors: string[] = [];
 
     for (const p of ozonProducts) {
+      const ozonCategoryPath = (p.ozonCategoryId && p.ozonTypeId)
+        ? categoryPathMap.get(`${p.ozonCategoryId}-${p.ozonTypeId}`)
+        : undefined;
       const existing =
         (await this.productMappingService.findProductByExternalId(userId, 'OZON', String(p.productId))) ??
         (await this.productsService.findByArticle(userId, p.offerId));
       if (existing) {
-        const updates: { article?: string; title?: string; description?: string; imageUrl?: string; barcodeOzon?: string; weight?: number; width?: number; height?: number; length?: number } = {};
-        const ex = existing as { weight?: number | null; width?: number | null; height?: number | null; length?: number | null };
+        const updates: {
+          article?: string; title?: string; description?: string; imageUrl?: string; barcodeOzon?: string;
+          weight?: number; width?: number; height?: number; length?: number;
+          brand?: string; color?: string; ozonCategoryId?: number; ozonTypeId?: number; ozonCategoryPath?: string;
+        } = {};
+        const ex = existing as { weight?: number | null; width?: number | null; height?: number | null; length?: number | null; brand?: string | null; color?: string | null; ozonCategoryId?: number | null; ozonTypeId?: number | null; ozonCategoryPath?: string | null };
         if (p.offerId && existing.article !== p.offerId) updates.article = p.offerId;
         if (p.name && existing.title !== p.name) updates.title = p.name.slice(0, 500);
         if (typeof p.description === 'string' && p.description.trim() && existing.description !== p.description.slice(0, 5000))
@@ -2675,6 +2704,11 @@ export class MarketplacesService {
         if (p.width != null && ex.width !== p.width) updates.width = p.width;
         if (p.height != null && ex.height !== p.height) updates.height = p.height;
         if (p.length != null && ex.length !== p.length) updates.length = p.length;
+        if (p.brand != null && ex.brand !== p.brand) updates.brand = p.brand;
+        if (p.color != null && ex.color !== p.color) updates.color = p.color;
+        if (p.ozonCategoryId != null && ex.ozonCategoryId !== p.ozonCategoryId) updates.ozonCategoryId = p.ozonCategoryId;
+        if (p.ozonTypeId != null && ex.ozonTypeId !== p.ozonTypeId) updates.ozonTypeId = p.ozonTypeId;
+        if (ozonCategoryPath != null && ex.ozonCategoryPath !== ozonCategoryPath) updates.ozonCategoryPath = ozonCategoryPath;
         if (Object.keys(updates).length > 0) {
           await this.prisma.product.update({
             where: { id: existing.id },
@@ -2702,8 +2736,11 @@ export class MarketplacesService {
           width: p.width,
           height: p.height,
           length: p.length,
+          brand: p.brand,
+          color: p.color,
           ozonCategoryId: p.ozonCategoryId,
           ozonTypeId: p.ozonTypeId,
+          ozonCategoryPath,
         });
         await this.productMappingService.upsertMapping(created.id, userId, 'OZON', String(p.productId), {
           externalArticle: p.offerId,

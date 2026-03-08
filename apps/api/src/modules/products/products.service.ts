@@ -126,6 +126,7 @@ export class ProductsService {
       richContent?: string;
       ozonCategoryId?: number;
       ozonTypeId?: number;
+      ozonCategoryPath?: string;
     },
   ) {
     const [limits, count] = await Promise.all([
