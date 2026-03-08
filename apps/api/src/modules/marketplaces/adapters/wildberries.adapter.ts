@@ -57,6 +57,14 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
     return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
   }
 
+  /** Нормализация страны: опечатка "Росиия" → "Россия", пустое → "Россия" */
+  private normalizeCountry(country?: string | null): string {
+    const s = (country ?? '').trim();
+    if (!s) return 'Россия';
+    if (/^Роси[иi]я$/i.test(s)) return 'Россия';
+    return s;
+  }
+
   /**
    * Получить charcID по имени характеристики (для маппинга наших полей на WB).
    * @param charcs - массив из getCharcsForSubject
@@ -182,22 +190,15 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
     const card: Record<string, unknown> = {
       nomenclature: 0,
       supplierVendorCode: vendorCode,
-      countryProduction: canonical.country_of_origin?.trim() || 'Россия',
+      countryProduction: this.normalizeCountry(canonical.country_of_origin),
       brand: canonical.brand_name ?? 'Ручная работа',
       dimensions: { width: w, height: h, length: l, weightBrutto },
       subjectId: canonical.wb_subject_id,
       goods: [good],
     };
 
-    // Добавляем фото внутрь goods[0].addin (правильный формат WB)
-    if (canonical.images?.length) {
-      good.addin = (good.addin as unknown[] || []).concat(
-        canonical.images.map((img, idx) => ({
-          type: 'Фото',
-          params: [{ value: img.url, count: idx + 1 }],
-        }))
-      );
-    }
+    // Фото НЕ передаём в cards/upload — WB не принимает addin при создании.
+    // Загрузка фото отдельно через POST /content/v3/media/save после создания карточки (uploadImages).
 
     if (canonical.seo_title || canonical.seo_description || canonical.seo_keywords) {
       card.seoText = {
