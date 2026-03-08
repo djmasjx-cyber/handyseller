@@ -399,6 +399,8 @@ export class ProductsService {
       ozonCategoryPath?: string;
       wbSubjectId?: number;
       wbCategoryPath?: string;
+      wbColorId?: number;
+      wbColorName?: string;
     },
   ) {
     const product = await this.findByArticleOrId(userId, productIdOrArticle);
@@ -425,10 +427,10 @@ export class ProductsService {
         if (isNaN(num) || num < 0) continue;
         newVal = num;
       }
-      if (['weight', 'width', 'length', 'height', 'itemsPerPack', 'ozonCategoryId', 'ozonTypeId', 'wbSubjectId'].includes(field)) {
+      if (['weight', 'width', 'length', 'height', 'itemsPerPack', 'ozonCategoryId', 'ozonTypeId', 'wbSubjectId', 'wbColorId'].includes(field)) {
         const num = Number(value);
         if (isNaN(num)) continue;
-        if (num < 0 && field !== 'ozonCategoryId' && field !== 'ozonTypeId' && field !== 'wbSubjectId') continue;
+        if (num < 0 && field !== 'ozonCategoryId' && field !== 'ozonTypeId' && field !== 'wbSubjectId' && field !== 'wbColorId') continue;
         newVal = num;
       }
       const oldStr = toStr(current);
@@ -449,7 +451,8 @@ export class ProductsService {
           field === 'packageContents' ||
           field === 'richContent' ||
           field === 'ozonCategoryPath' ||
-          field === 'wbCategoryPath') &&
+          field === 'wbCategoryPath' ||
+          field === 'wbColorName') &&
         typeof newVal === 'string' &&
         newVal === ''
       ) {

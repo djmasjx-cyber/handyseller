@@ -7,6 +7,7 @@ import { ArrowLeft, Loader2, Package, Save, History } from "lucide-react"
 import Link from "next/link"
 import { OzonCategorySelectModal } from "@/components/ozon-category-select-modal"
 import { WbCategorySelectModal } from "@/components/wb-category-select-modal"
+import { WbColorSelectModal } from "@/components/wb-color-select-modal"
 
 interface Product {
   id: string
@@ -42,6 +43,8 @@ interface Product {
   ozonCategoryPath?: string | null
   wbSubjectId?: number | null
   wbCategoryPath?: string | null
+  wbColorId?: number | null
+  wbColorName?: string | null
   marketplaceMappings?: { marketplace: string; externalSystemId: string }[]
 }
 
@@ -97,6 +100,8 @@ export default function ProductCardPage() {
     ozonCategoryPath: "",
     wbSubjectId: "",
     wbCategoryPath: "",
+    wbColorId: "",
+    wbColorName: "",
   })
 
   const token = typeof window !== "undefined" ? localStorage.getItem("accessToken") : null
@@ -162,6 +167,8 @@ export default function ProductCardPage() {
           ozonCategoryPath: p.ozonCategoryPath ?? "",
           wbSubjectId: p.wbSubjectId != null ? String(p.wbSubjectId) : "",
           wbCategoryPath: p.wbCategoryPath ?? "",
+          wbColorId: p.wbColorId != null ? String(p.wbColorId) : "",
+          wbColorName: p.wbColorName ?? "",
         })
       })
       .catch(() => setProduct(null))
@@ -233,6 +240,7 @@ export default function ProductCardPage() {
   const [loadingOzonPreview, setLoadingOzonPreview] = useState(false)
   const [ozonCategoryModalOpen, setOzonCategoryModalOpen] = useState(false)
   const [wbCategoryModalOpen, setWbCategoryModalOpen] = useState(false)
+  const [wbColorModalOpen, setWbColorModalOpen] = useState(false)
   const [wbDiagnostic, setWbDiagnostic] = useState<{
     success?: boolean;
     error?: string;
@@ -882,6 +890,30 @@ export default function ProductCardPage() {
                       </Button>
                     </div>
                     <p className="text-xs text-muted-foreground">WB требует предмет (subject) для выгрузки. На WB передаётся «Ваша цена», не себестоимость.</p>
+                  </div>
+                )}
+                {isWbConnected && (
+                  <div className="space-y-2">
+                    <Label>Цвет WB</Label>
+                    <div className="flex gap-2">
+                      <div
+                        className="flex-1 min-h-[40px] px-3 py-2 rounded-md border bg-background text-sm flex items-center border-input"
+                      >
+                        {form.wbColorName || (
+                          <span className="text-muted-foreground">Не выбран</span>
+                        )}
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setWbColorModalOpen(true)}
+                        className="shrink-0 border-[#CB11AB] text-[#CB11AB] hover:bg-[#CB11AB]/10"
+                      >
+                        Выбрать цвет
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">Цвет из справочника WB (необязательно, но рекомендуется)</p>
                     {wbPreview && (
                       <div className="rounded-lg border border-[#CB11AB]/30 p-2 text-xs bg-[#CB11AB]/5 space-y-2 mt-2">
                         {wbPreview.error ? (
@@ -1651,6 +1683,39 @@ export default function ProductCardPage() {
                 body: JSON.stringify({
                   wbSubjectId,
                   wbCategoryPath,
+                }),
+              })
+              if (r.ok) {
+                const p = await r.json()
+                setProduct((prev) => (prev ? { ...prev, ...p } : prev))
+              }
+            } catch {
+              // Сохранение при выборе — бонус; форма обновлена
+            }
+          }
+        }}
+      />
+      <WbColorSelectModal
+        open={wbColorModalOpen}
+        onOpenChange={setWbColorModalOpen}
+        token={token}
+        onSelect={async ({ wbColorId, wbColorName }) => {
+          setForm((f) => ({
+            ...f,
+            wbColorId: String(wbColorId),
+            wbColorName,
+          }))
+          if (token && product?.id) {
+            try {
+              const r = await fetch(`/api/products/${product.id}`, {
+                method: "PATCH",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({
+                  wbColorId,
+                  wbColorName,
                 }),
               })
               if (r.ok) {

@@ -136,6 +136,8 @@ model Product {
   ozonCategoryPath String? @map("ozon_category_path") @db.VarChar(500) // Путь для отображения: "Хобби > Материал > Бусина"
   wbSubjectId      Int?    @map("wb_subject_id")      // WB: subjectId из справочника /content/v2/object/all
   wbCategoryPath   String? @map("wb_category_path")    @db.VarChar(500) // Путь WB для отображения
+  wbColorId        Int?    @map("wb_color_id")        // WB: color ID из справочника /content/v2/directory/colors
+  wbColorName      String? @map("wb_color_name")       @db.VarChar(100) // Название цвета WB
   archivedAt   DateTime? @map("archived_at") // Архивированный — не показывается в основном списке
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
