@@ -162,22 +162,20 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       throw new Error('WB: категория (subjectId) обязательна для создания карточки товара');
     }
 
-    const good: Record<string, unknown> = {
-      nomenclature: 0,
-      variant: 0,
+    const variant: Record<string, unknown> = {
       vendorCode: `${vendorCode}-1`,
+      title: title || 'Товар',
+      description: descriptionText?.trim() || 'Описание товара',
+      brand: canonical.brand_name ?? 'Ручная работа',
+      dimensions: { length: l, width: w, height: h, weightBrutto },
       characteristics,
-      weightBrutto,
-      length: l,
-      width: w,
-      height: h,
     };
 
     // Штрих-код и sizes — WB требует sizes[].skus для идентификации размера
     if (barcode?.trim()) {
-      good.barcode = barcode.trim();
+      variant.barcode = barcode.trim();
       const priceRub = Math.round(canonical.price ?? 1);
-      good.sizes = [
+      variant.sizes = [
         {
           techSize: 'Без размера',
           wbSize: 'RU',
@@ -187,15 +185,13 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       ];
     }
 
-    // subjectID (capital ID) — WB API чувствителен к регистру
+    // Формат Habr/WBSeller: subjectID + variants (без nomenclature, goods)
     const card: Record<string, unknown> = {
-      nomenclature: 0,
+      subjectID: canonical.wb_subject_id,
       supplierVendorCode: vendorCode,
       countryProduction: this.normalizeCountry(canonical.country_of_origin),
       brand: canonical.brand_name ?? 'Ручная работа',
-      dimensions: { width: w, height: h, length: l, weightBrutto },
-      subjectID: canonical.wb_subject_id,
-      goods: [good],
+      variants: [variant],
     };
 
     // Фото НЕ передаём в cards/upload — WB не принимает addin при создании.
@@ -208,7 +204,9 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
         keywords: canonical.seo_keywords ?? '',
       };
     }
-    return { cards: [card] };
+    // WB Content API: принимает и { cards: [...] }, и массив [card] в корне.
+    // Пробуем массив — Habr и WBSeller используют этот формат.
+    return [card] as unknown as PlatformProductPayload;
   }
 
   /**
@@ -495,7 +493,8 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
           headers: { ...this.authHeader(), 'Content-Type': 'application/json' },
         }),
       );
-      const nmId = data?.cards?.[0]?.nmID ?? data?.cards?.[0]?.nmId ?? data?.nmID ?? data?.nmId;
+      const first = Array.isArray(data) ? data[0] : data?.cards?.[0];
+      const nmId = first?.nmID ?? first?.nmId ?? data?.nmID ?? data?.nmId;
       return { success: true, nmId: nmId ? String(nmId) : undefined, wbRequest: wbProduct, wbResponse: data };
     } catch (error) {
       const axErr = error as { response?: { status?: number; data?: unknown } };
@@ -558,7 +557,7 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       // Логируем ответ
       console.log('[WildberriesAdapter] uploadFromCanonical RESPONSE:', JSON.stringify(data, null, 2));
 
-      const firstCard = data?.cards?.[0];
+      const firstCard = Array.isArray(data) ? data[0] : data?.cards?.[0];
       const nmId = firstCard ? Number(firstCard.nmID ?? firstCard.nmId) : undefined;
       if (!nmId) throw new Error('WB не вернул nmID созданной карточки');
       const imageUrls = canonical.images?.map((i) => i.url) ?? [];
