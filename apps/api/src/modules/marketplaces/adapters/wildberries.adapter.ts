@@ -113,7 +113,8 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       };
       addChar(['Наименование', 'наименование', 'Название', 'title'], title || 'Товар');
       addChar(['Описание', 'описание', 'description'], descriptionText?.trim() || 'Описание товара');
-      addChar(['Цвет', 'цвет', 'color'], canonical.color?.trim());
+      // Цвет временно убран — нужно использовать справочник WB (/content/v2/directory/colors)
+      // addChar(['Цвет', 'цвет', 'color'], canonical.color?.trim());
       addChar(['Количество предметов в упаковке', 'количество'], canonical.items_per_pack != null && canonical.items_per_pack > 0 ? String(canonical.items_per_pack) : undefined);
       addChar(['Материал изделия', 'материал', 'material'], canonical.material?.trim());
       // Вид творчества — multi-select, через запятую → массив
@@ -137,7 +138,8 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
     if (characteristics.length === 0) {
       characteristics.push({ id: 0, name: 'Наименование', value: [title || 'Товар'] });
       characteristics.push({ id: 3, name: 'Описание', value: [descriptionText || ''] });
-      if (canonical.color?.trim()) characteristics.push({ id: 1, name: 'Цвет', value: [canonical.color.trim()] });
+      // Цвет временно убран — нужно использовать справочник WB
+      // if (canonical.color?.trim()) characteristics.push({ id: 1, name: 'Цвет', value: [canonical.color.trim()] });
       if (canonical.items_per_pack != null && canonical.items_per_pack > 0) {
         characteristics.push({ id: 4, name: 'Количество предметов в упаковке', value: [String(canonical.items_per_pack)] });
       }
@@ -188,7 +190,7 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       title: title || 'Товар',
       description: descriptionText?.trim() || 'Описание товара',
       countryProduction: this.normalizeCountry(canonical.country_of_origin),
-      characteristics: characteristics.map((c) => ({ id: c.id, value: c.value })),
+      characteristics: characteristics.map((c) => ({ name: c.name, value: c.value })),
       dimensions: { width: w, height: h, length: l, weightBrutto },
     };
     
