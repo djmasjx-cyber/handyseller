@@ -187,13 +187,15 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       brand: canonical.brand_name ?? 'Ручная работа',
       title: title || 'Товар',
       description: descriptionText?.trim() || 'Описание товара',
+      countryProduction: this.normalizeCountry(canonical.country_of_origin),
       characteristics: characteristics.map((c) => ({ id: c.id, value: c.value })),
       dimensions: { width: w, height: h, length: l, weightBrutto },
     };
     
     if (barcode?.trim()) {
+      // wbSize не указываем для безразмерных товаров
       card.sizes = [
-        { techSize: 'Без размера', wbSize: 'RU', price: priceRub, skus: [barcode.trim()] },
+        { techSize: 'Без размера', price: priceRub, skus: [barcode.trim()] },
       ];
     }
 
