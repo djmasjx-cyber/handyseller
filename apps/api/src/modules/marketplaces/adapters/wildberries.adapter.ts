@@ -81,17 +81,6 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
     barcode?: string,
     wbCharcs?: Array<{ charcID: number; name: string; required?: boolean }>,
   ): PlatformProductPayload {
-    // Логируем входные данные для отладки
-    console.log('[WildberriesAdapter] convertToPlatform INPUT:', {
-      canonical_sku: canonical.canonical_sku,
-      title: canonical.title,
-      wb_subject_id: canonical.wb_subject_id,
-      vendor_code: canonical.vendor_code,
-      images_count: canonical.images?.length ?? 0,
-      barcode: barcode ?? 'не сгенерирован',
-      charcs_count: wbCharcs?.length ?? 0,
-    });
-
     const vendorCode = canonical.vendor_code ?? canonical.canonical_sku;
     const plainDesc = canonical.long_description_plain ?? canonical.short_description ?? '';
     const richDesc = canonical.long_description_html?.trim();
@@ -105,9 +94,7 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       Array.isArray(v) ? v.filter(Boolean).map((s) => String(s).trim()) : (v?.trim() ? [v.trim()] : []);
     const characteristics: Array<{ id: number; name?: string; value: string[] }> = [];
 
-    console.log('[WildberriesAdapter] convertToPlatform: wbCharcs получено:', wbCharcs?.length || 0, 'характеристик');
     if (wbCharcs && wbCharcs.length > 0) {
-      console.log('[WildberriesAdapter] convertToPlatform: первые 5 charc из WB:', wbCharcs.slice(0, 5).map(c => ({ id: c.charcID, name: c.name })));
       const addChar = (names: string[], value: string | string[] | undefined) => {
         if (value === undefined || value === null || (typeof value === 'string' && !value.trim())) return;
         const charc = wbCharcs!.find((c) => names.some((n) => c.name.toLowerCase() === n.toLowerCase()));
@@ -129,17 +116,11 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       }
       const addedIds = new Set(characteristics.map((c) => c.id));
       // Добавляем только заполненные характеристики (пустые вызывают ошибку 400)
-      // Фильтруем характеристики — оставляем только те, что точно есть в товаре
-      // Убираем характеристики со значениями, которых нет в справочнике WB
       const validCharacteristics = characteristics.filter(c => {
-        // Пропускаем только характеристики с непустыми значениями
         return c.value && c.value.length > 0 && c.value[0]?.trim();
       });
       characteristics.length = 0;
       characteristics.push(...validCharacteristics);
-      console.log('[WildberriesAdapter] convertToPlatform: итоговые characteristics:', characteristics.map(c => ({ id: c.id, name: c.name, value: c.value })));
-    } else {
-      console.warn('[WildberriesAdapter] convertToPlatform: wbCharcs пустое, используем fallback с id=0');
     }
 
     if (characteristics.length === 0) {
@@ -186,22 +167,12 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       dimensions: { width: w, height: h, length: l, weightBrutto },
     };
     
-    // Фото передаются отдельным запросом после создания карточки
-    // Проверяем что есть хотя бы одно фото
-    const imageUrls = canonical.images?.map((i) => i.url).filter((u) => u?.startsWith('http')) ?? [];
-    if (imageUrls.length === 0) {
-      console.warn('[WildberriesAdapter] convertToPlatform: нет фото! WB требует хотя бы одно фото.');
-    }
-    
     if (barcode?.trim()) {
       // Безразмерный товар (Бусины и т.п.): НЕ указываем techSize и wbSize!
       // WB: "Недопустимо указывать Размер и Рос.Размер для безразмерного товара"
       // price не передается в sizes при создании (устанавливается отдельно)
       card.sizes = [{ skus: [barcode.trim()] }];
     }
-
-    // Логируем полный payload для диагностики (после добавления sizes)
-    console.log('[WildberriesAdapter] convertToPlatform FINAL PAYLOAD:', JSON.stringify({ cards: [card] }));
 
     const payload = {
       cards: [card],
@@ -725,9 +696,6 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       // 3. Формируем payload с штрих-кодом и корректными charcID
       const wbProduct = this.convertToPlatform(canonical, barcode, wbCharcs);
 
-      // Логируем полный запрос для отладки
-      console.log('[WildberriesAdapter] uploadFromCanonical REQUEST:', JSON.stringify(wbProduct, null, 2));
-
       // 3. Выгружаем карточку (upload/add для новых карточек)
       let data: unknown;
       try {
@@ -772,9 +740,6 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
           throw uploadErr;
         }
       }
-
-      // Логируем ответ
-      console.log('[WildberriesAdapter] uploadFromCanonical RESPONSE:', JSON.stringify(data, null, 2));
 
       // WB может вернуть 200 с error: true в теле — карточка не создана
       const resp = data as Record<string, unknown> | undefined;
@@ -858,28 +823,35 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
   /**
    * Загрузка фото на WB через POST /content/v3/media/save.
    * WB не принимает URL при создании карточки — фото загружаются отдельно по nmID.
-   * Формат: { nmID, data: [{ url }] } или { nmID, media: [{ url }] }.
+   * Формат: { nmID, data: [{ url }] } — см. docs/WB-MEDIA-PHOTOS.md
    */
   private async uploadImages(nmId: number, images: string[]): Promise<void> {
-    const urls = images.filter((u) => typeof u === 'string' && u.trim().startsWith('http'));
+    const urls = images.filter((u) => typeof u === 'string' && u.trim().startsWith('http')).map((u) => u.trim());
     if (urls.length === 0) return;
-    for (let i = 0; i < urls.length; i++) {
-      const url = urls[i].trim();
-      try {
-        await new Promise((r) => setTimeout(r, 500)); // rate limit
-        const body = { nmID: nmId, data: [{ url }] };
-        await firstValueFrom(
-          this.httpService.post(`${this.CONTENT_API}/content/v3/media/save`, body, {
-            headers: { ...this.authHeader(), 'Content-Type': 'application/json' },
-            timeout: 15000,
-          }),
-        );
-        console.log(`[WildberriesAdapter] Фото ${i + 1}/${urls.length} загружено для nmId=${nmId}`);
-      } catch (err) {
-        const axErr = err as { response?: { status?: number; data?: unknown } };
-        const wbData = axErr?.response?.data as Record<string, unknown> | undefined;
-        const msg = typeof wbData?.detail === 'string' ? wbData.detail : (err instanceof Error ? err.message : String(err));
-        console.warn(`[WildberriesAdapter] Ошибка загрузки фото для nmId=${nmId}: ${msg}. Попробуйте загрузить фото вручную в ЛК WB.`);
+    const data = urls.map((url) => ({ url }));
+    try {
+      // Сначала пробуем batch: все URL одним запросом
+      await firstValueFrom(
+        this.httpService.post(`${this.CONTENT_API}/content/v3/media/save`, { nmID: nmId, data }, {
+          headers: { ...this.authHeader(), 'Content-Type': 'application/json' },
+          timeout: 30000,
+        }),
+      );
+    } catch (batchErr) {
+      // Fallback: по одному URL (rate limit 500ms)
+      for (let i = 0; i < urls.length; i++) {
+        const url = urls[i];
+        try {
+          await new Promise((r) => setTimeout(r, 500));
+          await firstValueFrom(
+            this.httpService.post(`${this.CONTENT_API}/content/v3/media/save`, { nmID: nmId, data: [{ url }] }, {
+              headers: { ...this.authHeader(), 'Content-Type': 'application/json' },
+              timeout: 15000,
+            }),
+          );
+        } catch {
+          // Игнорируем ошибки отдельных фото
+        }
       }
     }
   }

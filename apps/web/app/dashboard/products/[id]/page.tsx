@@ -866,28 +866,35 @@ export default function ProductCardPage() {
                       >
                         Выбрать категорию
                       </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={loadWbPreview}
-                        disabled={loadingWbPreview}
-                        className="shrink-0 h-8 px-2 text-xs touch-manipulation text-[#CB11AB]"
-                        title="Что уйдёт на WB, маппинг полей"
-                      >
-                        {loadingWbPreview ? <Loader2 className="h-4 w-4 animate-spin" /> : "Предпросмотр WB"}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={handleWbDiagnostic}
-                        disabled={loadingWbDiagnostic || !!exportLoadingMarketplace}
-                        className="shrink-0 h-8 px-2 text-xs touch-manipulation text-muted-foreground"
-                        title="Попытка выгрузки с полным ответом WB при ошибке"
-                      >
-                        {loadingWbDiagnostic ? <Loader2 className="h-4 w-4 animate-spin" /> : "Диагностика WB"}
-                      </Button>
+                      <details className="group">
+                        <summary className="cursor-pointer list-none inline-flex items-center h-8 px-2 text-xs text-muted-foreground hover:text-foreground rounded-md hover:bg-muted/50 shrink-0">
+                          <span className="select-none">Ещё</span>
+                        </summary>
+                        <div className="flex flex-wrap gap-1.5 mt-1.5 pl-0">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={loadWbPreview}
+                            disabled={loadingWbPreview}
+                            className="shrink-0 h-8 px-2 text-xs touch-manipulation text-[#CB11AB]"
+                            title="Что уйдёт на WB, маппинг полей"
+                          >
+                            {loadingWbPreview ? <Loader2 className="h-4 w-4 animate-spin" /> : "Предпросмотр WB"}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={handleWbDiagnostic}
+                            disabled={loadingWbDiagnostic || !!exportLoadingMarketplace}
+                            className="shrink-0 h-8 px-2 text-xs touch-manipulation text-muted-foreground"
+                            title="Попытка выгрузки с полным ответом WB при ошибке"
+                          >
+                            {loadingWbDiagnostic ? <Loader2 className="h-4 w-4 animate-spin" /> : "Диагностика WB"}
+                          </Button>
+                        </div>
+                      </details>
                     </div>
                     <p className="text-xs text-muted-foreground">WB требует предмет (subject) для выгрузки. На WB передаётся «Ваша цена», не себестоимость.</p>
                     {wbPreview && (
