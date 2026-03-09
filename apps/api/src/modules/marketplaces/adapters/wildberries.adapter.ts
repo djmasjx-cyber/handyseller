@@ -371,7 +371,7 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       console.log(`[WildberriesAdapter] getColors: найдено ${items.length} элементов`);
       
       const result = items
-        .filter((x): x is Record<string, unknown> => x && typeof x === 'object')
+        .filter((x): x is Record<string, unknown> => !!x && typeof x === 'object')
         .map((x) => ({
           id: Number(x.id ?? x.colorId ?? x.color_id ?? x.colorID ?? 0),
           name: String(x.name ?? x.colorName ?? x.color_name ?? x.color ?? x.title ?? '').trim(),
