@@ -115,8 +115,7 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       };
       addChar(['Наименование', 'наименование', 'Название', 'title'], title || 'Товар');
       addChar(['Описание', 'описание', 'description'], descriptionText?.trim() || 'Описание товара');
-      // Цвет временно убран — нужно использовать справочник WB (/content/v2/directory/colors)
-      // addChar(['Цвет', 'цвет', 'color'], canonical.color?.trim());
+      addChar(['Цвет', 'цвет', 'color'], canonical.color?.trim());
       addChar(['Количество предметов в упаковке', 'количество'], canonical.items_per_pack != null && canonical.items_per_pack > 0 ? String(canonical.items_per_pack) : undefined);
       addChar(['Материал изделия', 'материал', 'material'], canonical.material?.trim());
       // Вид творчества — multi-select, через запятую → массив
@@ -146,8 +145,7 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
     if (characteristics.length === 0) {
       characteristics.push({ id: 0, name: 'Наименование', value: [title || 'Товар'] });
       characteristics.push({ id: 3, name: 'Описание', value: [descriptionText || ''] });
-      // Цвет временно убран — нужно использовать справочник WB
-      // if (canonical.color?.trim()) characteristics.push({ id: 1, name: 'Цвет', value: [canonical.color.trim()] });
+      if (canonical.color?.trim()) characteristics.push({ id: 1, name: 'Цвет', value: [canonical.color.trim()] });
       if (canonical.items_per_pack != null && canonical.items_per_pack > 0) {
         characteristics.push({ id: 4, name: 'Количество предметов в упаковке', value: [String(canonical.items_per_pack)] });
       }
@@ -175,21 +173,7 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       throw new Error('WB: категория (subjectId) обязательна для создания карточки товара');
     }
 
-    const priceRub = Math.round(canonical.price ?? 1);
-    const variant: Record<string, unknown> = {
-      vendorCode,
-      title: title || 'Товар',
-      description: descriptionText?.trim() || 'Описание товара',
-      brand: canonical.brand_name ?? 'Ручная работа',
-      characteristics,
-    };
-    if (barcode?.trim()) {
-      variant.sizes = [
-        { techSize: 'Без размера', wbSize: 'RU', price: priceRub, skus: [barcode.trim()] },
-      ];
-    }
-
-    // Правильный формат WB API /content/v2/cards/upload — объект с полем cards
+    // Формат WB API /content/v2/cards/upload — объект с полем cards
     // https://dev.wildberries.ru/docs/openapi/work-with-products
     const card: Record<string, unknown> = {
       vendorCode,
@@ -198,11 +182,7 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       title: (title || 'Товар').trim().slice(0, 255),
       description: (descriptionText || 'Описание товара').trim().slice(0, 500),
       countryProduction: this.normalizeCountry(canonical.country_of_origin),
-      // Характеристики: цвет обязателен и должен быть из справочника WB
-      characteristics: [
-        // Цвет — обязательное поле, значение должно быть из справочника WB
-        ...(canonical.color?.trim() ? [{ id: 0, name: 'Цвет', value: [canonical.color.trim()] }] : []),
-      ],
+      characteristics,
       dimensions: { width: w, height: h, length: l, weightBrutto },
     };
     
@@ -214,11 +194,10 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
     }
     
     if (barcode?.trim()) {
-      // wbSize не указываем для безразмерных товаров
-      // price не передается в sizes при создании карточки (цена устанавливается отдельно)
-      card.sizes = [
-        { techSize: 'Без размера', skus: [barcode.trim()] },
-      ];
+      // Безразмерный товар (Бусины и т.п.): НЕ указываем techSize и wbSize!
+      // WB: "Недопустимо указывать Размер и Рос.Размер для безразмерного товара"
+      // price не передается в sizes при создании (устанавливается отдельно)
+      card.sizes = [{ skus: [barcode.trim()] }];
     }
 
     // Логируем полный payload для диагностики (после добавления sizes)
