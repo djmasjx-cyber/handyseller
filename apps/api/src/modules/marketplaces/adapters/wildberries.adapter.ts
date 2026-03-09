@@ -199,6 +199,15 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       characteristics: characteristics.map((c) => ({ id: c.id, value: c.value })),
       dimensions: { width: w, height: h, length: l, weightBrutto },
     };
+
+    // Добавляем фото через addin (WB API требует хотя бы одно фото)
+    const imageUrls = canonical.images?.map((i) => i.url).filter((u) => u?.startsWith('http')) ?? [];
+    if (imageUrls.length > 0) {
+      card.addin = imageUrls.map((url, idx) => ({
+        type: 'Фото',
+        params: [{ value: url, order: idx + 1 }],
+      }));
+    }
     
     if (barcode?.trim()) {
       // wbSize не указываем для безразмерных товаров
