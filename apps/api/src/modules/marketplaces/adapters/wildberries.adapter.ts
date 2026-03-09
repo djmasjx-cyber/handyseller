@@ -105,7 +105,9 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       Array.isArray(v) ? v.filter(Boolean).map((s) => String(s).trim()) : (v?.trim() ? [v.trim()] : []);
     const characteristics: Array<{ id: number; name?: string; value: string[] }> = [];
 
+    console.log('[WildberriesAdapter] convertToPlatform: wbCharcs получено:', wbCharcs?.length || 0, 'характеристик');
     if (wbCharcs && wbCharcs.length > 0) {
+      console.log('[WildberriesAdapter] convertToPlatform: первые 5 charc из WB:', wbCharcs.slice(0, 5).map(c => ({ id: c.charcID, name: c.name })));
       const addChar = (names: string[], value: string | string[] | undefined) => {
         if (value === undefined || value === null || (typeof value === 'string' && !value.trim())) return;
         const charc = wbCharcs!.find((c) => names.some((n) => c.name.toLowerCase() === n.toLowerCase()));
@@ -133,6 +135,9 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
           addedIds.add(c.charcID);
         }
       }
+      console.log('[WildberriesAdapter] convertToPlatform: сформировано characteristics:', characteristics.map(c => ({ id: c.id, name: c.name })));
+    } else {
+      console.warn('[WildberriesAdapter] convertToPlatform: wbCharcs пустое, используем fallback с id=0');
     }
 
     if (characteristics.length === 0) {
