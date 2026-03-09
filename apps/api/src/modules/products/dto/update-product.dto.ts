@@ -1,4 +1,4 @@
-import { IsString, IsNumber, IsOptional, MaxLength } from 'class-validator';
+import { IsString, IsNumber, IsOptional, MaxLength, IsArray } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class UpdateProductDto {
@@ -45,6 +45,12 @@ export class UpdateProductDto {
   @IsOptional()
   @IsString()
   imageUrl?: string;
+
+  /** Доп. фото (URL) для WB — массив строк */
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  imageUrls?: string[];
 
   /** Штрих-коды нельзя менять через PATCH — только через load с маркета */
 

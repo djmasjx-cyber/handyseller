@@ -1,4 +1,4 @@
-import { IsString, IsNumber, IsOptional, IsInt, Min, Max } from 'class-validator';
+import { IsString, IsNumber, IsOptional, IsInt, Min, Max, IsArray } from 'class-validator';
 import { Type } from 'class-transformer';
 export class CreateProductDto {
   @IsString()
@@ -32,6 +32,12 @@ export class CreateProductDto {
   @IsOptional()
   @IsString()
   imageUrl?: string;
+
+  /** Доп. фото (URL) для WB — массив строк */
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  imageUrls?: string[];
 
   @IsOptional()
   @IsString()

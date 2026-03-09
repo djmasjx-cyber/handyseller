@@ -76,6 +76,7 @@ export default function ProductCardPage() {
     oldPrice: "",
     article: "",
     imageUrl: "",
+    imageUrls: "", // Доп. фото WB: по одному URL на строку
     stock: "",
     seoTitle: "",
     seoKeywords: "",
@@ -143,6 +144,7 @@ export default function ProductCardPage() {
           oldPrice: p.oldPrice != null ? String(p.oldPrice) : "",
           article: p.article ?? "",
           imageUrl: p.imageUrl ?? "",
+          imageUrls: Array.isArray(p.imageUrls) ? p.imageUrls.filter(Boolean).join("\n") : "",
           stock: String(p.stock ?? 0),
           seoTitle: p.seoTitle ?? "",
           seoKeywords: p.seoKeywords ?? "",
@@ -579,6 +581,7 @@ export default function ProductCardPage() {
         seoKeywords: form.seoKeywords.trim() || "",
         seoDescription: form.seoDescription.trim() || "",
         imageUrl: form.imageUrl.trim() || "",
+        imageUrls: form.imageUrls.trim() ? form.imageUrls.trim().split(/\r?\n/).map((u) => u.trim()).filter((u) => u.startsWith("http")) : undefined,
         brand: form.brand.trim() || undefined,
         color: form.color.trim() || undefined,
         weight: form.weight ? parseInt(form.weight, 10) : undefined,
@@ -638,6 +641,7 @@ export default function ProductCardPage() {
               ...payload,
               stock,
               imageUrl: form.imageUrl.trim() || prev.imageUrl,
+              imageUrls: form.imageUrls.trim() ? form.imageUrls.trim().split(/\r?\n/).map((u) => u.trim()).filter((u) => u.startsWith("http")) : undefined,
             }
           : null
       )
@@ -1486,6 +1490,19 @@ export default function ProductCardPage() {
                     className={`min-w-0 ${(ozonMissingFields.includes("Фото (URL)") || wbMissingFields.includes("Фото (URL)")) ? "border-destructive ring-destructive" : ""}`}
                   />
                   <p className="text-xs text-muted-foreground mt-1">WB: /content/v3/media/save. Ozon: images[].</p>
+                  {isWbConnected && (
+                    <>
+                      <Label htmlFor="imageUrls" className="mt-3 block text-xs text-muted-foreground">Доп. фото для WB (URL, по одному на строку)</Label>
+                      <Textarea
+                        id="imageUrls"
+                        value={form.imageUrls}
+                        onChange={(e) => setForm((f) => ({ ...f, imageUrls: e.target.value }))}
+                        placeholder="Один URL на строку"
+                        rows={3}
+                        className="mt-1 text-sm font-mono"
+                      />
+                    </>
+                  )}
                 </div>
               </div>
             </div>

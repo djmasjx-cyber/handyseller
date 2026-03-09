@@ -530,7 +530,7 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       long_description_html: product.richContent,
       wb_subject_id: product.wbSubjectId,
       attributes: undefined,
-      images: product.images.map((url) => ({ url })),
+      images: (product.images ?? []).filter((u) => typeof u === 'string' && u.trim().startsWith('http')).map((url) => ({ url: url.trim() })),
       price: product.price ?? 1,
       stock_quantity: product.stock,
     };

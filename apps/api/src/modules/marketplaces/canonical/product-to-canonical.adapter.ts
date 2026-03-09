@@ -11,8 +11,16 @@ export interface ProductWithRelations extends Product {
  */
 export function productToCanonical(product: ProductWithRelations): CanonicalProduct {
   const images: CanonicalImage[] = [];
-  if (product.imageUrl) {
-    images.push({ url: product.imageUrl, isMain: true });
+  const imageUrls = (product as { imageUrls?: string[] | null }).imageUrls;
+  const urlsFromArray = Array.isArray(imageUrls) ? imageUrls.filter((u) => typeof u === 'string' && u.trim().startsWith('http')) : [];
+  if (product.imageUrl?.trim().startsWith('http')) {
+    images.push({ url: product.imageUrl.trim(), isMain: true });
+  }
+  for (const url of urlsFromArray) {
+    const u = url.trim();
+    if (u && u.startsWith('http') && !images.some((i) => i.url === u)) {
+      images.push({ url: u, isMain: false });
+    }
   }
 
   const attributes: CanonicalAttribute[] = [];

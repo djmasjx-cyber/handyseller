@@ -379,6 +379,7 @@ export class ProductsService {
       seoKeywords?: string;
       seoDescription?: string;
       imageUrl?: string;
+      imageUrls?: string[];
       barcodeWb?: string;
       barcodeOzon?: string;
       brand?: string;
@@ -408,7 +409,7 @@ export class ProductsService {
       throw new BadRequestException('Товар не найден.');
     }
     const productId = product.id;
-    const updates: Record<string, string | number | null | undefined> = {};
+    const updates: Record<string, string | number | null | undefined | string[]> = {};
     const toStr = (v: unknown): string | null =>
       v === null || v === undefined ? null : String(v);
 
@@ -416,7 +417,14 @@ export class ProductsService {
     for (const [field, value] of Object.entries(data)) {
       if (value === undefined || readOnlyFields.has(field)) continue;
       const current = (product as Record<string, unknown>)[field];
-      let newVal: string | number | null = value as string | number | null;
+      let newVal: string | number | null | string[] = value as string | number | null | string[];
+      if (field === 'imageUrls') {
+        const arr = Array.isArray(value) ? value.filter((u) => typeof u === 'string' && u.trim().startsWith('http')).map((u) => u.trim()) : [];
+        if (JSON.stringify(current) !== JSON.stringify(arr)) {
+          updates.imageUrls = arr.length > 0 ? arr : null;
+        }
+        continue;
+      }
       if (field === 'cost') {
         const num = Number(value);
         if (isNaN(num) || num < 0) continue;
@@ -466,7 +474,7 @@ export class ProductsService {
     if (Object.keys(updates).length === 0) return product;
     // Синхронизация на маркеты при изменении любых полей карточки (описание, название, цена, габариты и т.д.)
     const syncRelevantFields = new Set([
-      'title', 'description', 'cost', 'price', 'oldPrice', 'imageUrl', 'brand', 'weight', 'width', 'length', 'height',
+      'title', 'description', 'cost', 'price', 'oldPrice', 'imageUrl', 'imageUrls', 'brand', 'weight', 'width', 'length', 'height',
       'color', 'material', 'craftType', 'countryOfOrigin', 'packageContents', 'richContent',
       'itemsPerPack', 'ozonCategoryId', 'ozonTypeId', 'wbSubjectId', 'seoTitle', 'seoKeywords', 'seoDescription',
     ]);
