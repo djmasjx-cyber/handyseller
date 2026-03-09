@@ -600,8 +600,10 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       console.log('[WildberriesAdapter] uploadFromCanonical REQUEST:', JSON.stringify(wbProduct, null, 2));
 
       // 3. Выгружаем карточку
+      // Используем /content/v2/cards/upload/add для создания НОВЫХ карточек
+      // /content/v2/cards/upload требует imtID для обновления существующих
       const { data } = await firstValueFrom(
-        this.httpService.post(`${this.CONTENT_API}/content/v2/cards/upload`, wbProduct, {
+        this.httpService.post(`${this.CONTENT_API}/content/v2/cards/upload/add`, wbProduct, {
           headers: {
             ...this.authHeader(),
             'Content-Type': 'application/json',
