@@ -442,7 +442,7 @@ export class ProductsService {
         newVal = num;
       }
       const oldStr = toStr(current);
-      let normalizedNew: string | number | null = newVal;
+      let normalizedNew: string | number | null = newVal as string | number | null;
       if (
         (field === 'article' ||
           field === 'description' ||
