@@ -129,14 +129,7 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
         if (charc && a.value?.trim()) characteristics.push({ id: charc.charcID, name: charc.name, value: toValue(a.value) });
       }
       const addedIds = new Set(characteristics.map((c) => c.id));
-      // WB API требует ВСЕ характеристики категории, не только marked as required
-      // Добавляем отсутствующие характеристики с пустым значением
-      for (const c of wbCharcs) {
-        if (!addedIds.has(c.charcID)) {
-          characteristics.push({ id: c.charcID, name: c.name, value: [''] });
-          addedIds.add(c.charcID);
-        }
-      }
+      // Добавляем только заполненные характеристики (пустые вызывают ошибку 400)
       console.log('[WildberriesAdapter] convertToPlatform: итоговые characteristics:', characteristics.map(c => ({ id: c.id, name: c.name })));
     } else {
       console.warn('[WildberriesAdapter] convertToPlatform: wbCharcs пустое, используем fallback с id=0');
@@ -211,8 +204,9 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
     
     if (barcode?.trim()) {
       // wbSize не указываем для безразмерных товаров
+      // price не передается в sizes при создании карточки (цена устанавливается отдельно)
       card.sizes = [
-        { techSize: 'Без размера', price: priceRub, skus: [barcode.trim()] },
+        { techSize: 'Без размера', skus: [barcode.trim()] },
       ];
     }
 
