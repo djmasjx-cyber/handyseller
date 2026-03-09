@@ -198,8 +198,8 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       title: (title || 'Товар').trim().slice(0, 255),
       description: (descriptionText || 'Описание товара').trim().slice(0, 500),
       countryProduction: this.normalizeCountry(canonical.country_of_origin),
-      // WB API требует id характеристики (charcID), не name
-      characteristics: characteristics.map((c) => ({ id: c.id, value: c.value })),
+      // Характеристики временно убраны — WB отклоняет значения не из справочника
+      // characteristics: characteristics.map((c) => ({ id: c.id, value: c.value })),
       dimensions: { width: w, height: h, length: l, weightBrutto },
     };
     
