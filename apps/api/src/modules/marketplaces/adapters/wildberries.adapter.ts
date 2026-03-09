@@ -187,8 +187,8 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       vendorCode,
       subjectID: canonical.wb_subject_id,
       brand: canonical.brand_name ?? 'Ручная работа',
-      title: (title || 'Товар').trim(),
-      description: (descriptionText || 'Описание товара').trim(),
+      title: (title || 'Товар').trim().slice(0, 255),
+      description: (descriptionText || 'Описание товара').trim().slice(0, 500),
       countryProduction: this.normalizeCountry(canonical.country_of_origin),
       // WB API требует id характеристики (charcID), не name
       characteristics: characteristics.map((c) => ({ id: c.id, value: c.value })),
@@ -606,7 +606,7 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
         this.httpService.post(`${this.CONTENT_API}/content/v2/cards/upload/add`, wbProduct, {
           headers: {
             ...this.authHeader(),
-            'Content-Type': 'application/json',
+            'Content-Type': 'application/json; charset=utf-8',
           },
         }),
       );
