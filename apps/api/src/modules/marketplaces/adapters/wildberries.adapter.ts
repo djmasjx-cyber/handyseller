@@ -647,12 +647,13 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
           }
           if (lastErr) {
             const habrData = (lastErr as { response?: { data?: unknown } })?.response?.data;
-            return {
-              success: false,
-              error: String((habrData as { errorText?: string })?.errorText ?? (lastErr instanceof Error ? lastErr.message : 'Ошибка WB')),
-              wbRequest: lastPayload,
-              wbResponse: habrData,
-            };
+            let errMsg = String((habrData as { errorText?: string })?.errorText ?? (lastErr instanceof Error ? lastErr.message : 'Ошибка WB'));
+            const lower = errMsg.toLowerCase();
+            if (lower.includes('vendor code') && lower.includes('used in other cards')) {
+              const vc = canonical.vendor_code ?? canonical.canonical_sku;
+              errMsg = `Артикул «${vc}» уже используется в другой карточке WB. Измените артикул товара или удалите дубликат в ЛК WB (Каталог → Спецификации).`;
+            }
+            return { success: false, error: errMsg, wbRequest: lastPayload, wbResponse: habrData };
           }
         } else {
           throw uploadErr;
@@ -660,7 +661,12 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       }
       const resp = data as Record<string, unknown> | undefined;
       if (resp && resp.error === true) {
-        const errText = String(resp.errorText ?? resp.message ?? resp.detail ?? 'Неизвестная ошибка WB');
+        let errText = String(resp.errorText ?? resp.message ?? resp.detail ?? 'Неизвестная ошибка WB');
+        const lower = errText.toLowerCase();
+        if (lower.includes('vendor code') && lower.includes('used in other cards')) {
+          const vc = canonical.vendor_code ?? canonical.canonical_sku;
+          errText = `Артикул «${vc}» уже используется в другой карточке WB. Измените артикул товара или удалите дубликат в ЛК WB (Каталог → Спецификации).`;
+        }
         return { success: false, error: errText, wbRequest: wbProduct, wbResponse: data };
       }
       let nmId = this.extractNmIdFromUploadResponse(data);
@@ -672,20 +678,26 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       const axErr = error as { response?: { status?: number; data?: unknown } };
       const wbData = axErr?.response?.data;
       let msg = error instanceof Error ? error.message : String(error);
-      const parts: string[] = [];
-      if (wbData && typeof wbData === 'object') {
-        const obj = wbData as Record<string, unknown>;
-        if (typeof obj.detail === 'string') parts.push(obj.detail);
-        if (typeof obj.message === 'string') parts.push(obj.message);
-        const errs = obj.errors ?? obj.Errors ?? obj.error;
-        if (Array.isArray(errs)) {
-          for (const e of errs) {
-            const s = typeof e === 'string' ? e : (e && typeof e === 'object' && 'message' in e ? (e as { message?: string }).message : null);
-            if (s?.trim()) parts.push(s.trim());
+      const obj = wbData && typeof wbData === 'object' ? (wbData as Record<string, unknown>) : null;
+      const errText = obj ? String(obj.errorText ?? obj.message ?? obj.detail ?? '').toLowerCase() : '';
+      if (errText.includes('vendor code') && errText.includes('used in other cards')) {
+        const vc = canonical.vendor_code ?? canonical.canonical_sku;
+        msg = `Артикул «${vc}» уже используется в другой карточке WB. Измените артикул товара или удалите дубликат в ЛК WB (Каталог → Спецификации).`;
+      } else {
+        const parts: string[] = [];
+        if (obj) {
+          if (typeof obj.detail === 'string') parts.push(obj.detail);
+          if (typeof obj.message === 'string') parts.push(obj.message);
+          const errs = obj.errors ?? obj.Errors ?? obj.error;
+          if (Array.isArray(errs)) {
+            for (const e of errs) {
+              const s = typeof e === 'string' ? e : (e && typeof e === 'object' && 'message' in e ? (e as { message?: string }).message : null);
+              if (s?.trim()) parts.push(s.trim());
+            }
           }
         }
+        if (parts.length > 0) msg = parts.join('. ');
       }
-      if (parts.length > 0) msg = parts.join('. ');
       return { success: false, error: msg, wbRequest: wbProduct, wbResponse: wbData };
     }
   }
@@ -767,7 +779,12 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       // WB может вернуть 200 с error: true в теле — карточка не создана
       const resp = data as Record<string, unknown> | undefined;
       if (resp && resp.error === true) {
-        const errText = String(resp.errorText ?? resp.message ?? resp.detail ?? 'Неизвестная ошибка WB');
+        let errText = String(resp.errorText ?? resp.message ?? resp.detail ?? 'Неизвестная ошибка WB');
+        const lower = errText.toLowerCase();
+        if (lower.includes('vendor code') && lower.includes('used in other cards')) {
+          const vc = canonical.vendor_code ?? canonical.canonical_sku;
+          throw new Error(`Артикул «${vc}» уже используется в другой карточке WB. Измените артикул товара или удалите дубликат в ЛК WB (Каталог → Спецификации).`);
+        }
         throw new Error(`WB отклонил карточку: ${errText}`);
       }
 
@@ -819,14 +836,19 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
         }
         if (parts.length > 0) msg = [...new Set(parts)].join('. ');
         if (status === 400) {
-          const rawJson = JSON.stringify(wbData, null, 2);
-          console.warn('[WildberriesAdapter] uploadProduct 400:', rawJson);
-          if (!msg || msg.includes('status code') || msg.length < 20) {
-            msg = parts.length > 0 ? msg : 'HTTP 400 — неверный формат. Выберите категорию WB, добавьте фото и заполните обязательные поля (название, артикул, габариты, вес).';
+          const errText = String(wbData.errorText ?? wbData.message ?? '').toLowerCase();
+          if (errText.includes('vendor code') && errText.includes('used in other cards')) {
+            const vc = canonical.vendor_code ?? canonical.canonical_sku;
+            msg = `Артикул «${vc}» уже используется в другой карточке WB. Измените артикул товара или удалите дубликат в ЛК WB (Каталог → Спецификации).`;
+          } else {
+            const rawJson = JSON.stringify(wbData, null, 2);
+            console.warn('[WildberriesAdapter] uploadProduct 400:', rawJson);
+            if (!msg || msg.includes('status code') || msg.length < 20) {
+              msg = parts.length > 0 ? msg : 'HTTP 400 — неверный формат. Выберите категорию WB, добавьте фото и заполните обязательные поля (название, артикул, габариты, вес).';
+            }
+            const rawPreview = rawJson.length > 800 ? rawJson.slice(0, 800) + '...' : rawJson;
+            msg += ` [Ответ WB: ${rawPreview}]`;
           }
-          // Добавляем сырой ответ WB для диагностики (первые 800 символов)
-          const rawPreview = rawJson.length > 800 ? rawJson.slice(0, 800) + '...' : rawJson;
-          msg += ` [Ответ WB: ${rawPreview}]`;
         }
       }
       throw new Error(`Ошибка выгрузки товара на Wildberries: ${msg}`);
