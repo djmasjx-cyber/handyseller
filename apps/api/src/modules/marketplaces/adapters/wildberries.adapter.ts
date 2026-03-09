@@ -340,29 +340,52 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
    */
   async getColors(token?: string): Promise<Array<{ id: number; name: string }>> {
     try {
+      console.log('[WildberriesAdapter] getColors: запрос к /content/v2/directory/colors');
       const { data } = await firstValueFrom(
         this.httpService.get<unknown>(
           `${this.CONTENT_API}/content/v2/directory/colors`,
           { headers: this.authHeader(token), timeout: 10000 },
         ),
       );
-      const raw = Array.isArray(data) ? data
-        : (data && typeof data === 'object')
-          ? (data as Record<string, unknown>).data ?? (data as Record<string, unknown>).result ?? (data as Record<string, unknown>).items ?? null
-          : null;
-      const items = Array.isArray(raw) ? raw : [];
-      return items
+      console.log('[WildberriesAdapter] getColors: ответ WB:', JSON.stringify(data).slice(0, 500));
+      
+      // WB API может вернуть разные форматы
+      let items: unknown[] = [];
+      
+      if (Array.isArray(data)) {
+        items = data;
+      } else if (data && typeof data === 'object') {
+        const obj = data as Record<string, unknown>;
+        // Пробуем разные поля
+        if (Array.isArray(obj.data)) items = obj.data;
+        else if (Array.isArray(obj.result)) items = obj.result;
+        else if (Array.isArray(obj.items)) items = obj.items;
+        else if (Array.isArray(obj.colors)) items = obj.colors;
+        else if (Array.isArray(obj.list)) items = obj.list;
+        // Если ничего не нашли — попробуем весь ответ как есть
+        else {
+          console.log('[WildberriesAdapter] getColors: неизвестная структура ответа, ключи:', Object.keys(obj));
+        }
+      }
+      
+      console.log(`[WildberriesAdapter] getColors: найдено ${items.length} элементов`);
+      
+      const result = items
         .filter((x): x is Record<string, unknown> => x && typeof x === 'object')
         .map((x) => ({
-          id: Number(x.id ?? x.colorId ?? x.color_id ?? 0),
-          name: String(x.name ?? x.colorName ?? x.color_name ?? '').trim(),
+          id: Number(x.id ?? x.colorId ?? x.color_id ?? x.colorID ?? 0),
+          name: String(x.name ?? x.colorName ?? x.color_name ?? x.color ?? x.title ?? '').trim(),
         }))
         .filter((x) => x.id > 0 && x.name);
+      
+      console.log(`[WildberriesAdapter] getColors: после фильтрации ${result.length} цветов`);
+      return result;
     } catch (err) {
       this.logError(err as Error, 'getColors');
       const msg = err instanceof Error ? err.message : String(err);
       const axErr = err as { response?: { status?: number; data?: { detail?: string } } };
       const wbMsg = axErr?.response?.data?.detail ?? axErr?.response?.status;
+      console.error('[WildberriesAdapter] getColors: ошибка:', wbMsg || msg);
       throw new Error(wbMsg ? `Ошибка WB API: ${wbMsg}` : `Не удалось загрузить цвета. ${msg}`);
     }
   }
