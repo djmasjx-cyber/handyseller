@@ -19,6 +19,7 @@ interface Product {
   oldPrice?: string | number
   imageUrl?: string
   article?: string
+  sku?: string
   stock?: number
   seoTitle?: string
   seoKeywords?: string
