@@ -130,7 +130,15 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       }
       const addedIds = new Set(characteristics.map((c) => c.id));
       // Добавляем только заполненные характеристики (пустые вызывают ошибку 400)
-      console.log('[WildberriesAdapter] convertToPlatform: итоговые characteristics:', characteristics.map(c => ({ id: c.id, name: c.name })));
+      // Фильтруем характеристики — оставляем только те, что точно есть в товаре
+      // Убираем характеристики со значениями, которых нет в справочнике WB
+      const validCharacteristics = characteristics.filter(c => {
+        // Пропускаем только характеристики с непустыми значениями
+        return c.value && c.value.length > 0 && c.value[0]?.trim();
+      });
+      characteristics.length = 0;
+      characteristics.push(...validCharacteristics);
+      console.log('[WildberriesAdapter] convertToPlatform: итоговые characteristics:', characteristics.map(c => ({ id: c.id, name: c.name, value: c.value })));
     } else {
       console.warn('[WildberriesAdapter] convertToPlatform: wbCharcs пустое, используем fallback с id=0');
     }
