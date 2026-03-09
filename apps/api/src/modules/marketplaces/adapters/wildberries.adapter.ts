@@ -334,6 +334,19 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
   }
 
   /**
+   * Простой хеш строки в число (для генерации id из name)
+   */
+  private hashString(str: string): number {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      const char = str.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32bit integer
+    }
+    return Math.abs(hash) || 0;
+  }
+
+  /**
    * Получить справочник цветов WB.
    * GET /content/v2/directory/colors — требуется авторизация.
    * @param token — токен WB (опционально, иначе берётся из config)
@@ -372,11 +385,12 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       
       const result = items
         .filter((x): x is Record<string, unknown> => !!x && typeof x === 'object')
-        .map((x) => ({
-          id: Number(x.id ?? x.colorId ?? x.color_id ?? x.colorID ?? 0),
+        .map((x, index) => ({
+          // WB API возвращает цвета без id, используем name как id (хеш) или индекс
+          id: Number(x.id ?? x.colorId ?? x.color_id ?? x.colorID ?? this.hashString(String(x.name)) ?? index + 1),
           name: String(x.name ?? x.colorName ?? x.color_name ?? x.color ?? x.title ?? '').trim(),
         }))
-        .filter((x) => x.id > 0 && x.name);
+        .filter((x) => x.name);
       
       console.log(`[WildberriesAdapter] getColors: после фильтрации ${result.length} цветов`);
       return result;
