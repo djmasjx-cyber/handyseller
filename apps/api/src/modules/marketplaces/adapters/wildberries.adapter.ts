@@ -195,9 +195,6 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       dimensions: { width: w, height: h, length: l, weightBrutto },
     };
     
-    // Логируем полный payload для диагностики
-    console.log('[WildberriesAdapter] convertToPlatform PAYLOAD:', JSON.stringify({ cards: [card] }));
-
     // Фото передаются отдельным запросом после создания карточки
     // Проверяем что есть хотя бы одно фото
     const imageUrls = canonical.images?.map((i) => i.url).filter((u) => u?.startsWith('http')) ?? [];
@@ -212,6 +209,9 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
         { techSize: 'Без размера', skus: [barcode.trim()] },
       ];
     }
+
+    // Логируем полный payload для диагностики (после добавления sizes)
+    console.log('[WildberriesAdapter] convertToPlatform FINAL PAYLOAD:', JSON.stringify({ cards: [card] }));
 
     const payload = {
       cards: [card],
