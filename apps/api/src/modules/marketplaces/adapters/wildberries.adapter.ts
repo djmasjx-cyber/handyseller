@@ -173,12 +173,7 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       // price не передается в sizes при создании (устанавливается отдельно)
       card.sizes = [{ skus: [barcode.trim()] }];
     }
-
-    // URL фото: WB в ЛК позволяет вводить URL при создании. Пробуем передать mediaFiles.
-    const imageUrls = canonical.images?.map((i) => i.url).filter((u) => typeof u === 'string' && u.trim().startsWith('http')) ?? [];
-    if (imageUrls.length > 0) {
-      card.mediaFiles = imageUrls.map((url) => ({ url: url.trim() }));
-    }
+    // WB API не принимает фото при создании карточки — только через media/save после создания
 
     const payload = {
       cards: [card],
@@ -259,11 +254,7 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       sizes,
       dimensions: { width: w, height: h, length: l, weightBrutto },
     };
-
-    const imageUrls = canonical.images?.map((i) => i.url).filter((u) => typeof u === 'string' && u.trim().startsWith('http')) ?? [];
-    if (imageUrls.length > 0) {
-      variant.mediaFiles = imageUrls.map((url) => ({ url: url.trim() }));
-    }
+    // WB API не принимает фото при создании — только через media/save после создания
 
     const root: Record<string, unknown> = {
       subjectID: canonical.wb_subject_id,
@@ -772,11 +763,12 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
         const raw = JSON.stringify(data).slice(0, 500);
         throw new Error(`WB не вернул nmID. Ответ: ${raw}`);
       }
-      const imageUrls = canonical.images?.map((i) => i.url) ?? [];
+      const imageUrls = canonical.images?.map((i) => i.url).filter((u) => typeof u === 'string' && u.trim().startsWith('http')) ?? [];
       if (imageUrls.length > 0) {
-        // WB создаёт карточку асинхронно — даём время перед загрузкой фото
-        await new Promise((r) => setTimeout(r, 2500));
-        await this.uploadImages(nmId, imageUrls);
+        // WB создаёт карточку асинхронно — ждём готовности, затем загружаем фото
+        await this.waitForCardAndUploadImages(nmId, imageUrls);
+      } else {
+        console.warn(`[WildberriesAdapter] Карточка nmID=${nmId} создана без фото: canonical.images пусто. Добавьте imageUrl или imageUrls в товар.`);
       }
       if (this.config.sellerId) {
         await this.setStock(nmId, canonical.stock_quantity);
@@ -836,16 +828,38 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
   }
 
   /**
+   * Ожидание готовности карточки WB и загрузка фото.
+   * WB создаёт карточку асинхронно — нужна задержка перед media/save.
+   * Пользователь видит лоудер до завершения загрузки фото.
+   */
+  private async waitForCardAndUploadImages(nmId: number, imageUrls: string[]): Promise<void> {
+    const delayMs = 3000; // 3 сек — WB обрабатывает карточку
+    const maxAttempts = 4; // 4 попытки: 0, 3, 6, 9 сек
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      if (attempt > 0) {
+        await new Promise((r) => setTimeout(r, delayMs));
+        console.warn(`[WildberriesAdapter] Повтор загрузки фото (nmID=${nmId}, попытка ${attempt + 1}/${maxAttempts})`);
+      }
+      const ok = await this.uploadImages(nmId, imageUrls);
+      if (ok > 0) return;
+    }
+    throw new Error(
+      `Карточка создана на WB, но не удалось загрузить фото. Убедитесь, что URL фото публичный (https://...) и доступен с внешних серверов. WB скачивает изображение по ссылке.`,
+    );
+  }
+
+  /**
    * Загрузка фото на WB через POST /content/v3/media/save.
    * WB не принимает URL при создании карточки — фото загружаются отдельно по nmID.
    * Формат: { nmID, data: [{ url }] } — см. docs/WB-MEDIA-PHOTOS.md
+   * @returns количество успешно загруженных фото
    */
-  private async uploadImages(nmId: number, images: string[]): Promise<void> {
+  private async uploadImages(nmId: number, images: string[]): Promise<number> {
     const urls = images.filter((u) => typeof u === 'string' && u.trim().startsWith('http')).map((u) => u.trim());
-    if (urls.length === 0) return;
+    if (urls.length === 0) return 0;
+    console.log(`[WildberriesAdapter] Загрузка фото на WB nmID=${nmId}, ${urls.length} URL, первый: ${urls[0]?.slice(0, 80)}...`);
     const data = urls.map((url) => ({ url }));
     try {
-      // Сначала пробуем batch: все URL одним запросом
       await firstValueFrom(
         this.httpService.post(`${this.CONTENT_API}/content/v3/media/save`, { nmID: nmId, data }, {
           headers: { ...this.authHeader(), 'Content-Type': 'application/json' },
@@ -853,11 +867,12 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
         }),
       );
       console.log(`[WildberriesAdapter] Фото загружены на WB (nmID=${nmId}, ${urls.length} шт.)`);
+      return urls.length;
     } catch (batchErr) {
       const axErr = batchErr as { response?: { status?: number; data?: unknown } };
       const status = axErr?.response?.status;
       const wbData = axErr?.response?.data;
-      console.warn(`[WildberriesAdapter] media/save batch failed (nmID=${nmId}): HTTP ${status}`, wbData ? JSON.stringify(wbData).slice(0, 300) : '');
+      console.warn(`[WildberriesAdapter] media/save batch failed (nmID=${nmId}): HTTP ${status}`, wbData ? JSON.stringify(wbData).slice(0, 400) : '');
       // Fallback: по одному URL (rate limit 500ms)
       let ok = 0;
       for (let i = 0; i < urls.length; i++) {
@@ -879,6 +894,7 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       if (ok > 0) {
         console.log(`[WildberriesAdapter] Фото загружены на WB (nmID=${nmId}, ${ok}/${urls.length} шт.)`);
       }
+      return ok;
     }
   }
 

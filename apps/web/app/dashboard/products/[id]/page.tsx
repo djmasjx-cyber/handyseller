@@ -206,7 +206,8 @@ export default function ProductCardPage() {
     if (!form.title?.trim()) wbMissingFields.push("Название")
     if (!form.article?.trim()) wbMissingFields.push("Артикул")
     if (!form.wbSubjectId?.trim()) wbMissingFields.push("Категория WB")
-    if (!form.imageUrl?.trim() || !form.imageUrl.startsWith("http")) wbMissingFields.push("Фото (URL)")
+    const hasWbPhoto = (form.imageUrl?.trim().startsWith("http")) || (form.imageUrls?.trim() && form.imageUrls.trim().split(/\r?\n/).some((u) => u.trim().startsWith("http")))
+    if (!hasWbPhoto) wbMissingFields.push("Фото (URL)")
     const wbPriceVal = form.price ? parseFloat(form.price) : NaN
     if (isNaN(wbPriceVal) || wbPriceVal <= 0) wbMissingFields.push("Ваша цена (₽)")
     if (!form.brand?.trim()) wbMissingFields.push("Бренд")

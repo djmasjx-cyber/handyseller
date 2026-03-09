@@ -1672,6 +1672,7 @@ export class MarketplacesService {
     product: {
       title?: string | null;
       imageUrl?: string | null;
+      imageUrls?: unknown;
       price?: unknown;
       article?: string | null;
       sku?: string | null;
@@ -1688,8 +1689,11 @@ export class MarketplacesService {
   ): { valid: boolean; errors: string[] } {
     const errors: string[] = [];
     if (!product.title?.trim()) errors.push('Укажите название товара');
-    if (!product.imageUrl?.trim() || !product.imageUrl.startsWith('http'))
-      errors.push('Добавьте URL фото товара (WB требует хотя бы одно изображение)');
+    const hasMainPhoto = product.imageUrl?.trim().startsWith('http');
+    const urls = Array.isArray(product.imageUrls) ? product.imageUrls : [];
+    const hasExtraPhotos = urls.some((u: unknown) => typeof u === 'string' && (u as string).trim().startsWith('http'));
+    if (!hasMainPhoto && !hasExtraPhotos)
+      errors.push('Добавьте URL фото товара в поле «Фото» или «Доп. фото для WB» (WB требует хотя бы одно изображение)');
     const price = product.price != null ? Number(product.price) : NaN;
     if (isNaN(price) || price <= 0) errors.push('Укажите «Вашу цену» (WB: price в sizes)');
     const article = (product.article ?? product.sku ?? '').toString().trim();
