@@ -129,11 +129,11 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
         if (charc && a.value?.trim()) characteristics.push({ id: charc.charcID, name: charc.name, value: toValue(a.value) });
       }
       const addedIds = new Set(characteristics.map((c) => c.id));
-      const requiredCharcs = wbCharcs.filter(c => c.required);
-      console.log('[WildberriesAdapter] convertToPlatform: обязательные характеристики:', requiredCharcs.map(c => ({ id: c.charcID, name: c.name })));
+      // WB API требует ВСЕ характеристики категории, не только marked as required
+      // Добавляем отсутствующие характеристики с пустым значением
       for (const c of wbCharcs) {
-        if (c.required && !addedIds.has(c.charcID)) {
-          characteristics.push({ id: c.charcID, name: c.name, value: ['Не указано'] });
+        if (!addedIds.has(c.charcID)) {
+          characteristics.push({ id: c.charcID, name: c.name, value: [''] });
           addedIds.add(c.charcID);
         }
       }
