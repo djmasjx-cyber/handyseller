@@ -187,13 +187,16 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       vendorCode,
       subjectID: canonical.wb_subject_id,
       brand: canonical.brand_name ?? 'Ручная работа',
-      title: title || 'Товар',
-      description: descriptionText?.trim() || 'Описание товара',
+      title: (title || 'Товар').trim(),
+      description: (descriptionText || 'Описание товара').trim(),
       countryProduction: this.normalizeCountry(canonical.country_of_origin),
       // WB API требует id характеристики (charcID), не name
       characteristics: characteristics.map((c) => ({ id: c.id, value: c.value })),
       dimensions: { width: w, height: h, length: l, weightBrutto },
     };
+    
+    // Логируем полный payload для диагностики
+    console.log('[WildberriesAdapter] convertToPlatform PAYLOAD:', JSON.stringify({ cards: [card] }));
 
     // Фото передаются отдельным запросом после создания карточки
     // Проверяем что есть хотя бы одно фото
