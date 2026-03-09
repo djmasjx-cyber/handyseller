@@ -211,6 +211,91 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
   }
 
   /**
+   * Формат Habr для WB upload: массив [{ subjectID, variants }].
+   * https://habr.com/ru/articles/897548/
+   * Для безразмерного товара — sizes без techSize/wbSize.
+   */
+  private buildHabrFormatPayload(
+    canonical: CanonicalProduct,
+    barcode: string,
+    wbCharcs?: Array<{ charcID: number; name: string; required?: boolean }>,
+  ): unknown[] {
+    const toValue = (v: string | string[]): string[] =>
+      Array.isArray(v) ? v.filter(Boolean).map((s) => String(s).trim()) : (v?.trim() ? [v.trim()] : []);
+    const plainDesc = canonical.long_description_plain ?? canonical.short_description ?? '';
+    const richDesc = canonical.long_description_html?.trim();
+    const descriptionText = richDesc
+      ? (plainDesc ? `${plainDesc}\n\n${this.stripHtml(richDesc)}` : this.stripHtml(richDesc))
+      : plainDesc;
+    const title = (canonical.title || '').trim();
+    const characteristics: Array<{ id: number; value: string | string[] }> = [];
+
+    if (wbCharcs && wbCharcs.length > 0) {
+      const addChar = (names: string[], value: string | string[] | undefined) => {
+        if (value === undefined || value === null || (typeof value === 'string' && !value.trim())) return;
+        const charc = wbCharcs!.find((c) => names.some((n) => c.name.toLowerCase() === n.toLowerCase()));
+        if (charc) {
+          const val = toValue(Array.isArray(value) ? value : value);
+          characteristics.push({ id: charc.charcID, value: val.length === 1 ? val[0]! : val });
+        }
+      };
+      addChar(['Наименование', 'наименование', 'Название', 'title'], title || 'Товар');
+      addChar(['Описание', 'описание', 'description'], descriptionText?.trim() || 'Описание товара');
+      addChar(['Цвет', 'цвет', 'color'], canonical.color?.trim());
+      addChar(['Количество предметов в упаковке', 'количество'], canonical.items_per_pack != null && canonical.items_per_pack > 0 ? String(canonical.items_per_pack) : undefined);
+      addChar(['Материал изделия', 'материал', 'material'], canonical.material?.trim());
+      addChar(['Вид творчества', 'вид творчества', 'craft'], canonical.craft_type?.trim()
+        ? (canonical.craft_type.includes(',') ? canonical.craft_type.split(',').map((s) => s.trim()).filter(Boolean) : canonical.craft_type.trim())
+        : undefined);
+      addChar(['Комплектация', 'комплектация'], canonical.package_contents?.trim());
+      for (const a of canonical.attributes ?? []) {
+        const charc = wbCharcs.find((c) => c.name.toLowerCase() === a.name.toLowerCase());
+        if (charc && a.value?.trim()) {
+          const val = toValue(a.value);
+          characteristics.push({ id: charc.charcID, value: val.length === 1 ? val[0]! : val });
+        }
+      }
+    }
+    if (characteristics.length === 0) {
+      characteristics.push({ id: 0, value: [title || 'Товар'] });
+      characteristics.push({ id: 3, value: [descriptionText || ''] });
+      if (canonical.color?.trim()) characteristics.push({ id: 1, value: [canonical.color.trim()] });
+    }
+
+    const w = Math.round(((canonical.width_mm ?? 100) / 10) * 100) / 100;
+    const h = Math.round(((canonical.height_mm ?? 100) / 10) * 100) / 100;
+    const l = Math.round(((canonical.length_mm ?? 100) / 10) * 100) / 100;
+    const weightBrutto = Math.round(((canonical.weight_grams ?? 100) / 1000) * 100) / 100;
+    const price = Math.round((canonical.price ?? 100) * 100);
+
+    const sizes = barcode?.trim()
+      ? [{ skus: [barcode.trim()] } as Record<string, unknown>]
+      : [];
+
+    const variant: Record<string, unknown> = {
+      vendorCode: canonical.vendor_code ?? canonical.canonical_sku,
+      title: (title || 'Товар').trim().slice(0, 255),
+      description: (descriptionText || 'Описание товара').trim().slice(0, 500),
+      brand: canonical.brand_name ?? 'Ручная работа',
+      characteristics,
+      sizes,
+      dimensions: { width: w, height: h, length: l, weightBrutto },
+    };
+    if (sizes.length > 0 && price > 0) {
+      (sizes[0] as Record<string, unknown>).price = price;
+    }
+
+    const root: Record<string, unknown> = {
+      subjectID: canonical.wb_subject_id,
+      variants: [variant],
+    };
+    const country = this.normalizeCountry(canonical.country_of_origin);
+    if (country) root.countryProduction = country;
+
+    return [root];
+  }
+
+  /**
    * Аутентификация — проверка токена через /ping
    * WB Content API: https://content-api.wildberries.ru/ping
    */
@@ -526,11 +611,41 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
         wbCharcs = await this.getCharcsForSubject(canonical.wb_subject_id);
       }
       wbProduct = this.convertToPlatform(canonical, barcode, wbCharcs);
-      const { data } = await firstValueFrom(
-        this.httpService.post(`${this.CONTENT_API}/content/v2/cards/upload`, wbProduct, {
-          headers: { ...this.authHeader(), 'Content-Type': 'application/json' },
-        }),
-      );
+      // Используем upload/add — тот же endpoint, что и production (upload для новых карточек).
+      let data: unknown;
+      try {
+        const res = await firstValueFrom(
+          this.httpService.post(`${this.CONTENT_API}/content/v2/cards/upload/add`, wbProduct, {
+            headers: { ...this.authHeader(), 'Content-Type': 'application/json' },
+          }),
+        );
+        data = res.data;
+      } catch (uploadErr) {
+        const status = (uploadErr as { response?: { status?: number } })?.response?.status;
+        if (status === 400) {
+          // Fallback: формат Habr (массив + variants) — https://habr.com/ru/articles/897548/
+          const habrPayload = this.buildHabrFormatPayload(canonical, barcode, wbCharcs);
+          console.log('[WildberriesAdapter] tryUpload: 400 на cards, пробуем формат Habr');
+          try {
+            const res = await firstValueFrom(
+              this.httpService.post(`${this.CONTENT_API}/content/v2/cards/upload/add`, habrPayload, {
+                headers: { ...this.authHeader(), 'Content-Type': 'application/json' },
+              }),
+            );
+            data = res.data;
+          } catch (habrErr) {
+            const habrData = (habrErr as { response?: { data?: unknown } })?.response?.data;
+            return {
+              success: false,
+              error: String((habrData as { errorText?: string })?.errorText ?? (habrErr instanceof Error ? habrErr.message : 'Ошибка WB')),
+              wbRequest: habrPayload,
+              wbResponse: habrData,
+            };
+          }
+        } else {
+          throw uploadErr;
+        }
+      }
       const resp = data as Record<string, unknown> | undefined;
       if (resp && resp.error === true) {
         const errText = String(resp.errorText ?? resp.message ?? resp.detail ?? 'Неизвестная ошибка WB');
@@ -589,17 +704,36 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       // Логируем полный запрос для отладки
       console.log('[WildberriesAdapter] uploadFromCanonical REQUEST:', JSON.stringify(wbProduct, null, 2));
 
-      // 3. Выгружаем карточку
-      // Используем /content/v2/cards/upload/add для создания НОВЫХ карточек
-      // /content/v2/cards/upload требует imtID для обновления существующих
-      const { data } = await firstValueFrom(
-        this.httpService.post(`${this.CONTENT_API}/content/v2/cards/upload/add`, wbProduct, {
-          headers: {
-            ...this.authHeader(),
-            'Content-Type': 'application/json; charset=utf-8',
-          },
-        }),
-      );
+      // 3. Выгружаем карточку (upload/add для новых карточек)
+      let data: unknown;
+      try {
+        const res = await firstValueFrom(
+          this.httpService.post(`${this.CONTENT_API}/content/v2/cards/upload/add`, wbProduct, {
+            headers: {
+              ...this.authHeader(),
+              'Content-Type': 'application/json; charset=utf-8',
+            },
+          }),
+        );
+        data = res.data;
+      } catch (uploadErr) {
+        const status = (uploadErr as { response?: { status?: number } })?.response?.status;
+        if (status === 400) {
+          const habrPayload = this.buildHabrFormatPayload(canonical, barcode, wbCharcs);
+          console.log('[WildberriesAdapter] uploadFromCanonical: 400 на cards, пробуем формат Habr');
+          const res = await firstValueFrom(
+            this.httpService.post(`${this.CONTENT_API}/content/v2/cards/upload/add`, habrPayload, {
+              headers: {
+                ...this.authHeader(),
+                'Content-Type': 'application/json; charset=utf-8',
+              },
+            }),
+          );
+          data = res.data;
+        } else {
+          throw uploadErr;
+        }
+      }
 
       // Логируем ответ
       console.log('[WildberriesAdapter] uploadFromCanonical RESPONSE:', JSON.stringify(data, null, 2));
