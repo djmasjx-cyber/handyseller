@@ -129,6 +129,9 @@ export class MarketplacesController {
     let products: ProductData[];
     if (body?.products?.length) {
       products = body.products;
+      for (const p of products) {
+        console.log(`[MarketplacesController] sync products from body: id=${p.id}, images=${(p.images?.length ?? 0)}, firstUrl=${p.images?.[0]?.slice(0, 60) ?? '—'}...`);
+      }
     } else if (body?.productIds?.length) {
       const dbProducts = await Promise.all(
         body.productIds.map((id) => this.productsService.findByIdWithMappings(userId, id)),
@@ -136,6 +139,10 @@ export class MarketplacesController {
       const validProducts = dbProducts.filter((p): p is NonNullable<typeof p> => p != null);
       const canonical = validProducts.map((p) => productToCanonical(p));
       products = canonical.map((c) => canonicalToProductData(c));
+      for (const p of products) {
+        const db = validProducts.find((d) => d.id === p.id);
+        console.log(`[MarketplacesController] sync from productIds: id=${p.id}, db.imageUrl=${(db as { imageUrl?: string })?.imageUrl?.slice(0, 50) ?? '—'}, images=${(p.images?.length ?? 0)}`);
+      }
       if (marketplace === 'OZON' && validProducts.length > 0) {
         const byId = new Map(validProducts.map((p) => [p.id, p]));
         for (const p of products) {
@@ -186,11 +193,16 @@ export class MarketplacesController {
       const validationErrors: string[] = [];
       for (const p of products) {
         const dbProduct = await this.productsService.findById(userId, p.id);
-        if (dbProduct) {
-          const v = this.marketplacesService.validateProductForWb(dbProduct, { wbColorNames });
-          if (!v.valid) {
-            validationErrors.push(`${p.name || 'Товар'}: ${v.errors.join('; ')}`);
-          }
+        const base = (dbProduct ?? p) as Record<string, unknown>;
+        const toValidate = {
+          ...base,
+          title: p.name ?? base.title,
+          imageUrl: p.images?.[0] ?? base.imageUrl,
+          imageUrls: p.images?.length ? p.images.slice(1) : base.imageUrls,
+        };
+        const v = this.marketplacesService.validateProductForWb(toValidate, { wbColorNames });
+        if (!v.valid) {
+          validationErrors.push(`${p.name || 'Товар'}: ${v.errors.join('; ')}`);
         }
       }
       if (validationErrors.length > 0) {

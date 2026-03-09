@@ -294,6 +294,46 @@ export default function ProductCardPage() {
     const cfg = MARKETPLACE_BTN[marketplace]
     const label = cfg?.short ?? marketplace
     try {
+      // Передаём данные из формы (включая imageUrl), чтобы не терять фото при выгрузке без сохранения
+      const images: string[] = []
+      if (form.imageUrl?.trim().startsWith("http")) images.push(form.imageUrl.trim())
+      if (form.imageUrls?.trim()) {
+        for (const u of form.imageUrls.trim().split(/\r?\n/)) {
+          const url = u.trim()
+          if (url.startsWith("http") && !images.includes(url)) images.push(url)
+        }
+      }
+      const productPayload = {
+        id: product.id,
+        name: form.title?.trim() || product.title || "",
+        description: form.description?.trim() || product.description || "",
+        price: form.price ? parseFloat(form.price) : (product.price ?? 0),
+        oldPrice: form.oldPrice ? parseFloat(form.oldPrice) : product.oldPrice,
+        stock: parseInt(form.stock, 10) || product.stock || 0,
+        images,
+        vendorCode: form.article?.trim() || product.article || product.sku,
+        brand: form.brand?.trim() || product.brand,
+        weight: form.weight ? parseInt(form.weight, 10) : product.weight,
+        width: form.width ? parseInt(form.width, 10) : product.width,
+        length: form.length ? parseInt(form.length, 10) : product.length,
+        height: form.height ? parseInt(form.height, 10) : product.height,
+        color: form.color?.trim() || product.color,
+        itemsPerPack: form.itemsPerPack ? parseInt(form.itemsPerPack, 10) : product.itemsPerPack,
+        material: form.material?.trim() || product.material,
+        craftType: form.craftType?.trim() || product.craftType,
+        countryOfOrigin: form.countryOfOrigin?.trim() || product.countryOfOrigin,
+        packageContents: form.packageContents?.trim() || product.packageContents,
+        richContent: form.richContent?.trim() || product.richContent,
+        ozonCategoryId: form.ozonCategoryId ? parseInt(form.ozonCategoryId, 10) : product.ozonCategoryId,
+        ozonTypeId: form.ozonTypeId ? parseInt(form.ozonTypeId, 10) : product.ozonTypeId,
+        wbSubjectId: form.wbSubjectId ? parseInt(form.wbSubjectId, 10) : product.wbSubjectId,
+        barcodeOzon: form.barcodeOzon?.trim() || product.barcodeOzon,
+        barcode: (form.barcodeWb?.trim() || form.barcodeOzon?.trim() || product.barcodeWb || product.barcodeOzon) as string | undefined,
+        wbNmId: product.marketplaceMappings?.find((m) => m.marketplace === "WILDBERRIES")?.externalSystemId
+          ? parseInt(product.marketplaceMappings.find((m) => m.marketplace === "WILDBERRIES")!.externalSystemId, 10)
+          : undefined,
+        ozonProductId: product.marketplaceMappings?.find((m) => m.marketplace === "OZON")?.externalSystemId,
+      }
       const res = await fetch(
         `/api/marketplaces/sync?marketplace=${marketplace}`,
         {
@@ -302,7 +342,7 @@ export default function ProductCardPage() {
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({ productIds: [product.id] }),
+          body: JSON.stringify({ products: [productPayload] }),
         }
       )
       const data = await res.json().catch(() => ({}))
