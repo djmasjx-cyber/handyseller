@@ -129,13 +129,15 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
         if (charc && a.value?.trim()) characteristics.push({ id: charc.charcID, name: charc.name, value: toValue(a.value) });
       }
       const addedIds = new Set(characteristics.map((c) => c.id));
+      const requiredCharcs = wbCharcs.filter(c => c.required);
+      console.log('[WildberriesAdapter] convertToPlatform: обязательные характеристики:', requiredCharcs.map(c => ({ id: c.charcID, name: c.name })));
       for (const c of wbCharcs) {
         if (c.required && !addedIds.has(c.charcID)) {
           characteristics.push({ id: c.charcID, name: c.name, value: ['Не указано'] });
           addedIds.add(c.charcID);
         }
       }
-      console.log('[WildberriesAdapter] convertToPlatform: сформировано characteristics:', characteristics.map(c => ({ id: c.id, name: c.name })));
+      console.log('[WildberriesAdapter] convertToPlatform: итоговые characteristics:', characteristics.map(c => ({ id: c.id, name: c.name })));
     } else {
       console.warn('[WildberriesAdapter] convertToPlatform: wbCharcs пустое, используем fallback с id=0');
     }
@@ -200,13 +202,11 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       dimensions: { width: w, height: h, length: l, weightBrutto },
     };
 
-    // Добавляем фото через addin (WB API требует хотя бы одно фото)
+    // Фото передаются отдельным запросом после создания карточки
+    // Проверяем что есть хотя бы одно фото
     const imageUrls = canonical.images?.map((i) => i.url).filter((u) => u?.startsWith('http')) ?? [];
-    if (imageUrls.length > 0) {
-      card.addin = imageUrls.map((url, idx) => ({
-        type: 'Фото',
-        params: [{ value: url, order: idx + 1 }],
-      }));
+    if (imageUrls.length === 0) {
+      console.warn('[WildberriesAdapter] convertToPlatform: нет фото! WB требует хотя бы одно фото.');
     }
     
     if (barcode?.trim()) {
