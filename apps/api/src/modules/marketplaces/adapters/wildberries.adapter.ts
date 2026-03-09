@@ -236,7 +236,8 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
         const charc = wbCharcs!.find((c) => names.some((n) => c.name.toLowerCase() === n.toLowerCase()));
         if (charc) {
           const val = toValue(Array.isArray(value) ? value : value);
-          characteristics.push({ id: charc.charcID, value: val.length === 1 ? val[0]! : val });
+          // WB: value как массив (некоторые API принимают string, но массив надёжнее)
+          characteristics.push({ id: charc.charcID, value: val });
         }
       };
       addChar(['Наименование', 'наименование', 'Название', 'title'], title || 'Товар');
@@ -266,8 +267,8 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
     const h = Math.round(((canonical.height_mm ?? 100) / 10) * 100) / 100;
     const l = Math.round(((canonical.length_mm ?? 100) / 10) * 100) / 100;
     const weightBrutto = Math.round(((canonical.weight_grams ?? 100) / 1000) * 100) / 100;
-    const price = Math.round((canonical.price ?? 100) * 100);
 
+    // WB: price устанавливается отдельно через Prices API после создания карточки
     const sizes = barcode?.trim()
       ? [{ skus: [barcode.trim()] } as Record<string, unknown>]
       : [];
@@ -281,9 +282,6 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       sizes,
       dimensions: { width: w, height: h, length: l, weightBrutto },
     };
-    if (sizes.length > 0 && price > 0) {
-      (sizes[0] as Record<string, unknown>).price = price;
-    }
 
     const root: Record<string, unknown> = {
       subjectID: canonical.wb_subject_id,
@@ -623,22 +621,36 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       } catch (uploadErr) {
         const status = (uploadErr as { response?: { status?: number } })?.response?.status;
         if (status === 400) {
-          // Fallback: формат Habr (массив + variants) — https://habr.com/ru/articles/897548/
           const habrPayload = this.buildHabrFormatPayload(canonical, barcode, wbCharcs);
-          console.log('[WildberriesAdapter] tryUpload: 400 на cards, пробуем формат Habr');
-          try {
-            const res = await firstValueFrom(
-              this.httpService.post(`${this.CONTENT_API}/content/v2/cards/upload/add`, habrPayload, {
-                headers: { ...this.authHeader(), 'Content-Type': 'application/json' },
-              }),
-            );
-            data = res.data;
-          } catch (habrErr) {
-            const habrData = (habrErr as { response?: { data?: unknown } })?.response?.data;
+          const attempts: Array<{ payload: unknown; endpoint: string }> = [
+            { payload: habrPayload, endpoint: '/content/v2/cards/upload/add' },
+            { payload: { cards: habrPayload }, endpoint: '/content/v2/cards/upload/add' },
+            { payload: habrPayload, endpoint: '/content/v2/cards/upload' },
+          ];
+          let lastErr: unknown;
+          let lastPayload: unknown = habrPayload;
+          for (const { payload: p, endpoint } of attempts) {
+            try {
+              console.log('[WildberriesAdapter] tryUpload: пробуем', endpoint, typeof p === 'object' && p && 'cards' in (p as object) ? '(cards wrapper)' : '');
+              const res = await firstValueFrom(
+                this.httpService.post(`${this.CONTENT_API}${endpoint}`, p, {
+                  headers: { ...this.authHeader(), 'Content-Type': 'application/json' },
+                }),
+              );
+              data = res.data;
+              lastErr = null;
+              break;
+            } catch (e) {
+              lastErr = e;
+              lastPayload = p;
+            }
+          }
+          if (lastErr) {
+            const habrData = (lastErr as { response?: { data?: unknown } })?.response?.data;
             return {
               success: false,
-              error: String((habrData as { errorText?: string })?.errorText ?? (habrErr instanceof Error ? habrErr.message : 'Ошибка WB')),
-              wbRequest: habrPayload,
+              error: String((habrData as { errorText?: string })?.errorText ?? (lastErr instanceof Error ? lastErr.message : 'Ошибка WB')),
+              wbRequest: lastPayload,
               wbResponse: habrData,
             };
           }
@@ -720,16 +732,30 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
         const status = (uploadErr as { response?: { status?: number } })?.response?.status;
         if (status === 400) {
           const habrPayload = this.buildHabrFormatPayload(canonical, barcode, wbCharcs);
-          console.log('[WildberriesAdapter] uploadFromCanonical: 400 на cards, пробуем формат Habr');
-          const res = await firstValueFrom(
-            this.httpService.post(`${this.CONTENT_API}/content/v2/cards/upload/add`, habrPayload, {
-              headers: {
-                ...this.authHeader(),
-                'Content-Type': 'application/json; charset=utf-8',
-              },
-            }),
-          );
-          data = res.data;
+          const attempts: Array<{ payload: unknown; path: string }> = [
+            { payload: habrPayload, path: '/content/v2/cards/upload/add' },
+            { payload: { cards: habrPayload }, path: '/content/v2/cards/upload/add' },
+            { payload: habrPayload, path: '/content/v2/cards/upload' },
+          ];
+          let lastErr: unknown = uploadErr;
+          for (const { payload: p, path } of attempts) {
+            try {
+              const res = await firstValueFrom(
+                this.httpService.post(`${this.CONTENT_API}${path}`, p, {
+                  headers: {
+                    ...this.authHeader(),
+                    'Content-Type': 'application/json; charset=utf-8',
+                  },
+                }),
+              );
+              data = res.data;
+              lastErr = null;
+              break;
+            } catch (e) {
+              lastErr = e;
+            }
+          }
+          if (lastErr) throw lastErr;
         } else {
           throw uploadErr;
         }
