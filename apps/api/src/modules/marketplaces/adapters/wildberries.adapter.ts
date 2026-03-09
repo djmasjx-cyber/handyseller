@@ -174,6 +174,12 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       card.sizes = [{ skus: [barcode.trim()] }];
     }
 
+    // URL фото: WB в ЛК позволяет вводить URL при создании. Пробуем передать mediaFiles.
+    const imageUrls = canonical.images?.map((i) => i.url).filter((u) => typeof u === 'string' && u.trim().startsWith('http')) ?? [];
+    if (imageUrls.length > 0) {
+      card.mediaFiles = imageUrls.map((url) => ({ url: url.trim() }));
+    }
+
     const payload = {
       cards: [card],
     };
@@ -253,6 +259,11 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       sizes,
       dimensions: { width: w, height: h, length: l, weightBrutto },
     };
+
+    const imageUrls = canonical.images?.map((i) => i.url).filter((u) => typeof u === 'string' && u.trim().startsWith('http')) ?? [];
+    if (imageUrls.length > 0) {
+      variant.mediaFiles = imageUrls.map((url) => ({ url: url.trim() }));
+    }
 
     const root: Record<string, unknown> = {
       subjectID: canonical.wb_subject_id,
@@ -762,7 +773,11 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
         throw new Error(`WB не вернул nmID. Ответ: ${raw}`);
       }
       const imageUrls = canonical.images?.map((i) => i.url) ?? [];
-      await this.uploadImages(nmId, imageUrls);
+      if (imageUrls.length > 0) {
+        // WB создаёт карточку асинхронно — даём время перед загрузкой фото
+        await new Promise((r) => setTimeout(r, 2500));
+        await this.uploadImages(nmId, imageUrls);
+      }
       if (this.config.sellerId) {
         await this.setStock(nmId, canonical.stock_quantity);
       }
@@ -837,8 +852,14 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
           timeout: 30000,
         }),
       );
+      console.log(`[WildberriesAdapter] Фото загружены на WB (nmID=${nmId}, ${urls.length} шт.)`);
     } catch (batchErr) {
+      const axErr = batchErr as { response?: { status?: number; data?: unknown } };
+      const status = axErr?.response?.status;
+      const wbData = axErr?.response?.data;
+      console.warn(`[WildberriesAdapter] media/save batch failed (nmID=${nmId}): HTTP ${status}`, wbData ? JSON.stringify(wbData).slice(0, 300) : '');
       // Fallback: по одному URL (rate limit 500ms)
+      let ok = 0;
       for (let i = 0; i < urls.length; i++) {
         const url = urls[i];
         try {
@@ -849,9 +870,14 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
               timeout: 15000,
             }),
           );
-        } catch {
-          // Игнорируем ошибки отдельных фото
+          ok++;
+        } catch (e) {
+          const err = e as { response?: { status?: number; data?: unknown } };
+          console.warn(`[WildberriesAdapter] media/save URL failed (${url.slice(0, 60)}...):`, err?.response?.status, err?.response?.data);
         }
+      }
+      if (ok > 0) {
+        console.log(`[WildberriesAdapter] Фото загружены на WB (nmID=${nmId}, ${ok}/${urls.length} шт.)`);
       }
     }
   }
