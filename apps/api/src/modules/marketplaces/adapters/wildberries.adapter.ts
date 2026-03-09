@@ -108,8 +108,8 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
     if (wbCharcs && wbCharcs.length > 0) {
       const addChar = (names: string[], value: string | string[] | undefined) => {
         if (value === undefined || value === null || (typeof value === 'string' && !value.trim())) return;
-        const id = this.findCharcIdByNames(wbCharcs!, names);
-        if (id) characteristics.push({ id, value: toValue(Array.isArray(value) ? value : value) });
+        const charc = wbCharcs!.find((c) => names.some((n) => c.name.toLowerCase() === n.toLowerCase()));
+        if (charc) characteristics.push({ id: charc.charcID, name: charc.name, value: toValue(Array.isArray(value) ? value : value) });
       };
       addChar(['Наименование', 'наименование', 'Название', 'title'], title || 'Товар');
       addChar(['Описание', 'описание', 'description'], descriptionText?.trim() || 'Описание товара');
@@ -123,13 +123,13 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
         : undefined);
       addChar(['Комплектация', 'комплектация'], canonical.package_contents?.trim());
       for (const a of canonical.attributes ?? []) {
-        const id = this.findCharcIdByNames(wbCharcs, [a.name]);
-        if (id && a.value?.trim()) characteristics.push({ id, value: toValue(a.value) });
+        const charc = wbCharcs.find((c) => c.name.toLowerCase() === a.name.toLowerCase());
+        if (charc && a.value?.trim()) characteristics.push({ id: charc.charcID, name: charc.name, value: toValue(a.value) });
       }
       const addedIds = new Set(characteristics.map((c) => c.id));
       for (const c of wbCharcs) {
         if (c.required && !addedIds.has(c.charcID)) {
-          characteristics.push({ id: c.charcID, value: ['Не указано'] });
+          characteristics.push({ id: c.charcID, name: c.name, value: ['Не указано'] });
           addedIds.add(c.charcID);
         }
       }

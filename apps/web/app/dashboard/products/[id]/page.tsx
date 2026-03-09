@@ -890,30 +890,6 @@ export default function ProductCardPage() {
                       </Button>
                     </div>
                     <p className="text-xs text-muted-foreground">WB требует предмет (subject) для выгрузки. На WB передаётся «Ваша цена», не себестоимость.</p>
-                  </div>
-                )}
-                {isWbConnected && (
-                  <div className="space-y-2">
-                    <Label>Цвет WB</Label>
-                    <div className="flex gap-2">
-                      <div
-                        className="flex-1 min-h-[40px] px-3 py-2 rounded-md border bg-background text-sm flex items-center border-input"
-                      >
-                        {form.wbColorName || (
-                          <span className="text-muted-foreground">Не выбран</span>
-                        )}
-                      </div>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setWbColorModalOpen(true)}
-                        className="shrink-0 border-[#CB11AB] text-[#CB11AB] hover:bg-[#CB11AB]/10"
-                      >
-                        Выбрать цвет
-                      </Button>
-                    </div>
-                    <p className="text-xs text-muted-foreground">Цвет из справочника WB (необязательно, но рекомендуется)</p>
                     {wbPreview && (
                       <div className="rounded-lg border border-[#CB11AB]/30 p-2 text-xs bg-[#CB11AB]/5 space-y-2 mt-2">
                         {wbPreview.error ? (
