@@ -491,7 +491,22 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
         await new Promise((r) => setTimeout(r, 300));
         wbCharcs = await this.getCharcsForSubject(canonical.wb_subject_id);
       }
-      wbProduct = this.convertToPlatform(canonical, barcode, wbCharcs);
+      const cardsArray = this.convertToPlatform(canonical, barcode, wbCharcs);
+      const cards = Array.isArray(cardsArray) ? cardsArray : [cardsArray];
+      // WB требует supplierVendorCode и brand на уровне карточки — дополняем если нет
+      for (const card of cards) {
+        const c = card as Record<string, unknown>;
+        const v0 = Array.isArray(c.variants) ? (c.variants as Record<string, unknown>[])[0] : undefined;
+        if (!c.supplierVendorCode) {
+          const vc = v0?.vendorCode;
+          c.supplierVendorCode = (typeof vc === 'string' ? vc.replace(/-1$/, '') : null) ?? canonical.vendor_code ?? canonical.canonical_sku;
+        }
+        if (!c.brand) {
+          c.brand = v0?.brand ?? canonical.brand_name ?? 'Ручная работа';
+        }
+      }
+      // WB Content API: пробуем массив (формат Habr) — он принимается чаще
+      wbProduct = cards;
       const { data } = await firstValueFrom(
         this.httpService.post(`${this.CONTENT_API}/content/v2/cards/upload`, wbProduct, {
           headers: { ...this.authHeader(), 'Content-Type': 'application/json' },
@@ -543,7 +558,20 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       }
 
       // 3. Формируем payload с штрих-кодом и корректными charcID
-      const wbProduct = this.convertToPlatform(canonical, barcode, wbCharcs);
+      const cardsArray = this.convertToPlatform(canonical, barcode, wbCharcs);
+      const cards = Array.isArray(cardsArray) ? cardsArray : [cardsArray];
+      for (const card of cards) {
+        const c = card as Record<string, unknown>;
+        const v0 = Array.isArray(c.variants) ? (c.variants as Record<string, unknown>[])[0] : undefined;
+        if (!c.supplierVendorCode) {
+          const vc = v0?.vendorCode;
+          c.supplierVendorCode = (typeof vc === 'string' ? vc.replace(/-1$/, '') : null) ?? canonical.vendor_code ?? canonical.canonical_sku;
+        }
+        if (!c.brand) {
+          c.brand = v0?.brand ?? canonical.brand_name ?? 'Ручная работа';
+        }
+      }
+      const wbProduct = cards;
 
       // Логируем полный запрос для отладки
       console.log('[WildberriesAdapter] uploadFromCanonical REQUEST:', JSON.stringify(wbProduct, null, 2));
@@ -565,6 +593,10 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       const nmId = firstCard ? Number(firstCard.nmID ?? firstCard.nmId) : undefined;
       if (!nmId) throw new Error('WB не вернул nmID созданной карточки');
       const imageUrls = canonical.images?.map((i) => i.url) ?? [];
+      // WB обрабатывает карточку асинхронно — ждём 3 сек перед загрузкой фото (docs/WB-MEDIA-PHOTOS.md)
+      if (imageUrls.length > 0) {
+        await new Promise((r) => setTimeout(r, 3000));
+      }
       await this.uploadImages(nmId, imageUrls);
       if (this.config.sellerId) {
         await this.setStock(nmId, canonical.stock_quantity);
@@ -620,30 +652,42 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
 
   /**
    * Загрузка фото на WB через POST /content/v3/media/save.
-   * WB не принимает URL при создании карточки — фото загружаются отдельно по nmID.
-   * Формат: { nmID, data: [{ url }] } или { nmID, media: [{ url }] }.
+   * Формат: { nmId, data: ["url1", "url2"] } — data это массив строк URL (не объектов!).
+   * Проверено curl-запросом 09.03.2026.
    */
   private async uploadImages(nmId: number, images: string[]): Promise<void> {
-    const urls = images.filter((u) => typeof u === 'string' && u.trim().startsWith('http'));
+    const urls = images.filter((u) => typeof u === 'string' && u.trim().startsWith('http')).map((u) => u.trim());
     if (urls.length === 0) return;
-    for (let i = 0; i < urls.length; i++) {
-      const url = urls[i].trim();
+    const maxRetries = 4;
+    const retryDelayMs = 3000;
+
+    // Загружаем все фото одним запросом (batch)
+    const body = { nmId, data: urls };
+    let lastErr: unknown;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        await new Promise((r) => setTimeout(r, 500)); // rate limit
-        const body = { nmID: nmId, data: [{ url }] };
         await firstValueFrom(
           this.httpService.post(`${this.CONTENT_API}/content/v3/media/save`, body, {
             headers: { ...this.authHeader(), 'Content-Type': 'application/json' },
-            timeout: 15000,
+            timeout: 30000,
           }),
         );
-        console.log(`[WildberriesAdapter] Фото ${i + 1}/${urls.length} загружено для nmId=${nmId}`);
+        console.log(`[WildberriesAdapter] Фото загружены для nmId=${nmId} (${urls.length} шт.)`);
+        return;
       } catch (err) {
+        lastErr = err;
         const axErr = err as { response?: { status?: number; data?: unknown } };
-        const wbData = axErr?.response?.data as Record<string, unknown> | undefined;
-        const msg = typeof wbData?.detail === 'string' ? wbData.detail : (err instanceof Error ? err.message : String(err));
-        console.warn(`[WildberriesAdapter] Ошибка загрузки фото для nmId=${nmId}: ${msg}. Попробуйте загрузить фото вручную в ЛК WB.`);
+        console.warn(`[WildberriesAdapter] media/save попытка ${attempt}/${maxRetries} failed: HTTP ${axErr?.response?.status}`, JSON.stringify(axErr?.response?.data ?? '').slice(0, 200));
+        if (attempt < maxRetries) await new Promise((r) => setTimeout(r, retryDelayMs));
       }
+    }
+
+    if (lastErr) {
+      const axErr = lastErr as { response?: { data?: unknown } };
+      const wbData = axErr?.response?.data as Record<string, unknown> | undefined;
+      const msg = typeof wbData?.errorText === 'string' ? wbData.errorText : (lastErr instanceof Error ? lastErr.message : String(lastErr));
+      console.warn(`[WildberriesAdapter] Ошибка загрузки фото для nmId=${nmId}: ${msg}. Попробуйте загрузить фото вручную в ЛК WB.`);
     }
   }
 
