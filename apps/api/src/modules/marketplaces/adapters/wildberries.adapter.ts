@@ -764,9 +764,10 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
         throw new Error(`WB не вернул nmID. Ответ: ${raw}`);
       }
       const imageUrls = canonical.images?.map((i) => i.url).filter((u) => typeof u === 'string' && u.trim().startsWith('http')) ?? [];
+      const vendorCode = canonical.vendor_code ?? canonical.canonical_sku;
       if (imageUrls.length > 0) {
         // WB создаёт карточку асинхронно — ждём готовности, затем загружаем фото
-        await this.waitForCardAndUploadImages(nmId, imageUrls);
+        await this.waitForCardAndUploadImages(nmId, imageUrls, vendorCode);
       } else {
         console.warn(`[WildberriesAdapter] Карточка nmID=${nmId} создана без фото: canonical.images пусто. Добавьте imageUrl или imageUrls в товар.`);
       }
@@ -832,7 +833,7 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
    * WB создаёт карточку асинхронно — нужна задержка перед media/save.
    * Пользователь видит лоудер до завершения загрузки фото.
    */
-  private async waitForCardAndUploadImages(nmId: number, imageUrls: string[]): Promise<void> {
+  private async waitForCardAndUploadImages(nmId: number, imageUrls: string[], vendorCode?: string): Promise<void> {
     const delayMs = 3000; // 3 сек — WB обрабатывает карточку
     const maxAttempts = 4; // 4 попытки: 0, 3, 6, 9 сек
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -840,7 +841,7 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
         await new Promise((r) => setTimeout(r, delayMs));
         console.warn(`[WildberriesAdapter] Повтор загрузки фото (nmID=${nmId}, попытка ${attempt + 1}/${maxAttempts})`);
       }
-      const ok = await this.uploadImages(nmId, imageUrls);
+      const ok = await this.uploadImages(nmId, imageUrls, vendorCode);
       if (ok > 0) return;
     }
     throw new Error(
@@ -851,51 +852,98 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
   /**
    * Загрузка фото на WB через POST /content/v3/media/save.
    * WB не принимает URL при создании карточки — фото загружаются отдельно по nmID.
-   * Формат: { nmID, data: [{ url }] } — см. docs/WB-MEDIA-PHOTOS.md
+   * Пробуем несколько форматов:
+   * 1) { nmId, data: [{ url, photoNumber }] } — новый формат (camelCase + photoNumber)
+   * 2) { vendorCode, data: [{ url, photoNumber }] } — альтернатива с артикулом
+   * 3) { nmID, data: [{ url }] } — старый формат
    * @returns количество успешно загруженных фото
    */
-  private async uploadImages(nmId: number, images: string[]): Promise<number> {
+  private async uploadImages(nmId: number, images: string[], vendorCode?: string): Promise<number> {
     const urls = images.filter((u) => typeof u === 'string' && u.trim().startsWith('http')).map((u) => u.trim());
     if (urls.length === 0) return 0;
-    console.log(`[WildberriesAdapter] Загрузка фото на WB nmID=${nmId}, ${urls.length} URL, первый: ${urls[0]?.slice(0, 80)}...`);
-    const data = urls.map((url) => ({ url }));
+    console.log(`[WildberriesAdapter] Загрузка фото на WB nmID=${nmId}, vendorCode=${vendorCode ?? 'N/A'}, ${urls.length} URL`);
+    console.log(`[WildberriesAdapter] URLs: ${JSON.stringify(urls)}`);
+
+    // Формат 1: nmId (camelCase) + photoNumber
+    const dataWithPhotoNumber = urls.map((url, idx) => ({ url, photoNumber: idx + 1 }));
+    const payloadFormat1 = { nmId, data: dataWithPhotoNumber };
+    console.log(`[WildberriesAdapter] Попытка формат 1 (nmId + photoNumber): ${JSON.stringify(payloadFormat1)}`);
     try {
-      await firstValueFrom(
-        this.httpService.post(`${this.CONTENT_API}/content/v3/media/save`, { nmID: nmId, data }, {
+      const { data: resp } = await firstValueFrom(
+        this.httpService.post(`${this.CONTENT_API}/content/v3/media/save`, payloadFormat1, {
           headers: { ...this.authHeader(), 'Content-Type': 'application/json' },
           timeout: 30000,
         }),
       );
-      console.log(`[WildberriesAdapter] Фото загружены на WB (nmID=${nmId}, ${urls.length} шт.)`);
+      console.log(`[WildberriesAdapter] Фото загружены формат 1 (nmId=${nmId}):`, JSON.stringify(resp).slice(0, 300));
       return urls.length;
-    } catch (batchErr) {
-      const axErr = batchErr as { response?: { status?: number; data?: unknown } };
-      const status = axErr?.response?.status;
-      const wbData = axErr?.response?.data;
-      console.warn(`[WildberriesAdapter] media/save batch failed (nmID=${nmId}): HTTP ${status}`, wbData ? JSON.stringify(wbData).slice(0, 400) : '');
-      // Fallback: по одному URL (rate limit 500ms)
-      let ok = 0;
-      for (let i = 0; i < urls.length; i++) {
-        const url = urls[i];
-        try {
-          await new Promise((r) => setTimeout(r, 500));
-          await firstValueFrom(
-            this.httpService.post(`${this.CONTENT_API}/content/v3/media/save`, { nmID: nmId, data: [{ url }] }, {
-              headers: { ...this.authHeader(), 'Content-Type': 'application/json' },
-              timeout: 15000,
-            }),
-          );
-          ok++;
-        } catch (e) {
-          const err = e as { response?: { status?: number; data?: unknown } };
-          console.warn(`[WildberriesAdapter] media/save URL failed (${url.slice(0, 60)}...):`, err?.response?.status, err?.response?.data);
-        }
-      }
-      if (ok > 0) {
-        console.log(`[WildberriesAdapter] Фото загружены на WB (nmID=${nmId}, ${ok}/${urls.length} шт.)`);
-      }
-      return ok;
+    } catch (err1) {
+      const ax1 = err1 as { response?: { status?: number; data?: unknown } };
+      console.warn(`[WildberriesAdapter] Формат 1 failed: HTTP ${ax1?.response?.status}`, JSON.stringify(ax1?.response?.data ?? '').slice(0, 300));
     }
+
+    // Формат 2: vendorCode + photoNumber (если есть артикул)
+    if (vendorCode) {
+      const payloadFormat2 = { vendorCode, data: dataWithPhotoNumber };
+      console.log(`[WildberriesAdapter] Попытка формат 2 (vendorCode + photoNumber): ${JSON.stringify(payloadFormat2)}`);
+      try {
+        const { data: resp } = await firstValueFrom(
+          this.httpService.post(`${this.CONTENT_API}/content/v3/media/save`, payloadFormat2, {
+            headers: { ...this.authHeader(), 'Content-Type': 'application/json' },
+            timeout: 30000,
+          }),
+        );
+        console.log(`[WildberriesAdapter] Фото загружены формат 2 (vendorCode=${vendorCode}):`, JSON.stringify(resp).slice(0, 300));
+        return urls.length;
+      } catch (err2) {
+        const ax2 = err2 as { response?: { status?: number; data?: unknown } };
+        console.warn(`[WildberriesAdapter] Формат 2 failed: HTTP ${ax2?.response?.status}`, JSON.stringify(ax2?.response?.data ?? '').slice(0, 300));
+      }
+    }
+
+    // Формат 3: nmID (PascalCase) без photoNumber — старый формат
+    const dataSimple = urls.map((url) => ({ url }));
+    const payloadFormat3 = { nmID: nmId, data: dataSimple };
+    console.log(`[WildberriesAdapter] Попытка формат 3 (nmID без photoNumber): ${JSON.stringify(payloadFormat3)}`);
+    try {
+      const { data: resp } = await firstValueFrom(
+        this.httpService.post(`${this.CONTENT_API}/content/v3/media/save`, payloadFormat3, {
+          headers: { ...this.authHeader(), 'Content-Type': 'application/json' },
+          timeout: 30000,
+        }),
+      );
+      console.log(`[WildberriesAdapter] Фото загружены формат 3 (nmID=${nmId}):`, JSON.stringify(resp).slice(0, 300));
+      return urls.length;
+    } catch (err3) {
+      const ax3 = err3 as { response?: { status?: number; data?: unknown } };
+      console.warn(`[WildberriesAdapter] Формат 3 failed: HTTP ${ax3?.response?.status}`, JSON.stringify(ax3?.response?.data ?? '').slice(0, 300));
+    }
+
+    // Формат 4: по одному URL с photoNumber
+    console.log(`[WildberriesAdapter] Попытка формат 4: по одному URL с photoNumber`);
+    let ok = 0;
+    for (let i = 0; i < urls.length; i++) {
+      const url = urls[i];
+      const singlePayload = { nmId, data: [{ url, photoNumber: i + 1 }] };
+      try {
+        await new Promise((r) => setTimeout(r, 500));
+        const { data: resp } = await firstValueFrom(
+          this.httpService.post(`${this.CONTENT_API}/content/v3/media/save`, singlePayload, {
+            headers: { ...this.authHeader(), 'Content-Type': 'application/json' },
+            timeout: 15000,
+          }),
+        );
+        console.log(`[WildberriesAdapter] Фото ${i + 1} загружено:`, JSON.stringify(resp).slice(0, 200));
+        ok++;
+      } catch (e) {
+        const err = e as { response?: { status?: number; data?: unknown } };
+        console.warn(`[WildberriesAdapter] Фото ${i + 1} failed (${url.slice(0, 50)}...): HTTP ${err?.response?.status}`, JSON.stringify(err?.response?.data ?? '').slice(0, 200));
+      }
+    }
+    if (ok > 0) {
+      console.log(`[WildberriesAdapter] Фото загружены на WB (nmID=${nmId}, ${ok}/${urls.length} шт.)`);
+    }
+    return ok;
   }
 
   private async setPrice(nmId: number, price: number): Promise<void> {
