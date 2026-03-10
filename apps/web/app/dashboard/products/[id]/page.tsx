@@ -7,6 +7,7 @@ import { ArrowLeft, Loader2, Package, Save, History } from "lucide-react"
 import Link from "next/link"
 import { OzonCategorySelectModal } from "@/components/ozon-category-select-modal"
 import { WbCategorySelectModal } from "@/components/wb-category-select-modal"
+import { CategoryAutocomplete, CategoryItem } from "@/components/category-autocomplete"
 import { WbColorSelectModal } from "@/components/wb-color-select-modal"
 
 interface Product {
@@ -123,6 +124,58 @@ export default function ProductCardPage() {
       .then((data) => setWbColors(Array.isArray(data) ? data : []))
       .catch(() => setWbColors([]))
   }, [token])
+
+  // Load WB categories for autocomplete
+  useEffect(() => {
+    if (!token || !isWbConnected) return
+    setLoadingWbCategories(true)
+    setWbCategoriesError(null)
+    fetch("/api/marketplaces/wb/categories", { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => r.json())
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setWbCategories(data.map((c: { subjectId: number; subjectName: string }) => ({
+            id: c.subjectId,
+            label: c.subjectName,
+            path: c.subjectName,
+          })))
+        }
+      })
+      .catch(() => setWbCategoriesError("Не удалось загрузить категории WB"))
+      .finally(() => setLoadingWbCategories(false))
+  }, [token, isWbConnected])
+
+  // Load Ozon categories for autocomplete
+  useEffect(() => {
+    if (!token || !isOzonConnected) return
+    setLoadingOzonCategories(true)
+    setOzonCategoriesError(null)
+    fetch("/api/marketplaces/ozon/categories", { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => r.json())
+      .then((data) => {
+        if (Array.isArray(data)) {
+          // Flatten tree to selectable items
+          const flatten = (nodes: Array<{ description_category_id?: number; category_name?: string; type_id?: number; type_name?: string; children?: unknown[] }>, path: string[] = [], parentCatId?: number): CategoryItem[] => {
+            const result: CategoryItem[] = []
+            for (const n of nodes) {
+              const name = n.category_name || n.type_name || ""
+              const currentPath = [...path, name].filter(Boolean)
+              const catId = n.description_category_id ?? parentCatId
+              if (n.type_id != null && n.type_id > 0 && catId) {
+                result.push({ id: catId, label: name, path: currentPath.join(" > "), typeId: n.type_id })
+              }
+              if (Array.isArray(n.children) && n.children.length > 0) {
+                result.push(...flatten(n.children as typeof nodes, currentPath, catId ?? parentCatId))
+              }
+            }
+            return result
+          }
+          setOzonCategories(flatten(data))
+        }
+      })
+      .catch(() => setOzonCategoriesError("Не удалось загрузить категории Ozon"))
+      .finally(() => setLoadingOzonCategories(false))
+  }, [token, isOzonConnected])
 
   useEffect(() => {
     if (!token || !id) return
@@ -276,6 +329,14 @@ export default function ProductCardPage() {
   const [ozonRefreshMapping, setOzonRefreshMapping] = useState<{ success?: boolean; product_id?: string; offer_id?: string; error?: string } | null>(null)
   const [loadingOzonRefreshMapping, setLoadingOzonRefreshMapping] = useState(false)
   const [deletingMappingId, setDeletingMappingId] = useState<string | null>(null)
+
+  // Category autocomplete state
+  const [wbCategories, setWbCategories] = useState<CategoryItem[]>([])
+  const [ozonCategories, setOzonCategories] = useState<CategoryItem[]>([])
+  const [loadingWbCategories, setLoadingWbCategories] = useState(false)
+  const [loadingOzonCategories, setLoadingOzonCategories] = useState(false)
+  const [wbCategoriesError, setWbCategoriesError] = useState<string | null>(null)
+  const [ozonCategoriesError, setOzonCategoriesError] = useState<string | null>(null)
 
   useEffect(() => {
     if (product && product.barcodeWb != null) setForm((f) => ({ ...f, barcodeWb: product.barcodeWb ?? "" }))
@@ -864,85 +925,86 @@ export default function ProductCardPage() {
             </div>
             {needsCategory && (
               <>
-                {isOzonConnected && (
-                  <div className="space-y-2">
-                    <Label>Категория Ozon {ozonMissingFields.includes("Категория") && "*"}</Label>
-                    <div className="flex gap-2">
-                      <div
-                        className={`flex-1 min-h-[40px] px-3 py-2 rounded-md border bg-background text-sm flex items-center ${
-                          ozonMissingFields.includes("Категория") ? "border-destructive" : "border-input"
-                        }`}
-                      >
-                        {form.ozonCategoryPath || (
-                          <span className="text-muted-foreground">Не выбрана</span>
-                        )}
-                      </div>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setOzonCategoryModalOpen(true)}
-                        className="shrink-0 border-[#005BFF] text-[#005BFF] hover:bg-[#005BFF]/10"
-                      >
-                        Выбрать категорию
-                      </Button>
-                    </div>
-                    <p className="text-xs text-muted-foreground">Ozon требует категорию третьего уровня.</p>
-                  </div>
-                )}
+                {/* Category selection - side by side */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {isOzonConnected && (
+                    <CategoryAutocomplete
+                      items={ozonCategories}
+                      value={form.ozonCategoryPath}
+                      onSelect={(item) => {
+                        setForm((f) => ({
+                          ...f,
+                          ozonCategoryId: String(item.id),
+                          ozonTypeId: String(item.typeId ?? ""),
+                          ozonCategoryPath: item.path || item.label,
+                        }))
+                      }}
+                      onClear={() => {
+                        setForm((f) => ({ ...f, ozonCategoryId: "", ozonTypeId: "", ozonCategoryPath: "" }))
+                      }}
+                      placeholder="Выберите категорию Ozon"
+                      accentColor="#005BFF"
+                      loading={loadingOzonCategories}
+                      error={ozonCategoriesError}
+                      label={`Категория Ozon ${ozonMissingFields.includes("Категория") ? "*" : ""}`}
+                      hint="Ozon требует категорию третьего уровня."
+                    />
+                  )}
+                  {isWbConnected && (
+                    <CategoryAutocomplete
+                      items={wbCategories}
+                      value={form.wbCategoryPath}
+                      onSelect={(item) => {
+                        setForm((f) => ({
+                          ...f,
+                          wbSubjectId: String(item.id),
+                          wbCategoryPath: item.label,
+                        }))
+                      }}
+                      onClear={() => {
+                        setForm((f) => ({ ...f, wbSubjectId: "", wbCategoryPath: "" }))
+                      }}
+                      placeholder="Выберите категорию WB"
+                      accentColor="#CB11AB"
+                      loading={loadingWbCategories}
+                      error={wbCategoriesError}
+                      label={`Категория WB ${wbMissingFields.includes("Категория WB") ? "*" : ""}`}
+                      hint="WB требует предмет (subject) для выгрузки."
+                    />
+                  )}
+                </div>
+                {/* WB Debug tools */}
                 {isWbConnected && (
                   <div className="space-y-2">
-                    <Label>Категория WB {wbMissingFields.includes("Категория WB") && "*"}</Label>
-                    <div className="flex gap-2">
-                      <div
-                        className={`flex-1 min-h-[40px] px-3 py-2 rounded-md border bg-background text-sm flex items-center ${
-                          wbMissingFields.includes("Категория WB") ? "border-destructive" : "border-input"
-                        }`}
-                      >
-                        {form.wbCategoryPath || (
-                          <span className="text-muted-foreground">Не выбрана</span>
-                        )}
+                    <details className="group">
+                      <summary className="cursor-pointer list-none inline-flex items-center h-8 px-2 text-xs text-muted-foreground hover:text-foreground rounded-md hover:bg-muted/50">
+                        <span className="select-none">Инструменты WB</span>
+                      </summary>
+                      <div className="flex flex-wrap gap-1.5 mt-1.5 pl-0">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={loadWbPreview}
+                          disabled={loadingWbPreview}
+                          className="shrink-0 h-8 px-2 text-xs touch-manipulation text-[#CB11AB]"
+                          title="Что уйдёт на WB, маппинг полей"
+                        >
+                          {loadingWbPreview ? <Loader2 className="h-4 w-4 animate-spin" /> : "Предпросмотр WB"}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={handleWbDiagnostic}
+                          disabled={loadingWbDiagnostic || !!exportLoadingMarketplace}
+                          className="shrink-0 h-8 px-2 text-xs touch-manipulation text-muted-foreground"
+                          title="Попытка выгрузки с полным ответом WB при ошибке"
+                        >
+                          {loadingWbDiagnostic ? <Loader2 className="h-4 w-4 animate-spin" /> : "Диагностика WB"}
+                        </Button>
                       </div>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setWbCategoryModalOpen(true)}
-                        className="shrink-0 border-[#CB11AB] text-[#CB11AB] hover:bg-[#CB11AB]/10"
-                      >
-                        Выбрать категорию
-                      </Button>
-                      <details className="group">
-                        <summary className="cursor-pointer list-none inline-flex items-center h-8 px-2 text-xs text-muted-foreground hover:text-foreground rounded-md hover:bg-muted/50 shrink-0">
-                          <span className="select-none">Ещё</span>
-                        </summary>
-                        <div className="flex flex-wrap gap-1.5 mt-1.5 pl-0">
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={loadWbPreview}
-                            disabled={loadingWbPreview}
-                            className="shrink-0 h-8 px-2 text-xs touch-manipulation text-[#CB11AB]"
-                            title="Что уйдёт на WB, маппинг полей"
-                          >
-                            {loadingWbPreview ? <Loader2 className="h-4 w-4 animate-spin" /> : "Предпросмотр WB"}
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={handleWbDiagnostic}
-                            disabled={loadingWbDiagnostic || !!exportLoadingMarketplace}
-                            className="shrink-0 h-8 px-2 text-xs touch-manipulation text-muted-foreground"
-                            title="Попытка выгрузки с полным ответом WB при ошибке"
-                          >
-                            {loadingWbDiagnostic ? <Loader2 className="h-4 w-4 animate-spin" /> : "Диагностика WB"}
-                          </Button>
-                        </div>
-                      </details>
-                    </div>
-                    <p className="text-xs text-muted-foreground">WB требует предмет (subject) для выгрузки. На WB передаётся «Ваша цена», не себестоимость.</p>
+                    </details>
                     {wbPreview && (
                       <div className="rounded-lg border border-[#CB11AB]/30 p-2 text-xs bg-[#CB11AB]/5 space-y-2 mt-2">
                         {wbPreview.error ? (
