@@ -208,8 +208,8 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
         const charc = wbCharcs!.find((c) => names.some((n) => c.name.toLowerCase() === n.toLowerCase()));
         if (charc) {
           const val = toValue(Array.isArray(value) ? value : value);
-          // WB: value как массив (некоторые API принимают string, но массив надёжнее)
-          characteristics.push({ id: charc.charcID, value: val });
+          // WB: для одиночного значения — строка (Habr), для нескольких — массив
+          characteristics.push({ id: charc.charcID, value: val.length === 1 ? val[0]! : val });
         }
       };
       addChar(['Наименование', 'наименование', 'Название', 'title'], title || 'Товар');
@@ -230,9 +230,9 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       }
     }
     if (characteristics.length === 0) {
-      characteristics.push({ id: 0, value: [title || 'Товар'] });
-      characteristics.push({ id: 3, value: [descriptionText || ''] });
-      if (canonical.color?.trim()) characteristics.push({ id: 1, value: [canonical.color.trim()] });
+      characteristics.push({ id: 0, value: title || 'Товар' });
+      characteristics.push({ id: 3, value: descriptionText || '' });
+      if (canonical.color?.trim()) characteristics.push({ id: 1, value: canonical.color.trim() });
     }
 
     const w = Math.round(((canonical.width_mm ?? 100) / 10) * 100) / 100;
@@ -595,10 +595,19 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
         const status = (uploadErr as { response?: { status?: number } })?.response?.status;
         if (status === 400) {
           const habrPayload = this.buildHabrFormatPayload(canonical, barcode, wbCharcs);
+          const habrToCards = (arr: unknown[]) => {
+            const cards: Record<string, unknown>[] = [];
+            for (const root of arr as Array<{ subjectID?: number; variants?: Record<string, unknown>[]; countryProduction?: string }>) {
+              for (const v of root.variants ?? []) {
+                cards.push({ subjectID: root.subjectID, countryProduction: root.countryProduction, ...v });
+              }
+            }
+            return { cards };
+          };
           const attempts: Array<{ payload: unknown; endpoint: string }> = [
-            { payload: habrPayload, endpoint: '/content/v2/cards/upload/add' },
-            { payload: { cards: habrPayload }, endpoint: '/content/v2/cards/upload/add' },
             { payload: habrPayload, endpoint: '/content/v2/cards/upload' },
+            { payload: habrToCards(habrPayload as unknown[]), endpoint: '/content/v2/cards/upload/add' },
+            { payload: habrPayload, endpoint: '/content/v2/cards/upload/add' },
           ];
           let lastErr: unknown;
           let lastPayload: unknown = habrPayload;
@@ -714,10 +723,21 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
         const status = (uploadErr as { response?: { status?: number } })?.response?.status;
         if (status === 400) {
           const habrPayload = this.buildHabrFormatPayload(canonical, barcode, wbCharcs);
+          // Преобразуем Habr-формат в cards: [{ subjectID, variants }] → { cards: [card] }
+          const habrToCards = (arr: unknown[]) => {
+            const cards: Record<string, unknown>[] = [];
+            for (const root of arr as Array<{ subjectID?: number; variants?: Record<string, unknown>[]; countryProduction?: string }>) {
+              for (const v of root.variants ?? []) {
+                cards.push({ subjectID: root.subjectID, countryProduction: root.countryProduction, ...v });
+              }
+            }
+            return { cards };
+          };
+          // Habr: POST /content/v2/cards/upload — массив [{ subjectID, variants }]
           const attempts: Array<{ payload: unknown; path: string }> = [
-            { payload: habrPayload, path: '/content/v2/cards/upload/add' },
-            { payload: { cards: habrPayload }, path: '/content/v2/cards/upload/add' },
             { payload: habrPayload, path: '/content/v2/cards/upload' },
+            { payload: habrToCards(habrPayload as unknown[]), path: '/content/v2/cards/upload/add' },
+            { payload: habrPayload, path: '/content/v2/cards/upload/add' },
           ];
           let lastErr: unknown = uploadErr;
           for (const { payload: p, path } of attempts) {
