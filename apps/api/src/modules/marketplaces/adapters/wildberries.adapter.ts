@@ -208,8 +208,8 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
         const charc = wbCharcs!.find((c) => names.some((n) => c.name.toLowerCase() === n.toLowerCase()));
         if (charc) {
           const val = toValue(Array.isArray(value) ? value : value);
-          // WB: для одиночного значения — строка (Habr), для нескольких — массив
-          characteristics.push({ id: charc.charcID, value: val.length === 1 ? val[0]! : val });
+          // WB: value всегда массив (работало в 1ad5b37)
+          characteristics.push({ id: charc.charcID, value: val });
         }
       };
       addChar(['Наименование', 'наименование', 'Название', 'title'], title || 'Товар');
@@ -225,14 +225,14 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
         const charc = wbCharcs.find((c) => c.name.toLowerCase() === a.name.toLowerCase());
         if (charc && a.value?.trim()) {
           const val = toValue(a.value);
-          characteristics.push({ id: charc.charcID, value: val.length === 1 ? val[0]! : val });
+          characteristics.push({ id: charc.charcID, value: val });
         }
       }
     }
     if (characteristics.length === 0) {
-      characteristics.push({ id: 0, value: title || 'Товар' });
-      characteristics.push({ id: 3, value: descriptionText || '' });
-      if (canonical.color?.trim()) characteristics.push({ id: 1, value: canonical.color.trim() });
+      characteristics.push({ id: 0, value: [title || 'Товар'] });
+      characteristics.push({ id: 3, value: [descriptionText || ''] });
+      if (canonical.color?.trim()) characteristics.push({ id: 1, value: [canonical.color.trim()] });
     }
 
     const w = Math.round(((canonical.width_mm ?? 100) / 10) * 100) / 100;
