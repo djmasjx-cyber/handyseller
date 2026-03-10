@@ -81,6 +81,17 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
     barcode?: string,
     wbCharcs?: Array<{ charcID: number; name: string; required?: boolean }>,
   ): PlatformProductPayload {
+    // Логируем входные данные для отладки
+    console.log('[WildberriesAdapter] convertToPlatform INPUT:', {
+      canonical_sku: canonical.canonical_sku,
+      title: canonical.title,
+      wb_subject_id: canonical.wb_subject_id,
+      vendor_code: canonical.vendor_code,
+      images_count: canonical.images?.length ?? 0,
+      barcode: barcode ?? 'не сгенерирован',
+      charcs_count: wbCharcs?.length ?? 0,
+    });
+
     const vendorCode = canonical.vendor_code ?? canonical.canonical_sku;
     const plainDesc = canonical.long_description_plain ?? canonical.short_description ?? '';
     const richDesc = canonical.long_description_html?.trim();
@@ -89,55 +100,57 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       : plainDesc;
     const title = (canonical.title || '').trim();
 
-    // WB ожидает value как массив: value: ["значение"] (см. ответ get cards/list)
-    const toValue = (v: string | string[]): string[] =>
+    // WB get cards/list возвращает value как массив — всегда массив для characteristics
+    const toValue = (v: string | string[] | undefined): string[] =>
       Array.isArray(v) ? v.filter(Boolean).map((s) => String(s).trim()) : (v?.trim() ? [v.trim()] : []);
+
     const characteristics: Array<{ id: number; name?: string; value: string[] }> = [];
 
     if (wbCharcs && wbCharcs.length > 0) {
+      // Используем charcID из API WB — обязательные поля зависят от категории
       const addChar = (names: string[], value: string | string[] | undefined) => {
-        if (value === undefined || value === null || (typeof value === 'string' && !value.trim())) return;
-        const charc = wbCharcs!.find((c) => names.some((n) => c.name.toLowerCase() === n.toLowerCase()));
-        if (charc) characteristics.push({ id: charc.charcID, name: charc.name, value: toValue(Array.isArray(value) ? value : value) });
+        const arr = toValue(value);
+        if (arr.length === 0) return;
+        const id = this.findCharcIdByNames(wbCharcs!, names);
+        if (id) characteristics.push({ id, value: arr });
       };
       addChar(['Наименование', 'наименование', 'Название', 'title'], title || 'Товар');
       addChar(['Описание', 'описание', 'description'], descriptionText?.trim() || 'Описание товара');
       addChar(['Цвет', 'цвет', 'color'], canonical.color?.trim());
       addChar(['Количество предметов в упаковке', 'количество'], canonical.items_per_pack != null && canonical.items_per_pack > 0 ? String(canonical.items_per_pack) : undefined);
       addChar(['Материал изделия', 'материал', 'material'], canonical.material?.trim());
-      // Вид творчества — multi-select, через запятую → массив
-      addChar(['Вид творчества', 'вид творчества', 'craft'], canonical.craft_type?.trim()
-        ? (canonical.craft_type.includes(',') ? canonical.craft_type.split(',').map((s) => s.trim()).filter(Boolean) : canonical.craft_type.trim())
-        : undefined);
+      addChar(['Вид творчества', 'вид творчества', 'craft'], canonical.craft_type?.trim());
       addChar(['Комплектация', 'комплектация'], canonical.package_contents?.trim());
       for (const a of canonical.attributes ?? []) {
-        const charc = wbCharcs.find((c) => c.name.toLowerCase() === a.name.toLowerCase());
-        if (charc && a.value?.trim()) characteristics.push({ id: charc.charcID, name: charc.name, value: toValue(a.value) });
+        const id = this.findCharcIdByNames(wbCharcs, [a.name]);
+        if (id && a.value?.trim()) characteristics.push({ id, value: toValue(a.value) });
       }
+      // Добавляем обязательные характеристики, которые не заполнены (дефолт для прохождения модерации)
       const addedIds = new Set(characteristics.map((c) => c.id));
-      // Добавляем только заполненные характеристики (пустые вызывают ошибку 400)
-      const validCharacteristics = characteristics.filter(c => {
-        return c.value && c.value.length > 0 && c.value[0]?.trim();
-      });
-      characteristics.length = 0;
-      characteristics.push(...validCharacteristics);
+      for (const c of wbCharcs) {
+        if (c.required && !addedIds.has(c.charcID)) {
+          characteristics.push({ id: c.charcID, value: ['Не указано'] });
+          addedIds.add(c.charcID);
+        }
+      }
     }
 
     if (characteristics.length === 0) {
-      characteristics.push({ id: 0, name: 'Наименование', value: [title || 'Товар'] });
-      characteristics.push({ id: 3, name: 'Описание', value: [descriptionText || ''] });
-      if (canonical.color?.trim()) characteristics.push({ id: 1, name: 'Цвет', value: [canonical.color.trim()] });
+      // Fallback: фиксированные ID (могут не подходить для всех категорий)
+      characteristics.push({ id: 0, name: 'Наименование', value: toValue(title || 'Товар') });
+      characteristics.push({ id: 3, name: 'Описание', value: toValue(descriptionText || '') });
+      if (canonical.color?.trim()) characteristics.push({ id: 1, name: 'Цвет', value: toValue(canonical.color) });
       if (canonical.items_per_pack != null && canonical.items_per_pack > 0) {
-        characteristics.push({ id: 4, name: 'Количество предметов в упаковке', value: [String(canonical.items_per_pack)] });
+        characteristics.push({ id: 4, name: 'Количество предметов в упаковке', value: toValue(String(canonical.items_per_pack)) });
       }
-      if (canonical.material?.trim()) characteristics.push({ id: 5, name: 'Материал изделия', value: [canonical.material.trim()] });
-      if (canonical.craft_type?.trim()) characteristics.push({ id: 6, name: 'Вид творчества', value: [canonical.craft_type.trim()] });
-      if (canonical.package_contents?.trim()) characteristics.push({ id: 7, name: 'Комплектация', value: [canonical.package_contents.trim()] });
+      if (canonical.material?.trim()) characteristics.push({ id: 5, name: 'Материал изделия', value: toValue(canonical.material) });
+      if (canonical.craft_type?.trim()) characteristics.push({ id: 6, name: 'Вид творчества', value: toValue(canonical.craft_type) });
+      if (canonical.package_contents?.trim()) characteristics.push({ id: 7, name: 'Комплектация', value: toValue(canonical.package_contents) });
       if (canonical.attributes?.length) {
         let nextId = 100;
         for (const a of canonical.attributes) {
           const skip = ['Артикул', 'Наименование', 'Описание', 'Цвет', 'Количество предметов в упаковке', 'Материал изделия', 'Вид творчества', 'Комплектация'];
-          if (!skip.includes(a.name) && a.value?.trim()) {
+          if (!skip.includes(a.name)) {
             characteristics.push({ id: nextId++, name: a.name, value: toValue(a.value) });
           }
         }
@@ -154,116 +167,50 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       throw new Error('WB: категория (subjectId) обязательна для создания карточки товара');
     }
 
-    // Формат WB API /content/v2/cards/upload — объект с полем cards
-    // https://dev.wildberries.ru/docs/openapi/work-with-products
-    const card: Record<string, unknown> = {
-      vendorCode,
-      subjectID: canonical.wb_subject_id,
-      brand: canonical.brand_name ?? 'Ручная работа',
-      title: (title || 'Товар').trim().slice(0, 255),
-      description: (descriptionText || 'Описание товара').trim().slice(0, 500),
-      countryProduction: this.normalizeCountry(canonical.country_of_origin),
-      characteristics,
-      dimensions: { width: w, height: h, length: l, weightBrutto },
-    };
-    
-    if (barcode?.trim()) {
-      // Безразмерный товар (Бусины и т.п.): НЕ указываем techSize и wbSize!
-      // WB: "Недопустимо указывать Размер и Рос.Размер для безразмерного товара"
-      // price не передается в sizes при создании (устанавливается отдельно)
-      card.sizes = [{ skus: [barcode.trim()] }];
-    }
-    // WB API не принимает фото при создании карточки — только через media/save после создания
-
-    const payload = {
-      cards: [card],
-    };
-
-    return payload as unknown as PlatformProductPayload;
-  }
-
-  /**
-   * Формат Habr для WB upload: массив [{ subjectID, variants }].
-   * https://habr.com/ru/articles/897548/
-   * Для безразмерного товара — sizes без techSize/wbSize.
-   */
-  private buildHabrFormatPayload(
-    canonical: CanonicalProduct,
-    barcode: string,
-    wbCharcs?: Array<{ charcID: number; name: string; required?: boolean }>,
-  ): unknown[] {
-    const toValue = (v: string | string[]): string[] =>
-      Array.isArray(v) ? v.filter(Boolean).map((s) => String(s).trim()) : (v?.trim() ? [v.trim()] : []);
-    const plainDesc = canonical.long_description_plain ?? canonical.short_description ?? '';
-    const richDesc = canonical.long_description_html?.trim();
-    const descriptionText = richDesc
-      ? (plainDesc ? `${plainDesc}\n\n${this.stripHtml(richDesc)}` : this.stripHtml(richDesc))
-      : plainDesc;
-    const title = (canonical.title || '').trim();
-    const characteristics: Array<{ id: number; value: string | string[] }> = [];
-
-    if (wbCharcs && wbCharcs.length > 0) {
-      const addChar = (names: string[], value: string | string[] | undefined) => {
-        if (value === undefined || value === null || (typeof value === 'string' && !value.trim())) return;
-        const charc = wbCharcs!.find((c) => names.some((n) => c.name.toLowerCase() === n.toLowerCase()));
-        if (charc) {
-          const val = toValue(Array.isArray(value) ? value : value);
-          // WB: value всегда массив (работало в 1ad5b37)
-          characteristics.push({ id: charc.charcID, value: val });
-        }
-      };
-      addChar(['Наименование', 'наименование', 'Название', 'title'], title || 'Товар');
-      addChar(['Описание', 'описание', 'description'], descriptionText?.trim() || 'Описание товара');
-      addChar(['Цвет', 'цвет', 'color'], canonical.color?.trim());
-      addChar(['Количество предметов в упаковке', 'количество'], canonical.items_per_pack != null && canonical.items_per_pack > 0 ? String(canonical.items_per_pack) : undefined);
-      addChar(['Материал изделия', 'материал', 'material'], canonical.material?.trim());
-      addChar(['Вид творчества', 'вид творчества', 'craft'], canonical.craft_type?.trim()
-        ? (canonical.craft_type.includes(',') ? canonical.craft_type.split(',').map((s) => s.trim()).filter(Boolean) : canonical.craft_type.trim())
-        : undefined);
-      addChar(['Комплектация', 'комплектация'], canonical.package_contents?.trim());
-      for (const a of canonical.attributes ?? []) {
-        const charc = wbCharcs.find((c) => c.name.toLowerCase() === a.name.toLowerCase());
-        if (charc && a.value?.trim()) {
-          const val = toValue(a.value);
-          characteristics.push({ id: charc.charcID, value: val });
-        }
-      }
-    }
-    if (characteristics.length === 0) {
-      characteristics.push({ id: 0, value: [title || 'Товар'] });
-      characteristics.push({ id: 3, value: [descriptionText || ''] });
-      if (canonical.color?.trim()) characteristics.push({ id: 1, value: [canonical.color.trim()] });
-    }
-
-    const w = Math.round(((canonical.width_mm ?? 100) / 10) * 100) / 100;
-    const h = Math.round(((canonical.height_mm ?? 100) / 10) * 100) / 100;
-    const l = Math.round(((canonical.length_mm ?? 100) / 10) * 100) / 100;
-    const weightBrutto = Math.round(((canonical.weight_grams ?? 100) / 1000) * 100) / 100;
-
-    // WB: price устанавливается отдельно через Prices API после создания карточки
-    const sizes = barcode?.trim()
-      ? [{ skus: [barcode.trim()] } as Record<string, unknown>]
-      : [];
-
     const variant: Record<string, unknown> = {
-      vendorCode: canonical.vendor_code ?? canonical.canonical_sku,
-      title: (title || 'Товар').trim().slice(0, 255),
-      description: (descriptionText || 'Описание товара').trim().slice(0, 500),
+      vendorCode: `${vendorCode}-1`,
+      title: title || 'Товар',
+      description: descriptionText?.trim() || 'Описание товара',
       brand: canonical.brand_name ?? 'Ручная работа',
+      dimensions: { length: l, width: w, height: h, weightBrutto },
       characteristics,
-      sizes,
-      dimensions: { width: w, height: h, length: l, weightBrutto },
     };
-    // WB API не принимает фото при создании — только через media/save после создания
 
-    const root: Record<string, unknown> = {
+    // Штрих-код и sizes — WB требует sizes[].skus для идентификации размера
+    if (barcode?.trim()) {
+      variant.barcode = barcode.trim();
+      const priceRub = Math.round(canonical.price ?? 1);
+      // WB: для безразмерного товара не указывать techSize/wbSize — иначе «Недопустимо указывать Размер и Рос.Размер»
+      variant.sizes = [
+        {
+          price: priceRub,
+          skus: [barcode.trim()],
+        },
+      ];
+    }
+
+    // Формат Habr/WBSeller: subjectID + variants (без nomenclature, goods)
+    const card: Record<string, unknown> = {
       subjectID: canonical.wb_subject_id,
+      supplierVendorCode: vendorCode,
+      countryProduction: this.normalizeCountry(canonical.country_of_origin),
+      brand: canonical.brand_name ?? 'Ручная работа',
       variants: [variant],
     };
-    const country = this.normalizeCountry(canonical.country_of_origin);
-    if (country) root.countryProduction = country;
 
-    return [root];
+    // Фото НЕ передаём в cards/upload — WB не принимает addin при создании.
+    // Загрузка фото отдельно через POST /content/v3/media/save после создания карточки (uploadImages).
+
+    if (canonical.seo_title || canonical.seo_description || canonical.seo_keywords) {
+      card.seoText = {
+        title: canonical.seo_title ?? canonical.title,
+        description: canonical.seo_description ?? '',
+        keywords: canonical.seo_keywords ?? '',
+      };
+    }
+    // WB Content API: принимает и { cards: [...] }, и массив [card] в корне.
+    // Пробуем массив — Habr и WBSeller используют этот формат.
+    return [card] as unknown as PlatformProductPayload;
   }
 
   /**
@@ -392,72 +339,35 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
   }
 
   /**
-   * Простой хеш строки в число (для генерации id из name)
-   */
-  private hashString(str: string): number {
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-      const char = str.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash; // Convert to 32bit integer
-    }
-    return Math.abs(hash) || 0;
-  }
-
-  /**
    * Получить справочник цветов WB.
    * GET /content/v2/directory/colors — требуется авторизация.
    * @param token — токен WB (опционально, иначе берётся из config)
    */
   async getColors(token?: string): Promise<Array<{ id: number; name: string }>> {
     try {
-      console.log('[WildberriesAdapter] getColors: запрос к /content/v2/directory/colors');
       const { data } = await firstValueFrom(
         this.httpService.get<unknown>(
           `${this.CONTENT_API}/content/v2/directory/colors`,
           { headers: this.authHeader(token), timeout: 10000 },
         ),
       );
-      console.log('[WildberriesAdapter] getColors: ответ WB:', JSON.stringify(data).slice(0, 500));
-      
-      // WB API может вернуть разные форматы
-      let items: unknown[] = [];
-      
-      if (Array.isArray(data)) {
-        items = data;
-      } else if (data && typeof data === 'object') {
-        const obj = data as Record<string, unknown>;
-        // Пробуем разные поля
-        if (Array.isArray(obj.data)) items = obj.data;
-        else if (Array.isArray(obj.result)) items = obj.result;
-        else if (Array.isArray(obj.items)) items = obj.items;
-        else if (Array.isArray(obj.colors)) items = obj.colors;
-        else if (Array.isArray(obj.list)) items = obj.list;
-        // Если ничего не нашли — попробуем весь ответ как есть
-        else {
-          console.log('[WildberriesAdapter] getColors: неизвестная структура ответа, ключи:', Object.keys(obj));
-        }
-      }
-      
-      console.log(`[WildberriesAdapter] getColors: найдено ${items.length} элементов`);
-      
-      const result = items
-        .filter((x): x is Record<string, unknown> => !!x && typeof x === 'object')
-        .map((x, index) => ({
-          // WB API возвращает цвета без id, используем name как id (хеш) или индекс
-          id: Number(x.id ?? x.colorId ?? x.color_id ?? x.colorID ?? this.hashString(String(x.name)) ?? index + 1),
-          name: String(x.name ?? x.colorName ?? x.color_name ?? x.color ?? x.title ?? '').trim(),
+      const raw = Array.isArray(data) ? data
+        : (data && typeof data === 'object')
+          ? (data as Record<string, unknown>).data ?? (data as Record<string, unknown>).result ?? (data as Record<string, unknown>).items ?? null
+          : null;
+      const items = Array.isArray(raw) ? raw : [];
+      return items
+        .filter((x): x is Record<string, unknown> => x && typeof x === 'object')
+        .map((x) => ({
+          id: Number(x.id ?? x.colorId ?? x.color_id ?? 0),
+          name: String(x.name ?? x.colorName ?? x.color_name ?? '').trim(),
         }))
-        .filter((x) => x.name);
-      
-      console.log(`[WildberriesAdapter] getColors: после фильтрации ${result.length} цветов`);
-      return result;
+        .filter((x) => x.id > 0 && x.name);
     } catch (err) {
       this.logError(err as Error, 'getColors');
       const msg = err instanceof Error ? err.message : String(err);
       const axErr = err as { response?: { status?: number; data?: { detail?: string } } };
       const wbMsg = axErr?.response?.data?.detail ?? axErr?.response?.status;
-      console.error('[WildberriesAdapter] getColors: ошибка:', wbMsg || msg);
       throw new Error(wbMsg ? `Ошибка WB API: ${wbMsg}` : `Не удалось загрузить цвета. ${msg}`);
     }
   }
@@ -532,7 +442,7 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       long_description_html: product.richContent,
       wb_subject_id: product.wbSubjectId,
       attributes: undefined,
-      images: (product.images ?? []).filter((u) => typeof u === 'string' && u.trim().startsWith('http')).map((url) => ({ url: url.trim() })),
+      images: product.images.map((url) => ({ url })),
       price: product.price ?? 1,
       stock_quantity: product.stock,
     };
@@ -582,104 +492,32 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
         wbCharcs = await this.getCharcsForSubject(canonical.wb_subject_id);
       }
       wbProduct = this.convertToPlatform(canonical, barcode, wbCharcs);
-      // Используем upload/add — тот же endpoint, что и production (upload для новых карточек).
-      let data: unknown;
-      try {
-        const res = await firstValueFrom(
-          this.httpService.post(`${this.CONTENT_API}/content/v2/cards/upload/add`, wbProduct, {
-            headers: { ...this.authHeader(), 'Content-Type': 'application/json' },
-          }),
-        );
-        data = res.data;
-      } catch (uploadErr) {
-        const status = (uploadErr as { response?: { status?: number } })?.response?.status;
-        if (status === 400) {
-          const habrPayload = this.buildHabrFormatPayload(canonical, barcode, wbCharcs);
-          const habrToCards = (arr: unknown[]) => {
-            const cards: Record<string, unknown>[] = [];
-            for (const root of arr as Array<{ subjectID?: number; variants?: Record<string, unknown>[]; countryProduction?: string }>) {
-              for (const v of root.variants ?? []) {
-                cards.push({ subjectID: root.subjectID, countryProduction: root.countryProduction, ...v });
-              }
-            }
-            return { cards };
-          };
-          const attempts: Array<{ payload: unknown; endpoint: string }> = [
-            { payload: habrPayload, endpoint: '/content/v2/cards/upload' },
-            { payload: habrToCards(habrPayload as unknown[]), endpoint: '/content/v2/cards/upload/add' },
-            { payload: habrPayload, endpoint: '/content/v2/cards/upload/add' },
-          ];
-          let lastErr: unknown;
-          let lastPayload: unknown = habrPayload;
-          for (const { payload: p, endpoint } of attempts) {
-            try {
-              console.log('[WildberriesAdapter] tryUpload: пробуем', endpoint, typeof p === 'object' && p && 'cards' in (p as object) ? '(cards wrapper)' : '');
-              const res = await firstValueFrom(
-                this.httpService.post(`${this.CONTENT_API}${endpoint}`, p, {
-                  headers: { ...this.authHeader(), 'Content-Type': 'application/json' },
-                }),
-              );
-              data = res.data;
-              lastErr = null;
-              break;
-            } catch (e) {
-              lastErr = e;
-              lastPayload = p;
-            }
-          }
-          if (lastErr) {
-            const habrData = (lastErr as { response?: { data?: unknown } })?.response?.data;
-            let errMsg = String((habrData as { errorText?: string })?.errorText ?? (lastErr instanceof Error ? lastErr.message : 'Ошибка WB'));
-            const lower = errMsg.toLowerCase();
-            if (lower.includes('vendor code') && lower.includes('used in other cards')) {
-              const vc = canonical.vendor_code ?? canonical.canonical_sku;
-              errMsg = `Артикул «${vc}» уже используется в другой карточке WB. Измените артикул товара или удалите дубликат в ЛК WB (Каталог → Спецификации).`;
-            }
-            return { success: false, error: errMsg, wbRequest: lastPayload, wbResponse: habrData };
-          }
-        } else {
-          throw uploadErr;
-        }
-      }
-      const resp = data as Record<string, unknown> | undefined;
-      if (resp && resp.error === true) {
-        let errText = String(resp.errorText ?? resp.message ?? resp.detail ?? 'Неизвестная ошибка WB');
-        const lower = errText.toLowerCase();
-        if (lower.includes('vendor code') && lower.includes('used in other cards')) {
-          const vc = canonical.vendor_code ?? canonical.canonical_sku;
-          errText = `Артикул «${vc}» уже используется в другой карточке WB. Измените артикул товара или удалите дубликат в ЛК WB (Каталог → Спецификации).`;
-        }
-        return { success: false, error: errText, wbRequest: wbProduct, wbResponse: data };
-      }
-      let nmId = this.extractNmIdFromUploadResponse(data);
-      if (!nmId) {
-        nmId = await this.findNmIdByVendorCode(canonical.vendor_code ?? canonical.canonical_sku);
-      }
+      const { data } = await firstValueFrom(
+        this.httpService.post(`${this.CONTENT_API}/content/v2/cards/upload`, wbProduct, {
+          headers: { ...this.authHeader(), 'Content-Type': 'application/json' },
+        }),
+      );
+      const first = Array.isArray(data) ? data[0] : data?.cards?.[0];
+      const nmId = first?.nmID ?? first?.nmId ?? data?.nmID ?? data?.nmId;
       return { success: true, nmId: nmId ? String(nmId) : undefined, wbRequest: wbProduct, wbResponse: data };
     } catch (error) {
       const axErr = error as { response?: { status?: number; data?: unknown } };
       const wbData = axErr?.response?.data;
       let msg = error instanceof Error ? error.message : String(error);
-      const obj = wbData && typeof wbData === 'object' ? (wbData as Record<string, unknown>) : null;
-      const errText = obj ? String(obj.errorText ?? obj.message ?? obj.detail ?? '').toLowerCase() : '';
-      if (errText.includes('vendor code') && errText.includes('used in other cards')) {
-        const vc = canonical.vendor_code ?? canonical.canonical_sku;
-        msg = `Артикул «${vc}» уже используется в другой карточке WB. Измените артикул товара или удалите дубликат в ЛК WB (Каталог → Спецификации).`;
-      } else {
-        const parts: string[] = [];
-        if (obj) {
-          if (typeof obj.detail === 'string') parts.push(obj.detail);
-          if (typeof obj.message === 'string') parts.push(obj.message);
-          const errs = obj.errors ?? obj.Errors ?? obj.error;
-          if (Array.isArray(errs)) {
-            for (const e of errs) {
-              const s = typeof e === 'string' ? e : (e && typeof e === 'object' && 'message' in e ? (e as { message?: string }).message : null);
-              if (s?.trim()) parts.push(s.trim());
-            }
+      const parts: string[] = [];
+      if (wbData && typeof wbData === 'object') {
+        const obj = wbData as Record<string, unknown>;
+        if (typeof obj.detail === 'string') parts.push(obj.detail);
+        if (typeof obj.message === 'string') parts.push(obj.message);
+        const errs = obj.errors ?? obj.Errors ?? obj.error;
+        if (Array.isArray(errs)) {
+          for (const e of errs) {
+            const s = typeof e === 'string' ? e : (e && typeof e === 'object' && 'message' in e ? (e as { message?: string }).message : null);
+            if (s?.trim()) parts.push(s.trim());
           }
         }
-        if (parts.length > 0) msg = parts.join('. ');
       }
+      if (parts.length > 0) msg = parts.join('. ');
       return { success: false, error: msg, wbRequest: wbProduct, wbResponse: wbData };
     }
   }
@@ -707,90 +545,27 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       // 3. Формируем payload с штрих-кодом и корректными charcID
       const wbProduct = this.convertToPlatform(canonical, barcode, wbCharcs);
 
-      // 3. Выгружаем карточку (upload/add для новых карточек)
-      let data: unknown;
-      try {
-        const res = await firstValueFrom(
-          this.httpService.post(`${this.CONTENT_API}/content/v2/cards/upload/add`, wbProduct, {
-            headers: {
-              ...this.authHeader(),
-              'Content-Type': 'application/json; charset=utf-8',
-            },
-          }),
-        );
-        data = res.data;
-      } catch (uploadErr) {
-        const status = (uploadErr as { response?: { status?: number } })?.response?.status;
-        if (status === 400) {
-          const habrPayload = this.buildHabrFormatPayload(canonical, barcode, wbCharcs);
-          // Преобразуем Habr-формат в cards: [{ subjectID, variants }] → { cards: [card] }
-          const habrToCards = (arr: unknown[]) => {
-            const cards: Record<string, unknown>[] = [];
-            for (const root of arr as Array<{ subjectID?: number; variants?: Record<string, unknown>[]; countryProduction?: string }>) {
-              for (const v of root.variants ?? []) {
-                cards.push({ subjectID: root.subjectID, countryProduction: root.countryProduction, ...v });
-              }
-            }
-            return { cards };
-          };
-          // Habr: POST /content/v2/cards/upload — массив [{ subjectID, variants }]
-          const attempts: Array<{ payload: unknown; path: string }> = [
-            { payload: habrPayload, path: '/content/v2/cards/upload' },
-            { payload: habrToCards(habrPayload as unknown[]), path: '/content/v2/cards/upload/add' },
-            { payload: habrPayload, path: '/content/v2/cards/upload/add' },
-          ];
-          let lastErr: unknown = uploadErr;
-          for (const { payload: p, path } of attempts) {
-            try {
-              const res = await firstValueFrom(
-                this.httpService.post(`${this.CONTENT_API}${path}`, p, {
-                  headers: {
-                    ...this.authHeader(),
-                    'Content-Type': 'application/json; charset=utf-8',
-                  },
-                }),
-              );
-              data = res.data;
-              lastErr = null;
-              break;
-            } catch (e) {
-              lastErr = e;
-            }
-          }
-          if (lastErr) throw lastErr;
-        } else {
-          throw uploadErr;
-        }
-      }
+      // Логируем полный запрос для отладки
+      console.log('[WildberriesAdapter] uploadFromCanonical REQUEST:', JSON.stringify(wbProduct, null, 2));
 
-      // WB может вернуть 200 с error: true в теле — карточка не создана
-      const resp = data as Record<string, unknown> | undefined;
-      if (resp && resp.error === true) {
-        let errText = String(resp.errorText ?? resp.message ?? resp.detail ?? 'Неизвестная ошибка WB');
-        const lower = errText.toLowerCase();
-        if (lower.includes('vendor code') && lower.includes('used in other cards')) {
-          const vc = canonical.vendor_code ?? canonical.canonical_sku;
-          throw new Error(`Артикул «${vc}» уже используется в другой карточке WB. Измените артикул товара или удалите дубликат в ЛК WB (Каталог → Спецификации).`);
-        }
-        throw new Error(`WB отклонил карточку: ${errText}`);
-      }
+      // 3. Выгружаем карточку
+      const { data } = await firstValueFrom(
+        this.httpService.post(`${this.CONTENT_API}/content/v2/cards/upload`, wbProduct, {
+          headers: {
+            ...this.authHeader(),
+            'Content-Type': 'application/json',
+          },
+        }),
+      );
 
-      let nmId = this.extractNmIdFromUploadResponse(data);
-      if (!nmId) {
-        nmId = await this.findNmIdByVendorCode(canonical.vendor_code ?? canonical.canonical_sku);
-      }
-      if (!nmId) {
-        const raw = JSON.stringify(data).slice(0, 500);
-        throw new Error(`WB не вернул nmID. Ответ: ${raw}`);
-      }
-      const imageUrls = canonical.images?.map((i) => i.url).filter((u) => typeof u === 'string' && u.trim().startsWith('http')) ?? [];
-      const vendorCode = canonical.vendor_code ?? canonical.canonical_sku;
-      if (imageUrls.length > 0) {
-        // WB создаёт карточку асинхронно — ждём готовности, затем загружаем фото
-        await this.waitForCardAndUploadImages(nmId, imageUrls, vendorCode);
-      } else {
-        console.warn(`[WildberriesAdapter] Карточка nmID=${nmId} создана без фото: canonical.images пусто. Добавьте imageUrl или imageUrls в товар.`);
-      }
+      // Логируем ответ
+      console.log('[WildberriesAdapter] uploadFromCanonical RESPONSE:', JSON.stringify(data, null, 2));
+
+      const firstCard = Array.isArray(data) ? data[0] : data?.cards?.[0];
+      const nmId = firstCard ? Number(firstCard.nmID ?? firstCard.nmId) : undefined;
+      if (!nmId) throw new Error('WB не вернул nmID созданной карточки');
+      const imageUrls = canonical.images?.map((i) => i.url) ?? [];
+      await this.uploadImages(nmId, imageUrls);
       if (this.config.sellerId) {
         await this.setStock(nmId, canonical.stock_quantity);
       }
@@ -829,19 +604,14 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
         }
         if (parts.length > 0) msg = [...new Set(parts)].join('. ');
         if (status === 400) {
-          const errText = String(wbData.errorText ?? wbData.message ?? '').toLowerCase();
-          if (errText.includes('vendor code') && errText.includes('used in other cards')) {
-            const vc = canonical.vendor_code ?? canonical.canonical_sku;
-            msg = `Артикул «${vc}» уже используется в другой карточке WB. Измените артикул товара или удалите дубликат в ЛК WB (Каталог → Спецификации).`;
-          } else {
-            const rawJson = JSON.stringify(wbData, null, 2);
-            console.warn('[WildberriesAdapter] uploadProduct 400:', rawJson);
-            if (!msg || msg.includes('status code') || msg.length < 20) {
-              msg = parts.length > 0 ? msg : 'HTTP 400 — неверный формат. Выберите категорию WB, добавьте фото и заполните обязательные поля (название, артикул, габариты, вес).';
-            }
-            const rawPreview = rawJson.length > 800 ? rawJson.slice(0, 800) + '...' : rawJson;
-            msg += ` [Ответ WB: ${rawPreview}]`;
+          const rawJson = JSON.stringify(wbData, null, 2);
+          console.warn('[WildberriesAdapter] uploadProduct 400:', rawJson);
+          if (!msg || msg.includes('status code') || msg.length < 20) {
+            msg = parts.length > 0 ? msg : 'HTTP 400 — неверный формат. Выберите категорию WB, добавьте фото и заполните обязательные поля (название, артикул, габариты, вес).';
           }
+          // Добавляем сырой ответ WB для диагностики (первые 800 символов)
+          const rawPreview = rawJson.length > 800 ? rawJson.slice(0, 800) + '...' : rawJson;
+          msg += ` [Ответ WB: ${rawPreview}]`;
         }
       }
       throw new Error(`Ошибка выгрузки товара на Wildberries: ${msg}`);
@@ -849,121 +619,32 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
   }
 
   /**
-   * Ожидание готовности карточки WB и загрузка фото.
-   * WB создаёт карточку асинхронно — нужна задержка перед media/save.
-   * Пользователь видит лоудер до завершения загрузки фото.
-   */
-  private async waitForCardAndUploadImages(nmId: number, imageUrls: string[], vendorCode?: string): Promise<void> {
-    const delayMs = 3000; // 3 сек — WB обрабатывает карточку
-    const maxAttempts = 4; // 4 попытки: 0, 3, 6, 9 сек
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      if (attempt > 0) {
-        await new Promise((r) => setTimeout(r, delayMs));
-        console.warn(`[WildberriesAdapter] Повтор загрузки фото (nmID=${nmId}, попытка ${attempt + 1}/${maxAttempts})`);
-      }
-      const ok = await this.uploadImages(nmId, imageUrls, vendorCode);
-      if (ok > 0) return;
-    }
-    throw new Error(
-      `Карточка создана на WB, но не удалось загрузить фото. Убедитесь, что URL фото публичный (https://...) и доступен с внешних серверов. WB скачивает изображение по ссылке.`,
-    );
-  }
-
-  /**
    * Загрузка фото на WB через POST /content/v3/media/save.
    * WB не принимает URL при создании карточки — фото загружаются отдельно по nmID.
-   * Пробуем несколько форматов:
-   * 1) { nmId, data: [{ url, photoNumber }] } — новый формат (camelCase + photoNumber)
-   * 2) { vendorCode, data: [{ url, photoNumber }] } — альтернатива с артикулом
-   * 3) { nmID, data: [{ url }] } — старый формат
-   * @returns количество успешно загруженных фото
+   * Формат: { nmID, data: [{ url }] } или { nmID, media: [{ url }] }.
    */
-  private async uploadImages(nmId: number, images: string[], vendorCode?: string): Promise<number> {
-    const urls = images.filter((u) => typeof u === 'string' && u.trim().startsWith('http')).map((u) => u.trim());
-    if (urls.length === 0) return 0;
-    console.log(`[WildberriesAdapter] Загрузка фото на WB nmID=${nmId}, vendorCode=${vendorCode ?? 'N/A'}, ${urls.length} URL`);
-    console.log(`[WildberriesAdapter] URLs: ${JSON.stringify(urls)}`);
-
-    // Формат 1: nmId (camelCase) + photoNumber
-    const dataWithPhotoNumber = urls.map((url, idx) => ({ url, photoNumber: idx + 1 }));
-    const payloadFormat1 = { nmId, data: dataWithPhotoNumber };
-    console.log(`[WildberriesAdapter] Попытка формат 1 (nmId + photoNumber): ${JSON.stringify(payloadFormat1)}`);
-    try {
-      const { data: resp } = await firstValueFrom(
-        this.httpService.post(`${this.CONTENT_API}/content/v3/media/save`, payloadFormat1, {
-          headers: { ...this.authHeader(), 'Content-Type': 'application/json' },
-          timeout: 30000,
-        }),
-      );
-      console.log(`[WildberriesAdapter] Фото загружены формат 1 (nmId=${nmId}):`, JSON.stringify(resp).slice(0, 300));
-      return urls.length;
-    } catch (err1) {
-      const ax1 = err1 as { response?: { status?: number; data?: unknown } };
-      console.warn(`[WildberriesAdapter] Формат 1 failed: HTTP ${ax1?.response?.status}`, JSON.stringify(ax1?.response?.data ?? '').slice(0, 300));
-    }
-
-    // Формат 2: vendorCode + photoNumber (если есть артикул)
-    if (vendorCode) {
-      const payloadFormat2 = { vendorCode, data: dataWithPhotoNumber };
-      console.log(`[WildberriesAdapter] Попытка формат 2 (vendorCode + photoNumber): ${JSON.stringify(payloadFormat2)}`);
-      try {
-        const { data: resp } = await firstValueFrom(
-          this.httpService.post(`${this.CONTENT_API}/content/v3/media/save`, payloadFormat2, {
-            headers: { ...this.authHeader(), 'Content-Type': 'application/json' },
-            timeout: 30000,
-          }),
-        );
-        console.log(`[WildberriesAdapter] Фото загружены формат 2 (vendorCode=${vendorCode}):`, JSON.stringify(resp).slice(0, 300));
-        return urls.length;
-      } catch (err2) {
-        const ax2 = err2 as { response?: { status?: number; data?: unknown } };
-        console.warn(`[WildberriesAdapter] Формат 2 failed: HTTP ${ax2?.response?.status}`, JSON.stringify(ax2?.response?.data ?? '').slice(0, 300));
-      }
-    }
-
-    // Формат 3: nmID (PascalCase) без photoNumber — старый формат
-    const dataSimple = urls.map((url) => ({ url }));
-    const payloadFormat3 = { nmID: nmId, data: dataSimple };
-    console.log(`[WildberriesAdapter] Попытка формат 3 (nmID без photoNumber): ${JSON.stringify(payloadFormat3)}`);
-    try {
-      const { data: resp } = await firstValueFrom(
-        this.httpService.post(`${this.CONTENT_API}/content/v3/media/save`, payloadFormat3, {
-          headers: { ...this.authHeader(), 'Content-Type': 'application/json' },
-          timeout: 30000,
-        }),
-      );
-      console.log(`[WildberriesAdapter] Фото загружены формат 3 (nmID=${nmId}):`, JSON.stringify(resp).slice(0, 300));
-      return urls.length;
-    } catch (err3) {
-      const ax3 = err3 as { response?: { status?: number; data?: unknown } };
-      console.warn(`[WildberriesAdapter] Формат 3 failed: HTTP ${ax3?.response?.status}`, JSON.stringify(ax3?.response?.data ?? '').slice(0, 300));
-    }
-
-    // Формат 4: по одному URL с photoNumber
-    console.log(`[WildberriesAdapter] Попытка формат 4: по одному URL с photoNumber`);
-    let ok = 0;
+  private async uploadImages(nmId: number, images: string[]): Promise<void> {
+    const urls = images.filter((u) => typeof u === 'string' && u.trim().startsWith('http'));
+    if (urls.length === 0) return;
     for (let i = 0; i < urls.length; i++) {
-      const url = urls[i];
-      const singlePayload = { nmId, data: [{ url, photoNumber: i + 1 }] };
+      const url = urls[i].trim();
       try {
-        await new Promise((r) => setTimeout(r, 500));
-        const { data: resp } = await firstValueFrom(
-          this.httpService.post(`${this.CONTENT_API}/content/v3/media/save`, singlePayload, {
+        await new Promise((r) => setTimeout(r, 500)); // rate limit
+        const body = { nmID: nmId, data: [{ url }] };
+        await firstValueFrom(
+          this.httpService.post(`${this.CONTENT_API}/content/v3/media/save`, body, {
             headers: { ...this.authHeader(), 'Content-Type': 'application/json' },
             timeout: 15000,
           }),
         );
-        console.log(`[WildberriesAdapter] Фото ${i + 1} загружено:`, JSON.stringify(resp).slice(0, 200));
-        ok++;
-      } catch (e) {
-        const err = e as { response?: { status?: number; data?: unknown } };
-        console.warn(`[WildberriesAdapter] Фото ${i + 1} failed (${url.slice(0, 50)}...): HTTP ${err?.response?.status}`, JSON.stringify(err?.response?.data ?? '').slice(0, 200));
+        console.log(`[WildberriesAdapter] Фото ${i + 1}/${urls.length} загружено для nmId=${nmId}`);
+      } catch (err) {
+        const axErr = err as { response?: { status?: number; data?: unknown } };
+        const wbData = axErr?.response?.data as Record<string, unknown> | undefined;
+        const msg = typeof wbData?.detail === 'string' ? wbData.detail : (err instanceof Error ? err.message : String(err));
+        console.warn(`[WildberriesAdapter] Ошибка загрузки фото для nmId=${nmId}: ${msg}. Попробуйте загрузить фото вручную в ЛК WB.`);
       }
     }
-    if (ok > 0) {
-      console.log(`[WildberriesAdapter] Фото загружены на WB (nmID=${nmId}, ${ok}/${urls.length} шт.)`);
-    }
-    return ok;
   }
 
   private async setPrice(nmId: number, price: number): Promise<void> {
@@ -985,79 +666,6 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
     } catch (error) {
       this.logError(error, 'setPrice');
     }
-  }
-
-  /**
-   * Извлечь nmID из ответа POST /content/v2/cards/upload.
-   * WB может возвращать разные форматы: { cards: [...] }, { data: { cards: [...] } }, массив и т.д.
-   */
-  private extractNmIdFromUploadResponse(data: unknown): number | null {
-    if (!data || typeof data !== 'object') return null;
-    const tryCard = (card: unknown): number | null => {
-      if (!card || typeof card !== 'object') return null;
-      const c = card as Record<string, unknown>;
-      const id = c.nmID ?? c.nmId;
-      return id != null && !isNaN(Number(id)) ? Number(id) : null;
-    };
-    const dig = (obj: unknown): number | null => {
-      if (!obj || typeof obj !== 'object') return null;
-      const o = obj as Record<string, unknown>;
-      const cards = o.cards ?? o.data ?? o.result;
-      if (Array.isArray(cards) && cards.length > 0) {
-        const id = tryCard(cards[0]);
-        if (id) return id;
-      }
-      if (typeof o.data === 'object' && o.data) return dig(o.data);
-      return tryCard(o) ?? (o.nmID != null || o.nmId != null ? Number(o.nmID ?? o.nmId) : null);
-    };
-    if (Array.isArray(data) && data.length > 0) return tryCard(data[0]);
-    return dig(data);
-  }
-
-  /**
-   * Найти nmID созданной карточки по артикулу (fallback, если WB не вернул nmID в ответе upload).
-   * WB создаёт карточку асинхронно — делаем несколько попыток с увеличенной задержкой.
-   */
-  private async findNmIdByVendorCode(vendorCode: string, maxAttempts = 5): Promise<number | null> {
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      try {
-        // Увеличиваем задержку с каждой попыткой: 3, 5, 7, 9, 11 секунд
-        const delayMs = 3000 + (attempt - 1) * 2000;
-        console.log(`[WildberriesAdapter] findNmIdByVendorCode: попытка ${attempt}/${maxAttempts}, ожидание ${delayMs}ms...`);
-        await new Promise((r) => setTimeout(r, delayMs));
-        
-        const { data } = await firstValueFrom(
-          this.httpService.post(
-            `${this.CONTENT_API}/content/v2/get/cards/list`,
-            { settings: { cursor: { limit: 20 }, filter: { withPhoto: -1, textSearch: vendorCode } } },
-            { headers: { ...this.authHeader(), 'Content-Type': 'application/json' }, timeout: 15000 },
-          ),
-        );
-        const cards = (data?.cards ?? []) as Array<Record<string, unknown>>;
-        console.log(`[WildberriesAdapter] findNmIdByVendorCode: получено ${cards.length} карточек`);
-        
-        const card = cards.find((c) => {
-          const vc = String(c?.vendorCode ?? c?.supplierVendorCode ?? '').trim();
-          const goods = (c?.goods ?? []) as Array<{ vendorCode?: string }>;
-          const gVc = goods[0]?.vendorCode?.trim();
-          return vc === vendorCode || gVc === `${vendorCode}-1` || gVc === vendorCode;
-        });
-        
-        const nmId = card ? Number(card.nmID ?? card.nmId) : undefined;
-        if (nmId && !isNaN(nmId)) {
-          console.log(`[WildberriesAdapter] findNmIdByVendorCode: найден nmID=${nmId} на попытке ${attempt}`);
-          return nmId;
-        }
-        
-        console.log(`[WildberriesAdapter] findNmIdByVendorCode: nmID не найден на попытке ${attempt}`);
-      } catch (err) {
-        console.warn(`[WildberriesAdapter] findNmIdByVendorCode: ошибка на попытке ${attempt}:`, err instanceof Error ? err.message : String(err));
-        if (attempt === maxAttempts) {
-          this.logError(err, 'findNmIdByVendorCode');
-        }
-      }
-    }
-    return null;
   }
 
   /**
