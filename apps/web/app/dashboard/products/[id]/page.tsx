@@ -125,58 +125,6 @@ export default function ProductCardPage() {
       .catch(() => setWbColors([]))
   }, [token])
 
-  // Load WB categories for autocomplete
-  useEffect(() => {
-    if (!token || !isWbConnected) return
-    setLoadingWbCategories(true)
-    setWbCategoriesError(null)
-    fetch("/api/marketplaces/wb/categories", { headers: { Authorization: `Bearer ${token}` } })
-      .then((r) => r.json())
-      .then((data) => {
-        if (Array.isArray(data)) {
-          setWbCategories(data.map((c: { subjectId: number; subjectName: string }) => ({
-            id: c.subjectId,
-            label: c.subjectName,
-            path: c.subjectName,
-          })))
-        }
-      })
-      .catch(() => setWbCategoriesError("Не удалось загрузить категории WB"))
-      .finally(() => setLoadingWbCategories(false))
-  }, [token, isWbConnected])
-
-  // Load Ozon categories for autocomplete
-  useEffect(() => {
-    if (!token || !isOzonConnected) return
-    setLoadingOzonCategories(true)
-    setOzonCategoriesError(null)
-    fetch("/api/marketplaces/ozon/categories", { headers: { Authorization: `Bearer ${token}` } })
-      .then((r) => r.json())
-      .then((data) => {
-        if (Array.isArray(data)) {
-          // Flatten tree to selectable items
-          const flatten = (nodes: Array<{ description_category_id?: number; category_name?: string; type_id?: number; type_name?: string; children?: unknown[] }>, path: string[] = [], parentCatId?: number): CategoryItem[] => {
-            const result: CategoryItem[] = []
-            for (const n of nodes) {
-              const name = n.category_name || n.type_name || ""
-              const currentPath = [...path, name].filter(Boolean)
-              const catId = n.description_category_id ?? parentCatId
-              if (n.type_id != null && n.type_id > 0 && catId) {
-                result.push({ id: catId, label: name, path: currentPath.join(" > "), typeId: n.type_id })
-              }
-              if (Array.isArray(n.children) && n.children.length > 0) {
-                result.push(...flatten(n.children as typeof nodes, currentPath, catId ?? parentCatId))
-              }
-            }
-            return result
-          }
-          setOzonCategories(flatten(data))
-        }
-      })
-      .catch(() => setOzonCategoriesError("Не удалось загрузить категории Ozon"))
-      .finally(() => setLoadingOzonCategories(false))
-  }, [token, isOzonConnected])
-
   useEffect(() => {
     if (!token || !id) return
     fetch(`/api/products/${id}`, { headers: { Authorization: `Bearer ${token}` } })
@@ -236,6 +184,58 @@ export default function ProductCardPage() {
   const isOzonConnected = connections.some((c) => c.marketplace === "OZON")
   const isWbConnected = connections.some((c) => c.marketplace === "WILDBERRIES")
   const needsCategory = isOzonConnected || isWbConnected
+
+  // Load WB categories for autocomplete
+  useEffect(() => {
+    if (!token || !isWbConnected) return
+    setLoadingWbCategories(true)
+    setWbCategoriesError(null)
+    fetch("/api/marketplaces/wb/categories", { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => r.json())
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setWbCategories(data.map((c: { subjectId: number; subjectName: string }) => ({
+            id: c.subjectId,
+            label: c.subjectName,
+            path: c.subjectName,
+          })))
+        }
+      })
+      .catch(() => setWbCategoriesError("Не удалось загрузить категории WB"))
+      .finally(() => setLoadingWbCategories(false))
+  }, [token, isWbConnected])
+
+  // Load Ozon categories for autocomplete
+  useEffect(() => {
+    if (!token || !isOzonConnected) return
+    setLoadingOzonCategories(true)
+    setOzonCategoriesError(null)
+    fetch("/api/marketplaces/ozon/categories", { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => r.json())
+      .then((data) => {
+        if (Array.isArray(data)) {
+          // Flatten tree to selectable items
+          const flatten = (nodes: Array<{ description_category_id?: number; category_name?: string; type_id?: number; type_name?: string; children?: unknown[] }>, path: string[] = [], parentCatId?: number): CategoryItem[] => {
+            const result: CategoryItem[] = []
+            for (const n of nodes) {
+              const name = n.category_name || n.type_name || ""
+              const currentPath = [...path, name].filter(Boolean)
+              const catId = n.description_category_id ?? parentCatId
+              if (n.type_id != null && n.type_id > 0 && catId) {
+                result.push({ id: catId, label: name, path: currentPath.join(" > "), typeId: n.type_id })
+              }
+              if (Array.isArray(n.children) && n.children.length > 0) {
+                result.push(...flatten(n.children as typeof nodes, currentPath, catId ?? parentCatId))
+              }
+            }
+            return result
+          }
+          setOzonCategories(flatten(data))
+        }
+      })
+      .catch(() => setOzonCategoriesError("Не удалось загрузить категории Ozon"))
+      .finally(() => setLoadingOzonCategories(false))
+  }, [token, isOzonConnected])
 
   const ozonMissingFields: string[] = []
   const wbMissingFields: string[] = []
