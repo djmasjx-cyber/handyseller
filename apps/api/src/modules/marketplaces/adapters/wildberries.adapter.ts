@@ -589,11 +589,26 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       // Логируем ответ
       console.log('[WildberriesAdapter] uploadFromCanonical RESPONSE:', JSON.stringify(data, null, 2));
 
+      // WB создаёт карточки асинхронно и может не вернуть nmID сразу
+      let nmId: number | undefined;
       const firstCard = Array.isArray(data) ? data[0] : data?.cards?.[0];
-      const nmId = firstCard ? Number(firstCard.nmID ?? firstCard.nmId) : undefined;
-      if (!nmId) throw new Error('WB не вернул nmID созданной карточки');
+      nmId = firstCard ? Number(firstCard.nmID ?? firstCard.nmId) : undefined;
+
+      // Если nmId не вернулся — WB обрабатывает асинхронно, ищем по vendorCode
+      const vendorCode = (wbProduct[0] as Record<string, unknown>)?.supplierVendorCode as string | undefined;
+      if (!nmId && vendorCode) {
+        console.log(`[WildberriesAdapter] nmId не вернулся, ждём 7 сек и ищем по vendorCode=${vendorCode}`);
+        await new Promise((r) => setTimeout(r, 7000));
+        nmId = await this.findNmIdByVendorCode(vendorCode);
+      }
+
+      if (!nmId) {
+        console.warn('[WildberriesAdapter] Не удалось получить nmId. Карточка создана, но фото не загружены.');
+        return 'pending'; // Карточка создана асинхронно, nmId появится позже
+      }
+
       const imageUrls = canonical.images?.map((i) => i.url) ?? [];
-      // WB обрабатывает карточку асинхронно — ждём 3 сек перед загрузкой фото (docs/WB-MEDIA-PHOTOS.md)
+      // WB обрабатывает карточку асинхронно — ждём ещё 3 сек перед загрузкой фото
       if (imageUrls.length > 0) {
         await new Promise((r) => setTimeout(r, 3000));
       }
@@ -689,6 +704,70 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       const msg = typeof wbData?.errorText === 'string' ? wbData.errorText : (lastErr instanceof Error ? lastErr.message : String(lastErr));
       console.warn(`[WildberriesAdapter] Ошибка загрузки фото для nmId=${nmId}: ${msg}. Попробуйте загрузить фото вручную в ЛК WB.`);
     }
+  }
+
+  /**
+   * Найти nmId карточки по vendorCode (артикулу).
+   * Используется когда WB создаёт карточку асинхронно и не возвращает nmId сразу.
+   */
+  private async findNmIdByVendorCode(vendorCode: string): Promise<number | undefined> {
+    const maxAttempts = 3;
+    const delayMs = 3000;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const { data } = await firstValueFrom(
+          this.httpService.post(
+            `${this.CONTENT_API}/content/v2/get/cards/list`,
+            {
+              settings: {
+                cursor: { limit: 100 },
+                filter: { withPhoto: -1, textSearch: vendorCode },
+              },
+            },
+            {
+              headers: { ...this.authHeader(), 'Content-Type': 'application/json' },
+              timeout: 15000,
+            },
+          ),
+        );
+
+        const cards = (data?.cards ?? []) as Array<{
+          nmID?: number;
+          nmId?: number;
+          vendorCode?: string;
+          supplierVendorCode?: string;
+        }>;
+
+        // Ищем карточку с точным совпадением vendorCode
+        const card = cards.find(
+          (c) =>
+            c.vendorCode === vendorCode ||
+            c.supplierVendorCode === vendorCode ||
+            c.vendorCode?.includes(vendorCode) ||
+            c.supplierVendorCode?.includes(vendorCode),
+        );
+
+        if (card) {
+          const nmId = Number(card.nmID ?? card.nmId);
+          console.log(`[WildberriesAdapter] Найдена карточка: vendorCode=${vendorCode}, nmId=${nmId}`);
+          return nmId;
+        }
+
+        if (attempt < maxAttempts) {
+          console.log(`[WildberriesAdapter] Карточка не найдена, попытка ${attempt}/${maxAttempts}, ждём ${delayMs}ms...`);
+          await new Promise((r) => setTimeout(r, delayMs));
+        }
+      } catch (err) {
+        console.warn(`[WildberriesAdapter] Ошибка поиска карточки:`, err instanceof Error ? err.message : err);
+        if (attempt < maxAttempts) {
+          await new Promise((r) => setTimeout(r, delayMs));
+        }
+      }
+    }
+
+    console.warn(`[WildberriesAdapter] Карточка с vendorCode=${vendorCode} не найдена после ${maxAttempts} попыток`);
+    return undefined;
   }
 
   private async setPrice(nmId: number, price: number): Promise<void> {
