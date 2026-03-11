@@ -1299,6 +1299,22 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
           // Не падаем — цена и остаток уже обновлены
         }
       }
+
+      // Загружаем фото при обновлении (для повторных выгрузок и догонки фото)
+      const imageUrls: string[] = [];
+      if (Array.isArray(product.images)) {
+        imageUrls.push(...product.images.filter((u): u is string => typeof u === 'string' && u.startsWith('http')));
+      }
+      if (imageUrls.length > 0) {
+        try {
+          console.log(`[WildberriesAdapter] Загружаем ${imageUrls.length} фото для nmId=${nmId}`);
+          await this.uploadImages(nmId, imageUrls);
+        } catch (photoErr) {
+          this.logError(photoErr as Error, 'updateProduct (photos)');
+          // Не падаем — фото опциональны
+        }
+      }
+
       return true;
     } catch (error) {
       this.logError(error, 'updateProduct');
@@ -1944,9 +1960,28 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
             result.errors?.push(`Товар ${product.name}: ошибка обновления на WB`);
           }
         } else {
-          const extId = await this.uploadProduct(product);
-          result.syncedCount++;
-          result.createdMappings?.push({ productId: product.id, externalSystemId: extId });
+          // Ищем существующую карточку по vendorCode перед созданием новой
+          const vendorCode = (product.vendorCode ?? product.sku)?.toString().trim();
+          const existingNmId = vendorCode ? await this.findNmIdByVendorCode(vendorCode) : undefined;
+          
+          if (existingNmId) {
+            // Нашли карточку на WB — обновляем вместо создания
+            console.log(`[WildberriesAdapter] Найдена существующая карточка nmId=${existingNmId} для vendorCode=${vendorCode}, обновляем`);
+            const ok = await this.updateProduct(String(existingNmId), product);
+            if (ok) {
+              result.syncedCount++;
+              // Сохраняем маппинг для будущих синхронизаций
+              result.createdMappings?.push({ productId: product.id, externalSystemId: String(existingNmId) });
+            } else {
+              result.failedCount++;
+              result.errors?.push(`Товар ${product.name}: ошибка обновления на WB`);
+            }
+          } else {
+            // Карточки нет — создаём новую
+            const extId = await this.uploadProduct(product);
+            result.syncedCount++;
+            result.createdMappings?.push({ productId: product.id, externalSystemId: extId });
+          }
         }
       } catch (error) {
         result.failedCount++;
