@@ -710,11 +710,24 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
    * Найти nmId карточки по vendorCode (артикулу).
    * Используется когда WB создаёт карточку асинхронно и не возвращает nmId сразу.
    * Стратегия: 1) textSearch, 2) полный список карточек с сравнением vendorCode.
+   * Учитывает суффикс "-1" который WB добавляет к variants.
    */
   async findNmIdByVendorCode(vendorCode: string): Promise<number | undefined> {
     const maxAttempts = 3;
     const delayMs = 3000;
     const searchVendorCode = vendorCode.toLowerCase().trim();
+    // WB добавляет "-1" к vendorCode в variants, ищем оба варианта
+    const searchVariants = [searchVendorCode, `${searchVendorCode}-1`];
+
+    /** Проверка совпадения vendorCode с учётом суффикса */
+    const matchesVendorCode = (cv: string, csv: string): boolean => {
+      const cvLower = cv.toLowerCase().trim();
+      const csvLower = csv.toLowerCase().trim();
+      return searchVariants.some((sv) =>
+        cvLower === sv || csvLower === sv ||
+        cvLower.startsWith(searchVendorCode) || csvLower.startsWith(searchVendorCode),
+      );
+    };
 
     // 1) Пробуем textSearch (быстрый путь)
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -742,14 +755,9 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
           supplierVendorCode?: string;
         }>;
 
-        // Ищем карточку с совпадением vendorCode
+        // Ищем карточку с совпадением vendorCode (с учётом суффикса -1)
         const card = cards.find(
-          (c) => {
-            const cv = (c.vendorCode ?? '').toLowerCase().trim();
-            const csv = (c.supplierVendorCode ?? '').toLowerCase().trim();
-            return cv === searchVendorCode || csv === searchVendorCode ||
-                   cv.includes(searchVendorCode) || csv.includes(searchVendorCode);
-          },
+          (c) => matchesVendorCode(c.vendorCode ?? '', c.supplierVendorCode ?? ''),
         );
 
         if (card) {
@@ -792,12 +800,8 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
         cursor = { updatedAt: respCursor.updatedAt, nmID: respCursor.nmID, limit: 100 };
       }
 
-      // Ищем по vendorCode
-      const found = allCards.find((c) => {
-        const cv = (c.vendorCode ?? '').toLowerCase().trim();
-        const csv = (c.supplierVendorCode ?? '').toLowerCase().trim();
-        return cv === searchVendorCode || csv === searchVendorCode;
-      });
+      // Ищем по vendorCode (с учётом суффикса -1)
+      const found = allCards.find((c) => matchesVendorCode(c.vendorCode ?? '', c.supplierVendorCode ?? ''));
 
       if (found) {
         const nmId = Number(found.nmID ?? found.nmId);

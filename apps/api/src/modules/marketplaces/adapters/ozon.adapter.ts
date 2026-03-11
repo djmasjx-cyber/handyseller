@@ -1795,15 +1795,35 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
             result.errors?.push(`Товар ${product.name}: ошибка обновления на Ozon`);
           }
         } else {
-          const ozonProductId = await this.uploadProduct(product);
-          result.syncedCount++;
-          // Сохраняем фактический offer_id (после sanitize), отправленный в Ozon — для надёжной связки при setStock
+          // Ищем существующий товар на Ozon по offer_id (vendorCode) перед созданием
           const offerId = this.sanitizeOfferId(product.vendorCode ?? `HS_${product.id.slice(0, 8)}`);
-          result.createdMappings?.push({
-            productId: product.id,
-            externalSystemId: ozonProductId,
-            externalArticle: offerId,
-          });
+          const existingProduct = await this.getProductInfoByOfferId(offerId);
+          
+          if (existingProduct?.id) {
+            // Найден существующий товар — обновляем вместо создания
+            console.log(`[OzonAdapter] Найден существующий товар product_id=${existingProduct.id} для offer_id=${offerId}, обновляем`);
+            const ok = await this.updateProduct(String(existingProduct.id), product);
+            if (ok) {
+              result.syncedCount++;
+              result.createdMappings?.push({
+                productId: product.id,
+                externalSystemId: String(existingProduct.id),
+                externalArticle: offerId,
+              });
+            } else {
+              result.failedCount++;
+              result.errors?.push(`Товар ${product.name}: ошибка обновления на Ozon`);
+            }
+          } else {
+            // Товара нет на Ozon — создаём новый
+            const ozonProductId = await this.uploadProduct(product);
+            result.syncedCount++;
+            result.createdMappings?.push({
+              productId: product.id,
+              externalSystemId: ozonProductId,
+              externalArticle: offerId,
+            });
+          }
         }
       } catch (error) {
         result.failedCount++;
