@@ -709,11 +709,14 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
   /**
    * Найти nmId карточки по vendorCode (артикулу).
    * Используется когда WB создаёт карточку асинхронно и не возвращает nmId сразу.
+   * Стратегия: 1) textSearch, 2) полный список карточек с сравнением vendorCode.
    */
-  private async findNmIdByVendorCode(vendorCode: string): Promise<number | undefined> {
+  async findNmIdByVendorCode(vendorCode: string): Promise<number | undefined> {
     const maxAttempts = 3;
     const delayMs = 3000;
+    const searchVendorCode = vendorCode.toLowerCase().trim();
 
+    // 1) Пробуем textSearch (быстрый путь)
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
         const { data } = await firstValueFrom(
@@ -739,34 +742,73 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
           supplierVendorCode?: string;
         }>;
 
-        // Ищем карточку с точным совпадением vendorCode
+        // Ищем карточку с совпадением vendorCode
         const card = cards.find(
-          (c) =>
-            c.vendorCode === vendorCode ||
-            c.supplierVendorCode === vendorCode ||
-            c.vendorCode?.includes(vendorCode) ||
-            c.supplierVendorCode?.includes(vendorCode),
+          (c) => {
+            const cv = (c.vendorCode ?? '').toLowerCase().trim();
+            const csv = (c.supplierVendorCode ?? '').toLowerCase().trim();
+            return cv === searchVendorCode || csv === searchVendorCode ||
+                   cv.includes(searchVendorCode) || csv.includes(searchVendorCode);
+          },
         );
 
         if (card) {
           const nmId = Number(card.nmID ?? card.nmId);
-          console.log(`[WildberriesAdapter] Найдена карточка: vendorCode=${vendorCode}, nmId=${nmId}`);
+          console.log(`[WildberriesAdapter] Найдена карточка (textSearch): vendorCode=${vendorCode}, nmId=${nmId}`);
           return nmId;
         }
 
         if (attempt < maxAttempts) {
-          console.log(`[WildberriesAdapter] Карточка не найдена, попытка ${attempt}/${maxAttempts}, ждём ${delayMs}ms...`);
+          console.log(`[WildberriesAdapter] Карточка не найдена (textSearch), попытка ${attempt}/${maxAttempts}, ждём ${delayMs}ms...`);
           await new Promise((r) => setTimeout(r, delayMs));
         }
       } catch (err) {
-        console.warn(`[WildberriesAdapter] Ошибка поиска карточки:`, err instanceof Error ? err.message : err);
+        console.warn(`[WildberriesAdapter] Ошибка поиска карточки (textSearch):`, err instanceof Error ? err.message : err);
         if (attempt < maxAttempts) {
           await new Promise((r) => setTimeout(r, delayMs));
         }
       }
     }
 
-    console.warn(`[WildberriesAdapter] Карточка с vendorCode=${vendorCode} не найдена после ${maxAttempts} попыток`);
+    // 2) Fallback: полный список карточек с сравнением vendorCode
+    console.log(`[WildberriesAdapter] textSearch не нашёл, пробуем полный список карточек...`);
+    try {
+      const allCards: Array<{ nmID?: number; nmId?: number; vendorCode?: string; supplierVendorCode?: string }> = [];
+      let cursor: { updatedAt?: string; nmID?: number; limit?: number } = { limit: 100 };
+
+      // Пагинация по всем карточкам (макс 500 для быстродействия)
+      for (let page = 0; page < 5; page++) {
+        const { data } = await firstValueFrom(
+          this.httpService.post(
+            `${this.CONTENT_API}/content/v2/get/cards/list`,
+            { settings: { cursor, filter: { withPhoto: -1 } } },
+            { headers: { ...this.authHeader(), 'Content-Type': 'application/json' }, timeout: 15000 },
+          ),
+        );
+        const pageCards = (data?.cards ?? []) as typeof allCards;
+        allCards.push(...pageCards);
+        const respCursor = (data?.cursor ?? {}) as { updatedAt?: string; nmID?: number; total?: number };
+        if (pageCards.length === 0 || (respCursor?.total ?? 0) < (cursor.limit ?? 100)) break;
+        cursor = { updatedAt: respCursor.updatedAt, nmID: respCursor.nmID, limit: 100 };
+      }
+
+      // Ищем по vendorCode
+      const found = allCards.find((c) => {
+        const cv = (c.vendorCode ?? '').toLowerCase().trim();
+        const csv = (c.supplierVendorCode ?? '').toLowerCase().trim();
+        return cv === searchVendorCode || csv === searchVendorCode;
+      });
+
+      if (found) {
+        const nmId = Number(found.nmID ?? found.nmId);
+        console.log(`[WildberriesAdapter] Найдена карточка (полный список): vendorCode=${vendorCode}, nmId=${nmId}`);
+        return nmId;
+      }
+    } catch (err) {
+      console.warn(`[WildberriesAdapter] Ошибка поиска по полному списку:`, err instanceof Error ? err.message : err);
+    }
+
+    console.warn(`[WildberriesAdapter] Карточка с vendorCode=${vendorCode} не найдена`);
     return undefined;
   }
 

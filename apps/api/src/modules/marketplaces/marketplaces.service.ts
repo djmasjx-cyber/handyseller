@@ -1390,7 +1390,9 @@ export class MarketplacesService {
     };
   }
 
-  /** Получить штрих-код WB по productId — для автозаполнения в карточке товара */
+  /** Получить штрих-код WB по productId — для автозаполнения в карточке товара.
+   * Если маппинг не найден — ищет карточку на WB по vendorCode и создаёт маппинг.
+   */
   async getWbBarcodeForProduct(userId: string, productId: string): Promise<{ barcode: string } | { error: string }> {
     const product = await this.productsService.findById(userId, productId);
     if (!product) {
@@ -1398,11 +1400,43 @@ export class MarketplacesService {
     }
     let nmId: number | null = await this.productMappingService.getWbNmId(product.id, userId);
     if (nmId == null) {
-      const match = (product.sku ?? '').match(/^WB-[^-]+-(\d+)$/);
+      const match = (product.sku ?? '').match(/^WB-[^-]+-(d+)$/);
       nmId = match ? parseInt(match[1], 10) : null;
     }
+  
+    // Если маппинг не найден — ищем карточку на WB по vendorCode (article)
     if (nmId == null) {
-      return { error: 'Товар не привязан к WB (нет nm_id)' };
+      const vendorCode = (product.article ?? product.sku ?? '').toString().trim();
+      if (vendorCode) {
+        const conn = await this.getMarketplaceConnection(userId, 'WILDBERRIES');
+        if (conn?.token) {
+          const adapter = this.adapterFactory.createAdapter('WILDBERRIES', {
+            encryptedToken: conn.token,
+            encryptedRefreshToken: conn.refreshToken,
+            sellerId: conn.sellerId ?? undefined,
+            warehouseId: conn.warehouseId ?? undefined,
+          });
+          if (adapter instanceof WildberriesAdapter) {
+            const foundNmId = await adapter.findNmIdByVendorCode(vendorCode);
+            if (foundNmId) {
+              nmId = foundNmId;
+              // Сохраняем маппинг для будущих запросов
+              await this.productMappingService.upsertMapping(
+                product.id,
+                userId,
+                'WILDBERRIES',
+                String(foundNmId),
+                { externalArticle: vendorCode },
+              );
+              console.log(`[MarketplacesService] Создан маппинг WB: productId=${product.id}, nmId=${foundNmId}, vendorCode=${vendorCode}`);
+            }
+          }
+        }
+      }
+    }
+  
+    if (nmId == null) {
+      return { error: 'Товар не привязан к WB (нет nm_id). Сначала выгрузите товар на WB.' };
     }
     const conn = await this.getMarketplaceConnection(userId, 'WILDBERRIES');
     if (!conn?.token) {
