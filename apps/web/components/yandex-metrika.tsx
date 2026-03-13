@@ -35,11 +35,12 @@ export function YandexMetrika() {
               k.async=1,k.src=r,a.parentNode.insertBefore(k,a)
             })(window, document, "script", "https://mc.yandex.ru/metrika/tag.js", "ym");
             ym(${METRIKA_ID}, "init", {
+              ssr: true,
+              webvisor: true,
               clickmap: true,
               trackLinks: true,
               accurateTrackBounce: true,
-              webvisor: true,
-              ecommerce: false
+              ecommerce: "dataLayer"
             });
           `,
         }}
