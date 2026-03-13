@@ -54,12 +54,30 @@ const faqSchema = {
   })),
 }
 
+const organizationSchema = {
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  name: "HandySeller",
+  url: "https://app.handyseller.ru",
+  logo: "https://app.handyseller.ru/logo.png",
+  description: "Сервис для продажи хендмейда и товаров ручной работы на маркетплейсах Wildberries, Ozon и Яндекс Маркет",
+  contactPoint: {
+    "@type": "ContactPoint",
+    contactType: "customer support",
+    availableLanguage: "Russian",
+  },
+}
+
 export default function Home() {
   return (
     <div className="min-h-screen bg-background">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(faqSchema) }}
+      />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(organizationSchema) }}
       />
       {/* Header */}
       <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">

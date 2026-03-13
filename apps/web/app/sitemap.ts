@@ -8,7 +8,31 @@ export default function sitemap(): MetadataRoute.Sitemap {
       url: BASE_URL,
       lastModified: new Date(),
       changeFrequency: "weekly",
-      priority: 1,
+      priority: 1.0,
+    },
+    {
+      url: `${BASE_URL}/kak-prodavat-hendmeid-na-wildberries`,
+      lastModified: new Date(),
+      changeFrequency: "monthly",
+      priority: 0.9,
+    },
+    {
+      url: `${BASE_URL}/kak-prodavat-hendmeid-na-ozon`,
+      lastModified: new Date(),
+      changeFrequency: "monthly",
+      priority: 0.9,
+    },
+    {
+      url: `${BASE_URL}/kak-prodavat-hendmeid-na-marketpleysah`,
+      lastModified: new Date(),
+      changeFrequency: "monthly",
+      priority: 0.8,
+    },
+    {
+      url: `${BASE_URL}/faq`,
+      lastModified: new Date(),
+      changeFrequency: "monthly",
+      priority: 0.7,
     },
     {
       url: `${BASE_URL}/oferta`,
@@ -26,43 +50,13 @@ export default function sitemap(): MetadataRoute.Sitemap {
       url: `${BASE_URL}/login`,
       lastModified: new Date(),
       changeFrequency: "monthly",
-      priority: 0.8,
+      priority: 0.6,
     },
     {
       url: `${BASE_URL}/register`,
       lastModified: new Date(),
       changeFrequency: "monthly",
-      priority: 0.9,
-    },
-    {
-      url: `${BASE_URL}/dashboard`,
-      lastModified: new Date(),
-      changeFrequency: "weekly",
       priority: 0.7,
-    },
-    {
-      url: `${BASE_URL}/kak-prodavat-hendmeid-na-wildberries`,
-      lastModified: new Date(),
-      changeFrequency: "monthly",
-      priority: 0.8,
-    },
-    {
-      url: `${BASE_URL}/kak-prodavat-hendmeid-na-ozon`,
-      lastModified: new Date(),
-      changeFrequency: "monthly",
-      priority: 0.8,
-    },
-    {
-      url: `${BASE_URL}/kak-prodavat-hendmeid-na-marketpleysah`,
-      lastModified: new Date(),
-      changeFrequency: "monthly",
-      priority: 0.9,
-    },
-    {
-      url: `${BASE_URL}/faq`,
-      lastModified: new Date(),
-      changeFrequency: "monthly",
-      priority: 0.8,
     },
   ];
 }

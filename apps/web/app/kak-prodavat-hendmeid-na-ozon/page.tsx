@@ -2,6 +2,7 @@ import Link from "next/link"
 import type { Metadata } from "next"
 import { Button, Badge } from "@handyseller/ui"
 import { HomeLogoLink } from "@/components/home-logo-link"
+import { Breadcrumb, generateBreadcrumbSchema } from "@/components/breadcrumb"
 import {
   ArrowRight,
   Zap,
@@ -73,6 +74,11 @@ const articleSchema = {
   dateModified: new Date().toISOString().split("T")[0],
 }
 
+const breadcrumbSchema = generateBreadcrumbSchema([
+  { name: "Главная", url: "https://app.handyseller.ru" },
+  { name: "Как продавать хендмейд на Ozon", url: "https://app.handyseller.ru/kak-prodavat-hendmeid-na-ozon" },
+])
+
 export const metadata: Metadata = {
   title: "Как продавать хендмейд на Ozon — пошаговая инструкция для мастеров",
   description:
@@ -97,6 +103,10 @@ export default function HowToSellHandmadeOnOzon() {
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(articleSchema) }}
+      />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbSchema) }}
       />
 
       {/* Header */}
@@ -124,14 +134,10 @@ export default function HowToSellHandmadeOnOzon() {
 
       <main className="container py-8 md:py-12">
         {/* Хлебная крошка */}
-        <nav className="mb-6 text-sm">
-          <Link
-            href="/kak-prodavat-hendmeid-na-marketpleysah"
-            className="text-muted-foreground hover:text-primary"
-          >
-            ← Все маркетплейсы
-          </Link>
-        </nav>
+        <Breadcrumb items={[
+          { label: "Главная", href: "/" },
+          { label: "Как продавать хендмейд на Ozon" },
+        ]} />
 
         <article className="max-w-3xl mx-auto">
           <Badge variant="secondary" className="mb-4">

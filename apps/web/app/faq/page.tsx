@@ -2,6 +2,7 @@ import Link from "next/link"
 import type { Metadata } from "next"
 import { Button, Badge } from "@handyseller/ui"
 import { HomeLogoLink } from "@/components/home-logo-link"
+import { Breadcrumb, generateBreadcrumbSchema } from "@/components/breadcrumb"
 import {
   ArrowRight,
   Palette,
@@ -169,6 +170,11 @@ const faqSchema = {
   })),
 }
 
+const breadcrumbSchema = generateBreadcrumbSchema([
+  { name: "Главная", url: "https://app.handyseller.ru" },
+  { name: "Частые вопросы", url: "https://app.handyseller.ru/faq" },
+])
+
 export const metadata: Metadata = {
   title: "Частые вопросы о продаже хендмейда на маркетплейсах — HandySeller",
   description:
@@ -187,6 +193,10 @@ export default function FAQPage() {
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(faqSchema) }}
+      />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbSchema) }}
       />
 
       {/* Header */}
@@ -214,6 +224,11 @@ export default function FAQPage() {
 
       <main className="container py-8 md:py-12">
         <article className="max-w-3xl mx-auto">
+          <Breadcrumb items={[
+            { label: "Главная", href: "/" },
+            { label: "Частые вопросы" },
+          ]} />
+
           <Badge variant="secondary" className="mb-4">
             <HelpCircle className="mr-1 h-3 w-3" />
             FAQ
