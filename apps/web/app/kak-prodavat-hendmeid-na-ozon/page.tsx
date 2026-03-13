@@ -123,6 +123,16 @@ export default function HowToSellHandmadeOnOzon() {
       </header>
 
       <main className="container py-8 md:py-12">
+        {/* Хлебная крошка */}
+        <nav className="mb-6 text-sm">
+          <Link
+            href="/kak-prodavat-hendmeid-na-marketpleysah"
+            className="text-muted-foreground hover:text-primary"
+          >
+            ← Все маркетплейсы
+          </Link>
+        </nav>
+
         <article className="max-w-3xl mx-auto">
           <Badge variant="secondary" className="mb-4">
             <Zap className="mr-1 h-3 w-3" />

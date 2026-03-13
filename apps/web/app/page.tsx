@@ -538,6 +538,11 @@ export default function Home() {
             </details>
           ))}
         </div>
+        <div className="text-center mt-6">
+          <Link href="/faq" className="text-primary hover:underline">
+            Смотреть все вопросы →
+          </Link>
+        </div>
       </section>
 
       <section id="contacts" className="min-h-screen container py-12 md:py-16 scroll-mt-20">
@@ -644,11 +649,11 @@ export default function Home() {
             <div className="space-y-3">
               <h4 className="font-bold text-sm">Ресурсы</h4>
               <nav className="space-y-2">
+                <div><Link href="/kak-prodavat-hendmeid-na-marketpleysah" className="text-muted-foreground hover:text-primary">Хендмейд на маркетплейсах</Link></div>
                 <div><Link href="/kak-prodavat-hendmeid-na-wildberries" className="text-muted-foreground hover:text-primary">Как продавать на WB</Link></div>
                 <div><Link href="/kak-prodavat-hendmeid-na-ozon" className="text-muted-foreground hover:text-primary">Как продавать на Ozon</Link></div>
-                <div><Link href="/blog" className="text-muted-foreground hover:text-primary">Блог</Link></div>
+                <div><Link href="/faq" className="text-muted-foreground hover:text-primary">FAQ</Link></div>
                 <div><Link href="/help" className="text-muted-foreground hover:text-primary">Помощь</Link></div>
-                <div><a href="#faq" className="text-muted-foreground hover:text-primary">FAQ</a></div>
                 <div><Link href="/oferta" className="text-muted-foreground hover:text-primary">Оферта</Link></div>
                 <div><Link href="/privacy" className="text-muted-foreground hover:text-primary">Политика конфиденциальности</Link></div>
               </nav>
