@@ -23,6 +23,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.9,
     },
     {
+      url: `${BASE_URL}/kak-prodavat-hendmeid-na-yandex-markete`,
+      lastModified: new Date(),
+      changeFrequency: "monthly",
+      priority: 0.9,
+    },
+    {
       url: `${BASE_URL}/kak-prodavat-hendmeid-na-marketpleysah`,
       lastModified: new Date(),
       changeFrequency: "monthly",
@@ -54,6 +60,43 @@ export default function sitemap(): MetadataRoute.Sitemap {
     },
     {
       url: `${BASE_URL}/register`,
+      lastModified: new Date(),
+      changeFrequency: "monthly",
+      priority: 0.7,
+    },
+    // Blog
+    {
+      url: `${BASE_URL}/blog`,
+      lastModified: new Date(),
+      changeFrequency: "weekly",
+      priority: 0.8,
+    },
+    {
+      url: `${BASE_URL}/blog/chto-mozhno-sdelat-svoimi-rukami-dlya-prodazhi`,
+      lastModified: new Date(),
+      changeFrequency: "monthly",
+      priority: 0.7,
+    },
+    {
+      url: `${BASE_URL}/blog/kak-rasschitat-tsenu-hendmeida`,
+      lastModified: new Date(),
+      changeFrequency: "monthly",
+      priority: 0.7,
+    },
+    {
+      url: `${BASE_URL}/blog/kak-sdelat-foto-hendmeida-dlya-marketpleysov`,
+      lastModified: new Date(),
+      changeFrequency: "monthly",
+      priority: 0.7,
+    },
+    {
+      url: `${BASE_URL}/blog/kak-stat-samozanyatym-i-nachat-prodavat`,
+      lastModified: new Date(),
+      changeFrequency: "monthly",
+      priority: 0.7,
+    },
+    {
+      url: `${BASE_URL}/blog/kak-upakovyvat-hendmeid-dlya-marketpleysov`,
       lastModified: new Date(),
       changeFrequency: "monthly",
       priority: 0.7,

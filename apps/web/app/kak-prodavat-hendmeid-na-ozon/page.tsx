@@ -541,15 +541,27 @@ export default function HowToSellHandmadeOnOzon() {
               </p>
 
               <div className="bg-muted/50 rounded-lg p-4 border mt-4">
-                <p className="text-sm mb-0">
-                  <strong>📚 Читайте также:</strong>{" "}
-                  <Link
-                    href="/kak-prodavat-hendmeid-na-wildberries"
-                    className="text-primary hover:underline"
-                  >
-                    Как продавать хендмейд на Wildberries — пошаговая инструкция
-                  </Link>
+                <p className="text-sm mb-2">
+                  <strong>📚 Читайте также:</strong>
                 </p>
+                <ul className="text-sm space-y-1 list-disc list-inside">
+                  <li>
+                    <Link
+                      href="/kak-prodavat-hendmeid-na-wildberries"
+                      className="text-primary hover:underline"
+                    >
+                      Как продавать хендмейд на Wildberries — пошаговая инструкция
+                    </Link>
+                  </li>
+                  <li>
+                    <Link
+                      href="/kak-prodavat-hendmeid-na-yandex-markete"
+                      className="text-primary hover:underline"
+                    >
+                      Как продавать хендмейд на Яндекс Маркете
+                    </Link>
+                  </li>
+                </ul>
               </div>
             </div>
           </section>
