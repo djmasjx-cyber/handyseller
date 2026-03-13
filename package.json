@@ -11,6 +11,9 @@
     "dev:api": "npm run dev --workspace=api",
     "dev:start": "./scripts/dev-start.sh",
     "dev:stop": "./scripts/dev-stop.sh",
+    "dev:parallel": "bash scripts/dev-start-parallel.sh",
+    "dev:parallel:stop": "bash scripts/dev-stop-parallel.sh",
+    "dev:status": "npx pm2 status",
     "build": "npm run build --workspaces",
     "build:web": "npm run build --workspace=web",
     "build:web:standalone": "OUTPUT_MODE=standalone npm run build --workspace=web",
@@ -28,5 +31,8 @@
   },
   "engines": {
     "node": ">=18"
+  },
+  "devDependencies": {
+    "pm2": "^5.4.3"
   }
 }

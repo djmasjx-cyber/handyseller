@@ -6,46 +6,62 @@
 
 ## Схема работы
 
-Разработка ведётся **на сервере** через Cursor Remote-SSH. Используется dev-режим с hot reload — без полного билда при каждом изменении. Коммит и пуш только после успешной проверки.
+Разработка ведётся **на сервере** через Cursor Remote-SSH. Используется **dev** — dev.handyseller.ru (параллельно с prod). Prod и dev работают одновременно: prod на app.handyseller.ru, dev на dev.handyseller.ru. Коммит и пуш только после успешной проверки на dev.
+
+**Важно:** метод взаимодействия (dev-parallel, порты 4001/3002, nginx) не менять — схема работает.
+
+**Dev через PM2:** авторестарт при падении, Node 20 (исправляет crypto/nest-schedule). Prod (Docker) не затрагивается.
 
 ---
 
 ## Цикл разработки
 
-### 1. Запуск dev-режима
+### 1. Запуск dev
 
 ```bash
 cd /home/ubuntu/handyseller-repo
-npm run dev:start
+npm run dev:parallel
 ```
 
 Что происходит:
-- Останавливаются prod-контейнеры (API, Web)
-- Запускаются API (`nest start --watch`) и Web (`next dev`) с hot reload
-- Приложение доступно по https://app.handyseller.ru
+- PM2 запускает dev API (4001) и dev Web (3002) **параллельно с prod**
+- При падении процесса PM2 перезапускает его
+- Prod (app.handyseller.ru) продолжает работать
+- Dev доступен по **http://dev.handyseller.ru**
 
 ### 2. Разработка
 
 - Редактируй код в Cursor
-- Сохраняй — изменения подхватываются автоматически
-- Проверяй в браузере (app.handyseller.ru)
-- Логи: `tail -f .dev-api.log` и `tail -f .dev-web.log`
+- Сохраняй — изменения подхватываются автоматически (watch mode)
+- **Проверяй на dev:** http://dev.handyseller.ru
+- Логи: `/tmp/handyseller-dev-api.log`, `/tmp/handyseller-dev-web.log`
 
 ### 3. Когда готово — коммит и пуш
 
 ```bash
 git add .
 git commit -m "fix(scope): описание"
-GIT_SSH_COMMAND="ssh -i ~/.ssh/id_ed25519_github -o StrictHostKeyChecking=no" git push origin main
+GIT_SSH_COMMAND="ssh -i ~/.ssh/id_ed25519_github -o IdentitiesOnly=yes" git push -u origin fix/имя-ветки
 ```
 
-### 4. Возврат prod
+(Не пушить в main — только в свою ветку, затем PR.)
+
+### 4. Остановка dev (по желанию)
 
 ```bash
-npm run dev:stop
+npm run dev:parallel:stop
 ```
 
-Prod (Docker) снова обслуживает пользователей.
+Prod при этом не затрагивается.
+
+### 5. После перезагрузки VM
+
+Prod (Docker) поднимается автоматически через systemd. Dev — вручную:
+
+```bash
+cd /home/ubuntu/handyseller-repo
+npm run dev:parallel
+```
 
 ---
 
@@ -53,9 +69,9 @@ Prod (Docker) снова обслуживает пользователей.
 
 | Правило | Пояснение |
 |---------|-----------|
-| **Не коммитить без проверки** | Сначала убедись, что всё работает в dev |
+| **Не коммитить без проверки** | Сначала убедись, что всё работает на dev.handyseller.ru |
 | **Не патчить dist/** | Менять только `apps/api/src/`, `apps/web/`, `prisma/` |
-| **dev:stop перед завершением** | Если закончил сессию — верни prod |
+| **Не менять dev-схему** | Скрипты dev-parallel, nginx, порты 4001/3002 — не трогать |
 | **Одна БД** | Dev использует ту же БД, что и prod. Осторожно с тестами |
 
 ---
@@ -63,33 +79,39 @@ Prod (Docker) снова обслуживает пользователей.
 ## Команды — шпаргалка
 
 ```bash
-# Запуск dev
-npm run dev:start
+# Запуск dev (параллельно с prod)
+npm run dev:parallel
 
-# Остановка dev, возврат prod
-npm run dev:stop
+# Остановка dev
+npm run dev:parallel:stop
 
-# Логи API
-tail -f .dev-api.log
+# Статус PM2
+npm run dev:status
+# или: npx pm2 status
 
-# Логи Web
-tail -f .dev-web.log
+# Логи dev API
+tail -f /tmp/handyseller-dev-api.log
+
+# Логи dev Web
+tail -f /tmp/handyseller-dev-web.log
 ```
 
 ---
 
-## Порты
+## Порты и окружения
 
-- **API:** 4000
-- **Web:** 3001
-- **Redis (dev):** 6379
+| Окружение | API | Web | URL |
+|-----------|-----|-----|-----|
+| **Prod** | 4000 | 3001 | https://app.handyseller.ru |
+| **Dev** | 4001 | 3002 | http://dev.handyseller.ru |
 
-Nginx проксирует app.handyseller.ru на эти порты.
+Nginx проксирует dev.handyseller.ru на 4001/3002.
 
 ---
 
 ## Если что-то пошло не так
 
-- **Порты заняты:** `fuser -k 4000/tcp` и `fuser -k 3001/tcp`
-- **Prod не вернулся:** `cd /opt/handyseller && docker compose -f docker-compose.prod.yml --env-file .env.production up -d`
-- **API не стартует:** проверь `apps/api/.env`, DATABASE_URL, REDIS_HOST=localhost
+- **Порты dev заняты:** `npm run dev:parallel:stop`, затем `npm run dev:parallel`
+- **Dev API не стартует:** проверь `apps/api/.env`, DATABASE_URL, REDIS_HOST=127.0.0.1
+- **PM2 crash-loop:** `npx pm2 logs handyseller-dev-api` — смотри причину падения
+- **Prod** — отдельно, через Docker в `/opt/handyseller`. Dev его не затрагивает.

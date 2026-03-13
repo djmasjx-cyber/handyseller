@@ -43,14 +43,19 @@ Content-Type: application/json
 **Требования к URL:**
 - Публично доступный HTTP или HTTPS
 - Формат изображения: JPG, PNG (рекомендуется вертикальное, мин. 900×1200 px по требованиям WB)
+- WebP: WB поддерживает webp (см. [release-notes](https://dev.wildberries.ru/release-notes?id=386) — отзывы возвращают фото в webp)
 - WB скачивает изображение по URL на своей стороне
+
+**Альтернативный формат тела:** некоторые источники указывают `mediaFiles` вместо `data`. Реализация пробует оба.
 
 ## Текущая реализация (HandySeller)
 
 Файл: `apps/api/src/modules/marketplaces/adapters/wildberries.adapter.ts`
 
+- Задержка 3 сек после создания карточки перед загрузкой фото (WB обрабатывает асинхронно)
 - Метод `uploadImages(nmId, images: string[])` — отправляет фото по одному в цикле с задержкой 500 мс (rate limit)
-- Формат: `{ nmID: nmId, data: [{ url }] }` — по одному URL за запрос
+- Формат: `{ nmID: nmId, data: [{ url }] }` — при ошибке пробует `mediaFiles`
+- Retry до 4 раз с интервалом 3 сек при каждой ошибке
 - Вызывается после `uploadFromCanonical` при успешном создании карточки
 
 ## Альтернатива: batch-загрузка
