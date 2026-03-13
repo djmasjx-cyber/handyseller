@@ -3,6 +3,8 @@ import type { Metadata } from "next"
 import { Button, Badge } from "@handyseller/ui"
 import { HomeLogoLink } from "@/components/home-logo-link"
 import { Breadcrumb, generateBreadcrumbSchema } from "@/components/breadcrumb"
+import { TrackedLink } from "@/components/tracked-link"
+import { ScrollTracker } from "@/components/scroll-tracker"
 import {
   ArrowRight,
   Palette,
@@ -190,6 +192,7 @@ export const metadata: Metadata = {
 export default function FAQPage() {
   return (
     <div className="min-h-screen bg-background">
+      <ScrollTracker pageId="faq" />
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(faqSchema) }}
@@ -210,13 +213,13 @@ export default function FAQPage() {
           </HomeLogoLink>
           <div className="flex items-center space-x-4">
             <Button variant="ghost" asChild>
-              <Link href="/login">Войти</Link>
+              <TrackedLink href="/login" goal="click_login">Войти</TrackedLink>
             </Button>
             <Button asChild>
-              <Link href="/register">
+              <TrackedLink href="/register" goal="click_start_free">
                 Начать бесплатно
                 <ArrowRight className="ml-2 h-4 w-4" />
-              </Link>
+              </TrackedLink>
             </Button>
           </div>
         </div>
@@ -306,10 +309,10 @@ export default function FAQPage() {
 
                 {cta && (
                   <Button className="mt-6" asChild>
-                    <Link href="/register">
+                    <TrackedLink href="/register" goal="click_start_free">
                       Попробовать HandySeller бесплатно
                       <ArrowRight className="ml-2 h-4 w-4" />
-                    </Link>
+                    </TrackedLink>
                   </Button>
                 )}
               </section>
@@ -334,7 +337,7 @@ export default function FAQPage() {
                 Написать в Telegram
               </a>
               <Button variant="outline" asChild>
-                <Link href="/register">Попробовать HandySeller</Link>
+                <TrackedLink href="/register" goal="click_start_free">Попробовать HandySeller</TrackedLink>
               </Button>
             </div>
           </section>

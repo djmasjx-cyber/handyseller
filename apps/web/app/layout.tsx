@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
+import { YandexMetrika } from "@/components/yandex-metrika";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -74,6 +76,9 @@ export default function RootLayout({
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(schemaOrg) }}
         />
+        <Suspense fallback={null}>
+          <YandexMetrika />
+        </Suspense>
         {children}
       </body>
     </html>

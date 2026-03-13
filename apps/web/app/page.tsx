@@ -3,6 +3,7 @@ import Image from "next/image"
 import type { Metadata } from "next"
 import { Button, Badge } from "@handyseller/ui"
 import { HomeLogoLink } from "@/components/home-logo-link"
+import { TrackedLink, TrackedAnchor } from "@/components/tracked-link"
 import {
   ArrowRight,
   Zap,
@@ -98,9 +99,9 @@ export default function Home() {
             <a href="#how-it-works" className="text-sm font-medium hover:text-primary">
               Как это работает
             </a>
-            <a href="#pricing" className="text-sm font-medium hover:text-primary">
+            <TrackedAnchor href="#pricing" goal="view_pricing" className="text-sm font-medium hover:text-primary">
               Тарифы
-            </a>
+            </TrackedAnchor>
             <a href="#faq" className="text-sm font-medium hover:text-primary">
               Вопросы
             </a>
@@ -110,13 +111,13 @@ export default function Home() {
           </nav>
           <div className="flex items-center space-x-4">
             <Button variant="ghost" asChild>
-              <Link href="/login">Войти</Link>
+              <TrackedLink href="/login" goal="click_login">Войти</TrackedLink>
             </Button>
             <Button asChild>
-              <Link href="/register">
+              <TrackedLink href="/register" goal="click_start_free">
                 Начать бесплатно
                 <ArrowRight className="ml-2 h-4 w-4" />
-              </Link>
+              </TrackedLink>
             </Button>
           </div>
         </div>
@@ -143,10 +144,10 @@ export default function Home() {
             </div>
             <div className="flex flex-col sm:flex-row gap-3">
               <Button size="default" className="px-6" asChild>
-                <Link href="/register">
+                <TrackedLink href="/register" goal="click_start_free">
                   Начать бесплатно
                   <ArrowRight className="ml-2 h-5 w-5" />
-                </Link>
+                </TrackedLink>
               </Button>
               <Button size="default" variant="outline" className="px-6" asChild>
                 <a href="#how-it-works">Как это работает</a>
@@ -614,13 +615,13 @@ export default function Home() {
           </p>
           <div className="flex flex-col sm:flex-row justify-center gap-3">
             <Button size="default" className="px-6" asChild>
-              <Link href="/register">
+              <TrackedLink href="/register" goal="click_start_free">
                 Начать бесплатно
                 <ArrowRight className="ml-2 h-4 w-4" />
-              </Link>
+              </TrackedLink>
             </Button>
             <Button size="default" variant="outline" className="px-6" asChild>
-              <Link href="/login">Уже есть аккаунт</Link>
+              <TrackedLink href="/login" goal="click_login">Уже есть аккаунт</TrackedLink>
             </Button>
           </div>
         </div>

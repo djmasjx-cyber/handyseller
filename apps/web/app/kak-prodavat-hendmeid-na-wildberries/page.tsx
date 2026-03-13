@@ -3,6 +3,8 @@ import type { Metadata } from "next"
 import { Button, Badge } from "@handyseller/ui"
 import { HomeLogoLink } from "@/components/home-logo-link"
 import { Breadcrumb, generateBreadcrumbSchema } from "@/components/breadcrumb"
+import { TrackedLink } from "@/components/tracked-link"
+import { ScrollTracker } from "@/components/scroll-tracker"
 import {
   ArrowRight,
   Zap,
@@ -117,19 +119,20 @@ export default function HowToSellHandmadeOnWildberries() {
           </HomeLogoLink>
           <div className="flex items-center space-x-4">
             <Button variant="ghost" asChild>
-              <Link href="/login">Войти</Link>
+              <TrackedLink href="/login" goal="click_login">Войти</TrackedLink>
             </Button>
             <Button asChild>
-              <Link href="/register">
+              <TrackedLink href="/register" goal="click_start_free">
                 Начать бесплатно
                 <ArrowRight className="ml-2 h-4 w-4" />
-              </Link>
+              </TrackedLink>
             </Button>
           </div>
         </div>
       </header>
 
       <main className="container py-8 md:py-12">
+        <ScrollTracker pageId="wildberries" />
         {/* Хлебная крошка */}
         <Breadcrumb items={[
           { label: "Главная", href: "/" },
@@ -161,10 +164,10 @@ export default function HowToSellHandmadeOnWildberries() {
           </div>
 
           <Button size="lg" className="mb-12" asChild>
-            <Link href="/register">
+            <TrackedLink href="/register" goal="click_start_free">
               Попробовать HandySeller бесплатно
               <ArrowRight className="ml-2 h-5 w-5" />
-            </Link>
+            </TrackedLink>
           </Button>
 
           {/* Блок 2: ИП и документы */}
