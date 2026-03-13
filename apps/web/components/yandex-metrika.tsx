@@ -9,7 +9,8 @@ declare global {
   }
 }
 
-const METRIKA_ID = Number(process.env.NEXT_PUBLIC_YANDEX_METRIKA_ID)
+// Публичный номер счётчика Яндекс.Метрики (не секрет — виден в исходнике любого сайта)
+const METRIKA_ID = 107695847
 
 export function YandexMetrika() {
   const pathname = usePathname()
