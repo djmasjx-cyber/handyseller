@@ -406,6 +406,18 @@ export default function HowToSellHandmadeOnWildberries() {
               </Link>{" "}
               или напишите в поддержку.
             </p>
+
+            <div className="bg-muted/50 rounded-lg p-4 border mt-4">
+              <p className="text-sm mb-0">
+                <strong>📚 Читайте также:</strong>{" "}
+                <Link
+                  href="/kak-prodavat-hendmeid-na-ozon"
+                  className="text-primary hover:underline"
+                >
+                  Как продавать хендмейд на Ozon — пошаговая инструкция
+                </Link>
+              </p>
+            </div>
           </section>
 
           {/* Блок 8: Финальный призыв */}
@@ -470,6 +482,12 @@ export default function HowToSellHandmadeOnWildberries() {
                   className="text-muted-foreground hover:text-primary block"
                 >
                   Как продавать на WB
+                </Link>
+                <Link
+                  href="/kak-prodavat-hendmeid-na-ozon"
+                  className="text-muted-foreground hover:text-primary block"
+                >
+                  Как продавать на Ozon
                 </Link>
                 <Link href="/#faq" className="text-muted-foreground hover:text-primary block">
                   FAQ

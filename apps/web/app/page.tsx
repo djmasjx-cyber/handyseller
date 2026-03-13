@@ -645,6 +645,7 @@ export default function Home() {
               <h4 className="font-bold text-sm">Ресурсы</h4>
               <nav className="space-y-2">
                 <div><Link href="/kak-prodavat-hendmeid-na-wildberries" className="text-muted-foreground hover:text-primary">Как продавать на WB</Link></div>
+                <div><Link href="/kak-prodavat-hendmeid-na-ozon" className="text-muted-foreground hover:text-primary">Как продавать на Ozon</Link></div>
                 <div><Link href="/blog" className="text-muted-foreground hover:text-primary">Блог</Link></div>
                 <div><Link href="/help" className="text-muted-foreground hover:text-primary">Помощь</Link></div>
                 <div><a href="#faq" className="text-muted-foreground hover:text-primary">FAQ</a></div>
