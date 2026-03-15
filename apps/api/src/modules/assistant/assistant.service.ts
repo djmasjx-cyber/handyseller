@@ -101,12 +101,10 @@ export class AssistantService {
       ? relevantArticles.map((a, i) => `[${i + 1}] ${a.title}\n${a.content}`).join('\n\n---\n\n')
       : 'Контекст не найден. Ответь на основе общих знаний о продаже хендмейда на маркетплейсах.';
 
-    const history = await this.prisma.assistantMessage.findMany({
-      where: { conversationId: conversation.id },
-      orderBy: { createdAt: 'asc' },
-      take: 12,
-    });
-
+    // Архитектура: Stateless query + Stateful display.
+    // Каждый вопрос обрабатывается независимо: GPT получает system + контекст + текущий вопрос.
+    // История переписки хранится в БД только для отображения в виджете и аналитики.
+    // Исключение: для коротких follow-up вопросов добавляем последнюю пару сообщений.
     const messages: Array<{ role: 'system' | 'user' | 'assistant'; text: string }> = [
       {
         role: 'system',
@@ -114,14 +112,20 @@ export class AssistantService {
       },
     ];
 
-    // Ограничиваем историю: берём только последние 6 сообщений (3 пары вопрос/ответ),
-    // чтобы модель не зацикливалась на старых приветствиях.
-    const trimmedHistory =
-      history.length > 6 ? history.slice(history.length - 6) : history;
+    // Detect follow-up: short questions or pronouns referring to previous answer
+    const followUpPatterns = /^(это|он|она|они|оно|там|тут|как|почему|зачем|а\s|и\s|ещё|ещe|еще|подробнее|расскажи|объясни|что дальше|что значит)/i;
+    const isFollowUp = params.message.trim().length < 25 || followUpPatterns.test(params.message.trim());
 
-    for (const msg of trimmedHistory) {
-      if (msg.role === 'user' || msg.role === 'assistant') {
-        messages.push({ role: msg.role, text: msg.content });
+    if (isFollowUp) {
+      const lastTwo = await this.prisma.assistantMessage.findMany({
+        where: { conversationId: conversation.id },
+        orderBy: { createdAt: 'desc' },
+        take: 2,
+      });
+      for (const msg of lastTwo.reverse()) {
+        if (msg.role === 'user' || msg.role === 'assistant') {
+          messages.push({ role: msg.role, text: msg.content });
+        }
       }
     }
 
