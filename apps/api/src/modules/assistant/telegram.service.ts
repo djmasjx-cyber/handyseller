@@ -12,7 +12,8 @@ interface TelegramUpdate {
   update_id: number;
   message?: {
     message_id: number;
-    chat: { id: number };
+    chat: { id: number; type: string };
+    from?: { id: number };
     text?: string;
     reply_to_message?: {
       message_id: number;
@@ -196,8 +197,9 @@ Session: ${params.sessionId}`;
     const chatId = msg.chat.id;
     const text = msg.text.trim();
 
-    if (text === '/start') {
-      await this.handleStartCommand(chatId);
+    // In groups Telegram appends the bot username: /start@BotName
+    if (text === '/start' || text.startsWith('/start@')) {
+      await this.handleStartCommand(chatId, msg.chat.type);
       return;
     }
 
@@ -254,21 +256,26 @@ Session: ${params.sessionId}`;
     });
   }
 
-  private async handleStartCommand(chatId: number): Promise<void> {
+  private async handleStartCommand(chatId: number, chatType?: string): Promise<void> {
     const chatIdStr = String(chatId);
+    const isGroup = chatType === 'group' || chatType === 'supergroup';
     try {
       await this.prisma.assistantOperator.upsert({
         where: { chatId: chatIdStr },
-        update: {},
-        create: { chatId: chatIdStr },
+        update: { type: isGroup ? 'group' : 'primary' },
+        create: { chatId: chatIdStr, type: isGroup ? 'group' : 'primary' },
       });
       if (!this.operatorChatIds.includes(chatId)) {
         this.operatorChatIds.push(chatId);
       }
-      this.logger.log(`Operator chat_id registered: ${chatId}`);
+      this.logger.log(
+        `Operator chat_id registered: ${chatId} (${isGroup ? 'group' : 'private'})`,
+      );
       await this.sendMessage(
         chatId,
-        'Вы зарегистрированы как оператор. Теперь вы будете получать все сообщения ассистента и логи диалогов.',
+        isGroup
+          ? '✅ Группа зарегистрирована. Все диалоги из виджета будут дублироваться сюда.'
+          : '✅ Вы зарегистрированы как оператор. Теперь вы будете получать все сообщения ассистента и логи диалогов.',
       );
     } catch (err) {
       this.logger.error(
@@ -278,7 +285,7 @@ Session: ${params.sessionId}`;
       );
       await this.sendMessage(
         chatId,
-        'Не удалось зарегистрировать вас как оператора из-за ошибки на сервере.',
+        'Не удалось зарегистрировать из-за ошибки на сервере.',
       );
     }
   }
