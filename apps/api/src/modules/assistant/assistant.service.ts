@@ -170,36 +170,11 @@ export class AssistantService {
         },
       });
 
-      await this.prisma.assistantConversation.update({
-        where: { id: conversation.id },
-        data: { status: 'awaiting_operator' },
-      });
-
-      const recentMessages = await this.prisma.assistantMessage.findMany({
-        where: { conversationId: conversation.id },
-        orderBy: { createdAt: 'desc' },
-        take: 6,
-      });
-      const contextLines = recentMessages
-        .reverse()
-        .map((m) => `${m.role}: ${m.content.slice(0, 200)}`)
-        .join('\n');
-
-      this.telegramService.notifyOperator({
-        conversationId: conversation.id,
-        sessionId: params.sessionId,
-        question: params.message,
-        context: contextLines,
-      }).catch((err) => this.logger.error(`Telegram notify failed: ${err}`));
-
-      this.logger.warn(`Low confidence (${confidence.toFixed(2)}) for: "${params.message.slice(0, 100)}"`);
-    } else if (conversation.status !== 'active') {
-      // Сбрасываем статус, если ранее стоял awaiting_operator / operator_replied,
-      // но текущий ответ модели достаточно уверенный.
-      await this.prisma.assistantConversation.update({
-        where: { id: conversation.id },
-        data: { status: 'active' },
-      });
+      // Только логируем низкую уверенность и сохраняем вопрос для обучения.
+      // Без изменения статуса диалога и без уведомления оператора.
+      this.logger.warn(
+        `Low confidence (${confidence.toFixed(2)}) for: "${params.message.slice(0, 100)}"`,
+      );
     }
 
     return { reply, conversationId: conversation.id, confidence };
