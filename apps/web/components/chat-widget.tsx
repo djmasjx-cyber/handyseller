@@ -179,26 +179,63 @@ export function ChatWidget() {
 
   return (
     <>
-      {/* Toggle button */}
-      <button
-        onClick={() => setOpen((v) => !v)}
-        aria-label={open ? "Закрыть чат" : "Открыть чат-ассистент"}
-        className="fixed bottom-5 right-5 z-[9999] flex h-14 w-14 items-center justify-center rounded-full shadow-lg transition-all hover:scale-105 active:scale-95"
-        style={{ background: "hsl(346.8, 77.2%, 49.8%)" }}
-      >
+      {/* ── Toggle button — floating agent card ── */}
+      <div className="fixed bottom-5 right-5 z-[9999]">
         {open ? (
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round">
-            <line x1="18" y1="6" x2="6" y2="18" />
-            <line x1="6" y1="6" x2="18" y2="18" />
-          </svg>
+          /* Close button — compact circle */
+          <button
+            onClick={() => setOpen(false)}
+            aria-label="Закрыть чат"
+            className="flex h-12 w-12 items-center justify-center rounded-full shadow-xl transition-all duration-200 hover:scale-105 active:scale-95"
+            style={{ background: "hsl(346.8, 77.2%, 49.8%)" }}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
         ) : (
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-          </svg>
-        )}
-      </button>
+          /* Agent card — Intercom-style */
+          <button
+            onClick={() => setOpen(true)}
+            aria-label="Открыть чат с Лерой"
+            className="group flex cursor-pointer items-center gap-3 rounded-2xl border bg-white px-4 py-3 shadow-xl transition-all duration-200 hover:-translate-y-0.5 hover:shadow-2xl active:scale-95"
+            style={{ borderColor: "rgba(0,0,0,0.08)" }}
+          >
+            {/* Avatar with online indicator */}
+            <div className="relative shrink-0">
+              <img
+                src="/lera-avatar.jpg"
+                alt="Лера"
+                className="h-11 w-11 rounded-full object-cover object-top ring-2 ring-white"
+              />
+              {/* Green online dot */}
+              <span
+                className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-white"
+                style={{ background: "#22c55e" }}
+              />
+            </div>
 
-      {/* Chat window */}
+            {/* Text */}
+            <div className="text-left">
+              <p className="text-sm font-semibold text-gray-900 leading-tight">Лера</p>
+              <p className="text-xs text-gray-500 leading-tight mt-0.5">Поддержка · обычно онлайн</p>
+            </div>
+
+            {/* Chat bubble icon */}
+            <div
+              className="ml-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-transform duration-200 group-hover:scale-110"
+              style={{ background: "hsl(346.8, 77.2%, 49.8%)" }}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              </svg>
+            </div>
+          </button>
+        )}
+      </div>
+
+      {/* ── Chat window ── */}
       {open && (
         <div
           className="fixed bottom-24 right-5 z-[9998] flex flex-col overflow-hidden rounded-2xl border shadow-2xl"
@@ -231,20 +268,35 @@ export function ChatWidget() {
               </svg>
             </button>
           )}
-          {/* Header */}
+
+          {/* Header — with Lera's avatar */}
           <div
             className="flex items-center gap-3 px-4 py-3"
             style={{ background: "hsl(346.8, 77.2%, 49.8%)" }}
           >
-            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-white/20">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            <div className="relative shrink-0">
+              <img
+                src="/lera-avatar.jpg"
+                alt="Лера"
+                className="h-10 w-10 rounded-full object-cover object-top ring-2 ring-white/40"
+              />
+              <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-[hsl(346.8,77.2%,49.8%)]" style={{ background: "#4ade80" }} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-white leading-tight">Лера</p>
+              <p className="text-xs text-white/80 leading-tight mt-0.5">HandySeller · Поддержка</p>
+            </div>
+            {/* Close button inside header */}
+            <button
+              onClick={() => setOpen(false)}
+              className="flex h-7 w-7 items-center justify-center rounded-full bg-white/20 transition-colors hover:bg-white/30"
+              aria-label="Закрыть"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
               </svg>
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-white">HandySeller Ассистент</p>
-              <p className="text-xs text-white/70">Помощь по продаже хендмейда</p>
-            </div>
+            </button>
           </div>
 
           {/* Messages */}
@@ -255,16 +307,17 @@ export function ChatWidget() {
           >
             {messages.length === 0 && !loading && (
               <div className="flex h-full flex-col items-center justify-center text-center">
-                <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full" style={{ background: "hsl(346.8, 77.2%, 49.8%, 0.1)" }}>
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="hsl(346.8, 77.2%, 49.8%)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                  </svg>
-                </div>
-                <p className="text-sm font-medium" style={{ color: "hsl(var(--foreground))" }}>
-                  Привет! Я ассистент HandySeller
+                <img
+                  src="/lera-avatar.jpg"
+                  alt="Лера"
+                  className="mb-3 h-14 w-14 rounded-full object-cover object-top ring-2 ring-white shadow-md"
+                  style={{ boxShadow: "0 0 0 4px hsl(346.8,77.2%,49.8%,0.15)" }}
+                />
+                <p className="text-sm font-semibold" style={{ color: "hsl(var(--foreground))" }}>
+                  Привет! Меня зовут Лера 👋
                 </p>
                 <p className="mt-1 text-xs" style={{ color: "hsl(var(--muted-foreground))" }}>
-                  Задайте вопрос о продаже хендмейда на маркетплейсах
+                  Ассистент HandySeller. Спрашивайте о продаже хендмейда на маркетплейсах
                 </p>
                 <div className="mt-4 flex flex-wrap justify-center gap-2">
                   {[
