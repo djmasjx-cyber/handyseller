@@ -105,9 +105,9 @@ export default function Home() {
             <a href="#faq" className="text-sm font-medium hover:text-primary">
               Вопросы
             </a>
-            <a href="#contacts" className="text-sm font-medium hover:text-primary">
+            {/* <a href="#contacts" className="text-sm font-medium hover:text-primary">
               Контакты
-            </a>
+            </a> */}
           </nav>
           <div className="flex items-center space-x-4">
             <Button variant="ghost" asChild>
@@ -564,43 +564,11 @@ export default function Home() {
         </div>
       </section>
 
+      {/* Contacts section hidden — all communication via chat widget
       <section id="contacts" className="min-h-screen container py-12 md:py-16 scroll-mt-20">
-        <div className="max-w-2xl mx-auto text-center">
-          <Badge variant="secondary" className="mb-2">
-            <MessageCircle className="mr-1 h-3 w-3" />
-            Контакты
-          </Badge>
-          <h2 className="text-2xl md:text-3xl font-bold mb-2">
-            Свяжитесь с нами
-          </h2>
-          <p className="text-muted-foreground mb-8">
-            Есть вопросы? Напишите в удобный мессенджер — ответим быстро
-          </p>
-          <div className="flex flex-col sm:flex-row justify-center gap-4">
-            <a
-              href={CONTACTS.telegram}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center justify-center gap-2 rounded-md px-6 py-2.5 text-sm font-medium text-white shadow transition-colors hover:opacity-90 bg-[#0088cc]"
-            >
-              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
-              </svg>
-              Telegram
-            </a>
-            {/* MAX — включить позже
-            <a href={CONTACTS.max} target="_blank" rel="noopener noreferrer" className="...">
-              MAX
-            </a>
-            */}
-            <Button variant="ghost" asChild>
-              <a href={`mailto:${CONTACTS.email}`}>
-                {CONTACTS.email}
-              </a>
-            </Button>
-          </div>
-        </div>
+        ...
       </section>
+      */}
       </main>
 
       {/* CTA Section */}
@@ -660,9 +628,9 @@ export default function Home() {
                 <a href="#faq" className="text-muted-foreground hover:text-primary block">
                   FAQ
                 </a>
-                <a href="#contacts" className="text-muted-foreground hover:text-primary block">
+                {/* <a href="#contacts" className="text-muted-foreground hover:text-primary block">
                   Контакты
-                </a>
+                </a> */}
               </nav>
             </div>
             <div className="space-y-3">
