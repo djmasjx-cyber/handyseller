@@ -66,6 +66,44 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     this.pollingAborted = true;
   }
 
+  async logMessage(params: {
+    conversationId: string;
+    sessionId: string;
+    role: 'user' | 'assistant' | 'operator';
+    text: string;
+  }): Promise<void> {
+    if (!this.baseUrl) return;
+    const chatId = this.operatorChatId;
+    if (chatId === null) {
+      // Логи не критичны, просто пропускаем, если оператор ещё не зарегистрирован.
+      return;
+    }
+
+    const header =
+      params.role === 'user'
+        ? '🧑‍💻 Сообщение клиента'
+        : params.role === 'assistant'
+          ? '🤖 Ответ ассистента'
+          : '👤 Сообщение оператора';
+
+    const body = `${header}
+
+${params.text.slice(0, 800)}
+
+Conversation: ${params.conversationId}
+Session: ${params.sessionId}`;
+
+    try {
+      await this.sendMessage(chatId, body);
+    } catch (err) {
+      this.logger.error(
+        `Failed to send Telegram log message: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
+
   async notifyOperator(params: {
     conversationId: string;
     sessionId: string;

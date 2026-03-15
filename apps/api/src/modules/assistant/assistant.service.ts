@@ -80,6 +80,18 @@ export class AssistantService {
       },
     });
 
+    // Логируем входящее сообщение клиента в Telegram (для анализа и дообучения).
+    this.telegramService
+      .logMessage({
+        conversationId: conversation.id,
+        sessionId: params.sessionId,
+        role: 'user',
+        text: params.message,
+      })
+      .catch((err) =>
+        this.logger.error(`Telegram log (user message) failed: ${String(err)}`),
+      );
+
     const relevantArticles = await this.knowledgeService.searchRelevant(params.message, 5);
 
     const contextBlock = relevantArticles.length > 0
@@ -135,6 +147,18 @@ export class AssistantService {
         tokensUsed,
       },
     });
+
+    // Логируем ответ ассистента в Telegram.
+    this.telegramService
+      .logMessage({
+        conversationId: conversation.id,
+        sessionId: params.sessionId,
+        role: 'assistant',
+        text: reply,
+      })
+      .catch((err) =>
+        this.logger.error(`Telegram log (assistant message) failed: ${String(err)}`),
+      );
 
     if (confidence < LOW_CONFIDENCE_THRESHOLD) {
       await this.prisma.assistantUnanswered.create({
