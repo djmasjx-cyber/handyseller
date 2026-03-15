@@ -116,8 +116,9 @@ export class AssistantService {
 
       confidence = this.estimateConfidence(reply, relevantArticles.length);
     } catch {
-      reply = 'Извините, сейчас я не могу ответить на ваш вопрос. Попробуйте позже или напишите нам в Telegram: @Handyseller_bot';
-      confidence = 0;
+      reply =
+        'Извините, сейчас я не могу ответить на ваш вопрос. Попробуйте позже или напишите нам в Telegram: @Handyseller_bot';
+      confidence = 1; // не передаём оператору при ошибке GPT (нет ключей, сеть и т.д.)
     }
 
     await this.prisma.assistantMessage.create({
