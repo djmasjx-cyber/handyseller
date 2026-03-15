@@ -31,12 +31,16 @@ export function ChatWidget() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [conversationStatus, setConversationStatus] = useState("active");
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [isNearBottom, setIsNearBottom] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const sessionIdRef = useRef<string>("");
   const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  // Prevent interval polls from overwriting optimistic state while API call is in flight
   const loadingRef = useRef(false);
+  // Track previous message count to detect new incoming messages
+  const prevMessageCountRef = useRef(0);
 
   useEffect(() => {
     sessionIdRef.current = getSessionId();
@@ -46,9 +50,41 @@ export function ChatWidget() {
     loadingRef.current = loading;
   }, [loading]);
 
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
+    messagesEndRef.current?.scrollIntoView({ behavior });
+    setUnreadCount(0);
+    setIsNearBottom(true);
+  }, []);
+
+  // Detect whether user is near the bottom of the scroll container
+  const handleScroll = useCallback(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const threshold = 80; // px from bottom considered "near bottom"
+    const near = el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
+    setIsNearBottom(near);
+    if (near) setUnreadCount(0);
+  }, []);
+
+  // Smart auto-scroll: only scroll if user is already near the bottom
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    const newCount = messages.length;
+    const prev = prevMessageCountRef.current;
+    prevMessageCountRef.current = newCount;
+
+    if (newCount <= prev) return; // no new messages (e.g. initial load handled separately)
+
+    if (isNearBottom) {
+      scrollToBottom("smooth");
+    } else {
+      // User scrolled up — count incoming messages (not sent by user)
+      const newMessages = messages.slice(prev);
+      const incomingCount = newMessages.filter((m) => m.role !== "user").length;
+      if (incomingCount > 0) {
+        setUnreadCount((c) => c + incomingCount);
+      }
+    }
+  }, [messages, isNearBottom, scrollToBottom]);
 
   useEffect(() => {
     if (open && inputRef.current) {
@@ -90,7 +126,10 @@ export function ChatWidget() {
       return;
     }
 
-    syncMessages();
+    // On open: load history then jump straight to bottom (instant, no animation)
+    syncMessages().then(() => {
+      setTimeout(() => scrollToBottom("instant" as ScrollBehavior), 50);
+    });
 
     pollingIntervalRef.current = setInterval(() => {
       // Skip poll while a send is in flight to avoid overwriting optimistic message
@@ -105,7 +144,7 @@ export function ChatWidget() {
         pollingIntervalRef.current = null;
       }
     };
-  }, [open, syncMessages]);
+  }, [open, syncMessages, scrollToBottom]);
 
   const sendMessage = useCallback(async () => {
     const text = input.trim();
@@ -114,7 +153,11 @@ export function ChatWidget() {
     setInput("");
     // Optimistic: show user message immediately so it feels instant
     setMessages((prev) => [...prev, { role: "user", content: text }]);
+    setIsNearBottom(true); // user just sent — treat as "at bottom"
+    setUnreadCount(0);
     setLoading(true);
+    // Scroll to show the sent message + loading dots immediately
+    setTimeout(() => scrollToBottom("smooth"), 30);
 
     try {
       await fetch("/api/assistant/message", {
@@ -164,8 +207,30 @@ export function ChatWidget() {
             height: "min(520px, calc(100vh - 8rem))",
             background: "hsl(var(--background))",
             borderColor: "hsl(var(--border))",
+            position: "fixed",
           }}
         >
+          {/* Scroll-to-bottom button — shown when user has scrolled up */}
+          {!isNearBottom && (
+            <button
+              onClick={() => scrollToBottom("smooth")}
+              className="absolute bottom-[60px] right-3 z-20 flex h-8 w-8 items-center justify-center rounded-full shadow-lg transition-all hover:scale-110"
+              style={{ background: "hsl(346.8, 77.2%, 49.8%)" }}
+              aria-label="Прокрутить вниз"
+            >
+              {unreadCount > 0 && (
+                <span
+                  className="absolute -top-2 -right-1.5 flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-bold text-white"
+                  style={{ background: "#16a34a" }}
+                >
+                  {unreadCount > 9 ? "9+" : unreadCount}
+                </span>
+              )}
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </button>
+          )}
           {/* Header */}
           <div
             className="flex items-center gap-3 px-4 py-3"
@@ -183,7 +248,11 @@ export function ChatWidget() {
           </div>
 
           {/* Messages */}
-          <div className="flex-1 overflow-y-auto px-4 py-3" style={{ scrollBehavior: "smooth" }}>
+          <div
+            ref={scrollContainerRef}
+            onScroll={handleScroll}
+            className="relative flex-1 overflow-y-auto px-4 py-3"
+          >
             {messages.length === 0 && !loading && (
               <div className="flex h-full flex-col items-center justify-center text-center">
                 <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full" style={{ background: "hsl(346.8, 77.2%, 49.8%, 0.1)" }}>
