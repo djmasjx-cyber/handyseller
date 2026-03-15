@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { PrismaService } from '../../common/database/prisma.service';
 
 interface TelegramUpdate {
   update_id: number;
@@ -30,7 +31,7 @@ interface NotificationMeta {
 export class TelegramService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(TelegramService.name);
   private readonly baseUrl: string | null = null;
-  private operatorChatId: number | null = null;
+  private operatorChatIds: number[] = [];
   private pollingAborted = false;
   private lastUpdateId = 0;
   private readonly notificationMeta = new Map<number, NotificationMeta>();
@@ -38,17 +39,11 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly configService: ConfigService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly prisma: PrismaService,
   ) {
     const token = this.configService.get<string>('TELEGRAM_BOT_TOKEN');
     if (token) {
       this.baseUrl = `https://api.telegram.org/bot${token}`;
-      const chatId = this.configService.get<string>('TELEGRAM_OPERATOR_CHAT_ID');
-      if (chatId) {
-        const parsed = parseInt(chatId, 10);
-        if (!Number.isNaN(parsed)) {
-          this.operatorChatId = parsed;
-        }
-      }
     } else {
       this.logger.warn(
         'TELEGRAM_BOT_TOKEN is not set. Telegram notifications and polling are disabled.',
@@ -58,6 +53,23 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
   async onModuleInit(): Promise<void> {
     if (this.baseUrl) {
+      try {
+        const operators = await this.prisma.assistantOperator.findMany();
+        this.operatorChatIds = operators
+          .map((o) => parseInt(o.chatId, 10))
+          .filter((id) => !Number.isNaN(id));
+        if (this.operatorChatIds.length > 0) {
+          this.logger.log(
+            `Loaded ${this.operatorChatIds.length} Telegram operator chat_id(s) from DB`,
+          );
+        }
+      } catch (err) {
+        this.logger.error(
+          `Failed to load assistant operators from DB: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
       this.startPolling();
     }
   }
@@ -73,8 +85,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     text: string;
   }): Promise<void> {
     if (!this.baseUrl) return;
-    const chatId = this.operatorChatId;
-    if (chatId === null) {
+    if (this.operatorChatIds.length === 0) {
       // Логи не критичны, просто пропускаем, если оператор ещё не зарегистрирован.
       return;
     }
@@ -93,14 +104,16 @@ ${params.text.slice(0, 800)}
 Conversation: ${params.conversationId}
 Session: ${params.sessionId}`;
 
-    try {
-      await this.sendMessage(chatId, body);
-    } catch (err) {
-      this.logger.error(
-        `Failed to send Telegram log message: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
+    for (const chatId of this.operatorChatIds) {
+      try {
+        await this.sendMessage(chatId, body);
+      } catch (err) {
+        this.logger.error(
+          `Failed to send Telegram log message to ${chatId}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
     }
   }
 
@@ -111,11 +124,9 @@ Session: ${params.sessionId}`;
     context: string;
   }): Promise<void> {
     if (!this.baseUrl) return;
-
-    const chatId = this.operatorChatId;
-    if (chatId === null) {
+    if (this.operatorChatIds.length === 0) {
       this.logger.warn(
-        'TELEGRAM_OPERATOR_CHAT_ID is not set and no operator has sent /start. Skipping notification.',
+        'No assistant operators registered yet. Skipping notification.',
       );
       return;
     }
@@ -135,18 +146,22 @@ Session: ${params.sessionId}`;
       'Отправьте /approve в ответ, чтобы добавить Q&A в базу знаний.',
     ].join('\n');
 
-    try {
-      const { messageId } = await this.sendMessage(chatId, text, {
-        parseMode: 'Markdown',
-      });
-      this.notificationMeta.set(messageId, {
-        conversationId: params.conversationId,
-        question: params.question,
-      });
-    } catch (err) {
-      this.logger.error(
-        `Failed to send Telegram notification: ${err instanceof Error ? err.message : String(err)}`,
-      );
+    for (const chatId of this.operatorChatIds) {
+      try {
+        const { messageId } = await this.sendMessage(chatId, text, {
+          parseMode: 'Markdown',
+        });
+        this.notificationMeta.set(messageId, {
+          conversationId: params.conversationId,
+          question: params.question,
+        });
+      } catch (err) {
+        this.logger.error(
+          `Failed to send Telegram notification to ${chatId}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
     }
   }
 
@@ -240,12 +255,32 @@ Session: ${params.sessionId}`;
   }
 
   private async handleStartCommand(chatId: number): Promise<void> {
-    this.operatorChatId = chatId;
-    this.logger.log(`Operator chat_id registered: ${chatId}`);
-    await this.sendMessage(
-      chatId,
-      'Вы зарегистрированы как оператор. Теперь вы будете получать уведомления о вопросах с низкой уверенностью.',
-    );
+    const chatIdStr = String(chatId);
+    try {
+      await this.prisma.assistantOperator.upsert({
+        where: { chatId: chatIdStr },
+        update: {},
+        create: { chatId: chatIdStr },
+      });
+      if (!this.operatorChatIds.includes(chatId)) {
+        this.operatorChatIds.push(chatId);
+      }
+      this.logger.log(`Operator chat_id registered: ${chatId}`);
+      await this.sendMessage(
+        chatId,
+        'Вы зарегистрированы как оператор. Теперь вы будете получать все сообщения ассистента и логи диалогов.',
+      );
+    } catch (err) {
+      this.logger.error(
+        `Failed to register operator chat_id ${chatId}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      await this.sendMessage(
+        chatId,
+        'Не удалось зарегистрировать вас как оператора из-за ошибки на сервере.',
+      );
+    }
   }
 
   private async handleApproveCommand(
