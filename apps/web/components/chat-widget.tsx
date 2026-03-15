@@ -34,11 +34,17 @@ export function ChatWidget() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const sessionIdRef = useRef<string>("");
-  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Prevent interval polls from overwriting optimistic state while API call is in flight
+  const loadingRef = useRef(false);
 
   useEffect(() => {
     sessionIdRef.current = getSessionId();
   }, []);
+
+  useEffect(() => {
+    loadingRef.current = loading;
+  }, [loading]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -50,7 +56,8 @@ export function ChatWidget() {
     }
   }, [open]);
 
-  const pollHistory = useCallback(async () => {
+  // Server is the single source of truth for messages
+  const syncMessages = useCallback(async () => {
     if (!sessionIdRef.current) return;
     try {
       const res = await fetch(
@@ -62,70 +69,70 @@ export function ChatWidget() {
         status: string;
       };
       setConversationStatus(data.status);
-
-      const serverMessages: Message[] = data.messages.map((m) => ({
-        role: m.role as Message["role"],
-        content: m.content,
-      }));
-      setMessages(serverMessages);
-
-      if (data.status === "operator_replied" || data.status === "active") {
-        if (pollingRef.current) {
-          clearInterval(pollingRef.current);
-          pollingRef.current = null;
-        }
-      }
+      setMessages(
+        data.messages.map((m) => ({
+          role: m.role as Message["role"],
+          content: m.content,
+        }))
+      );
     } catch {
-      // ignore polling errors
+      // ignore transient errors
     }
   }, []);
 
+  // Load history immediately on open; poll every 3s while chat is open
   useEffect(() => {
-    if (open && conversationStatus === "awaiting_operator") {
-      if (!pollingRef.current) {
-        pollingRef.current = setInterval(pollHistory, 3000);
+    if (!open) {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
       }
+      return;
     }
+
+    syncMessages();
+
+    pollingIntervalRef.current = setInterval(() => {
+      // Skip poll while a send is in flight to avoid overwriting optimistic message
+      if (!loadingRef.current) {
+        syncMessages();
+      }
+    }, 3000);
+
     return () => {
-      if (pollingRef.current) {
-        clearInterval(pollingRef.current);
-        pollingRef.current = null;
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
       }
     };
-  }, [open, conversationStatus, pollHistory]);
+  }, [open, syncMessages]);
 
   const sendMessage = useCallback(async () => {
     const text = input.trim();
     if (!text || loading) return;
 
     setInput("");
+    // Optimistic: show user message immediately so it feels instant
     setMessages((prev) => [...prev, { role: "user", content: text }]);
     setLoading(true);
 
     try {
-      const res = await fetch("/api/assistant/message", {
+      await fetch("/api/assistant/message", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sessionId: sessionIdRef.current, message: text }),
       });
-
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = (await res.json()) as { reply: string };
-      setMessages((prev) => [...prev, { role: "assistant", content: data.reply }]);
-
-      setTimeout(pollHistory, 500);
+      // Sync from server — picks up the saved user message + assistant reply (no duplicates)
+      await syncMessages();
     } catch {
       setMessages((prev) => [
         ...prev,
-        {
-          role: "assistant",
-          content: "Не удалось получить ответ. Попробуйте позже или напишите нам в Telegram: @Handyseller_bot",
-        },
+        { role: "assistant", content: "Не удалось получить ответ. Попробуйте позже." },
       ]);
     } finally {
       setLoading(false);
     }
-  }, [input, loading, pollHistory]);
+  }, [input, loading, syncMessages]);
 
   return (
     <>
@@ -177,7 +184,7 @@ export function ChatWidget() {
 
           {/* Messages */}
           <div className="flex-1 overflow-y-auto px-4 py-3" style={{ scrollBehavior: "smooth" }}>
-            {messages.length === 0 && (
+            {messages.length === 0 && !loading && (
               <div className="flex h-full flex-col items-center justify-center text-center">
                 <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full" style={{ background: "hsl(346.8, 77.2%, 49.8%, 0.1)" }}>
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="hsl(346.8, 77.2%, 49.8%)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -200,9 +207,7 @@ export function ChatWidget() {
                       key={q}
                       onClick={() => {
                         setInput(q);
-                        setTimeout(() => {
-                          inputRef.current?.focus();
-                        }, 0);
+                        setTimeout(() => inputRef.current?.focus(), 0);
                       }}
                       className="rounded-full border px-3 py-1.5 text-xs transition-colors hover:border-[hsl(346.8,77.2%,49.8%)] hover:text-[hsl(346.8,77.2%,49.8%)]"
                       style={{ borderColor: "hsl(var(--border))", color: "hsl(var(--muted-foreground))" }}
@@ -224,17 +229,17 @@ export function ChatWidget() {
                     </svg>
                   </div>
                 )}
-                <div>
+                <div className={msg.role === "user" ? "" : "max-w-[85%]"}>
                   {msg.role === "operator" && (
                     <p className="mb-1 text-xs font-medium" style={{ color: "#2563eb" }}>
                       Оператор поддержки
                     </p>
                   )}
                   <div
-                    className="max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed whitespace-pre-wrap"
+                    className="rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed whitespace-pre-wrap"
                     style={
                       msg.role === "user"
-                        ? { background: "hsl(346.8, 77.2%, 49.8%)", color: "white", borderBottomRightRadius: "4px" }
+                        ? { background: "hsl(346.8, 77.2%, 49.8%)", color: "white", borderBottomRightRadius: "4px", maxWidth: "85%" }
                         : msg.role === "operator"
                           ? { background: "#dbeafe", color: "#1e3a5f", borderBottomLeftRadius: "4px", border: "1px solid #93c5fd" }
                           : { background: "hsl(var(--muted))", color: "hsl(var(--foreground))", borderBottomLeftRadius: "4px" }

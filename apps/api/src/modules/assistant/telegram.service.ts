@@ -114,7 +114,12 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
     for (const chatId of this.operatorChatIds) {
       try {
-        await this.sendMessage(chatId, body);
+        const { messageId } = await this.sendMessage(chatId, body);
+        // Store mapping so operator can reply to this log message to reach the client
+        this.notificationMeta.set(messageId, {
+          conversationId: params.conversationId,
+          question: params.text.slice(0, 300),
+        });
       } catch (err) {
         this.logger.error(
           `Failed to send Telegram log message to ${chatId}: ${
