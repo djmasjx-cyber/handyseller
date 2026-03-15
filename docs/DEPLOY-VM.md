@@ -35,6 +35,15 @@ npm run deploy
   - `YANDEX_MDB_HOST`, `YANDEX_MDB_PASSWORD` — обязательны для продакшена (Managed PostgreSQL)
   - опционально: `YANDEX_MDB_USER`, `CORS_ORIGIN`, `VTB_*`, `RESEND_API_KEY` и др. (см. .env.secrets.example)
 
+### Деплой через GitHub Actions (CI)
+
+При push в `main` workflow собирает образы в GHCR и деплоит на VM через `docker-compose.ci.yml`. На VM в `/opt/handyseller/.env.production` должны быть заданы переменные для **AI-ассистента** (иначе ассистент будет отвечать «напишите в Telegram» на каждый вопрос):
+
+- `YANDEX_GPT_API_KEY` — API-ключ Yandex GPT (сервисный аккаунт, область `yc.ai.foundationModels.execute`)
+- `YANDEX_GPT_FOLDER_ID` — идентификатор каталога Yandex Cloud
+- `TELEGRAM_BOT_TOKEN` — токен бота для уведомлений оператора (при низкой уверенности ответа)
+- `TELEGRAM_OPERATOR_CHAT_ID` — (опционально) chat_id оператора; иначе оператор пишет боту `/start` и регистрируется сам
+
 ## Безопасность и надёжность
 
 - Секреты (JWT_SECRET, ENCRYPTION_KEY, DATABASE_URL) не попадают в репозиторий: подставляются на VM при деплое из .env.secrets и сохранённых файлов.
