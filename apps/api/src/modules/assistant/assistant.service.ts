@@ -167,6 +167,13 @@ export class AssistantService {
       }).catch((err) => this.logger.error(`Telegram notify failed: ${err}`));
 
       this.logger.warn(`Low confidence (${confidence.toFixed(2)}) for: "${params.message.slice(0, 100)}"`);
+    } else if (conversation.status !== 'active') {
+      // Сбрасываем статус, если ранее стоял awaiting_operator / operator_replied,
+      // но текущий ответ модели достаточно уверенный.
+      await this.prisma.assistantConversation.update({
+        where: { id: conversation.id },
+        data: { status: 'active' },
+      });
     }
 
     return { reply, conversationId: conversation.id, confidence };
