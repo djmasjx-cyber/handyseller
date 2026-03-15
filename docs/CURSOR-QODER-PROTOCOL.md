@@ -26,6 +26,13 @@
 ## 2. Что делает Qoder
 
 1. Читает `docs/DEVELOPER-WORKFLOW.md`
+
+**Среда разработки (знать, не менять):**
+- **Dev** — http://dev.handyseller.ru. Prod (app.handyseller.ru) и dev работают параллельно. Dev: API 4001, Web 3002. Запуск: `npm run dev:parallel`, остановка: `npm run dev:parallel:stop`. Проверять изменения на dev до коммита. **Не менять** скрипты dev-parallel, nginx-конфиг dev, порты — схема работает.
+
+**Запрещено менять (стабильно работает, не трогать):**
+- **Выгрузка карточек на WB** — `apps/api/src/modules/marketplaces/adapters/wildberries.adapter.ts`, методы `convertToPlatform`, `tryUploadWithFullResponse`, `uploadFromCanonical`. Формат запроса (supplierVendorCode, brand на уровне карточки, price в sizes, characteristics.value как массив) проверен и работает. Не менять логику формирования payload для WB Content API.
+
 2. Создаёт ветку `fix/` или `feat/`
 3. Вносит изменения только в `src/`, `prisma/`, `docs/`
 4. Проверяет: `npm run build`

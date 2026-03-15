@@ -10,7 +10,7 @@ alwaysApply: true
 
 **Не делаешь:** push в main, merge в main
 
-**Перед задачей:** читай `docs/DEVELOPER-WORKFLOW.md` и `AGENTS.md`
+**Перед задачей:** читай `AGENTS.md`, `docs/DEVELOPER-WORKFLOW.md`, `docs/CURSOR-QODER-PROTOCOL.md` (разделы «Запрещено менять», «Среда разработки»), при работе на сервере — `docs/QODER-DEV-WORKFLOW.md`
 
 **После PR:** отчёт по формату из `docs/CURSOR-QODER-PROTOCOL.md` → «Отчёт Qoder после завершения»
 

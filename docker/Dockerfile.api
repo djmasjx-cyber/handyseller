@@ -3,28 +3,26 @@
 # Run from monorepo root
 
 # Stage 1: Build
-FROM node:18-alpine AS builder
+FROM node:20-alpine AS builder
+
+RUN apk add --no-cache openssl
 
 WORKDIR /app
 
-# Копируем package файлы (monorepo + api)
 COPY package*.json ./
 COPY apps/api/package*.json ./apps/api/
-COPY tsconfig.json ./
 
-# Устанавливаем все зависимости (включая dev для сборки)
 RUN npm ci
 
-# Копируем исходный код API
 COPY apps/api ./apps/api
 
-# Prisma generate + сборка
 WORKDIR /app/apps/api
 RUN npx prisma generate
 RUN npm run build
 
-# Stage 2: Production
-FROM node:18-alpine
+FROM node:20-alpine
+
+RUN apk add --no-cache openssl
 
 WORKDIR /app
 
@@ -43,7 +41,6 @@ RUN npm prune --omit=dev
 # .env из примера (переопределяется через env при запуске)
 COPY apps/api/.env.example apps/api/.env
 
-RUN addgroup -g 1001 -S nodejs && adduser -S node -u 1001 -G nodejs
 RUN chown -R node:node /app
 USER node
 
@@ -55,4 +52,4 @@ EXPOSE 4000
 ENV PORT=4000
 ENV NODE_ENV=production
 
-CMD ["node", "apps/api/dist/main.js"]
+CMD ["node", "apps/api/dist/src/main.js"]

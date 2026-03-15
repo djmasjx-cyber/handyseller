@@ -486,3 +486,65 @@ model VtbWebhook {
   @@index([processed])
   @@index([createdAt])
 }
+
+// ── AI Assistant ──────────────────────────────────────────────────────
+
+model AssistantKnowledge {
+  id        String   @id @default(uuid())
+  sourceUrl String?  @map("source_url") @db.VarChar(1024)
+  title     String   @db.VarChar(500)
+  content   String   @db.Text
+  category  String?  @db.VarChar(100)
+  hash      String   @unique @db.VarChar(64)
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("assistant_knowledge")
+  @@index([category])
+  @@index([isActive])
+}
+
+model AssistantConversation {
+  id        String   @id @default(uuid())
+  sessionId String   @map("session_id") @db.VarChar(128)
+  ipAddress String?  @map("ip_address") @db.VarChar(45)
+  userAgent String?  @map("user_agent") @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  messages AssistantMessage[]
+
+  @@map("assistant_conversation")
+  @@index([sessionId])
+}
+
+model AssistantMessage {
+  id             String  @id @default(uuid())
+  conversationId String  @map("conversation_id")
+  role           String  @db.VarChar(20)
+  content        String  @db.Text
+  confidence     Float?
+  tokensUsed     Int?    @map("tokens_used")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  conversation AssistantConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@map("assistant_message")
+  @@index([conversationId])
+  @@index([createdAt])
+}
+
+model AssistantUnanswered {
+  id        String   @id @default(uuid())
+  question  String   @db.Text
+  sessionId String?  @map("session_id") @db.VarChar(128)
+  answer    String?  @db.Text
+  resolved  Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("assistant_unanswered")
+  @@index([resolved])
+  @@index([createdAt])
+}

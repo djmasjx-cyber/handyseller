@@ -20,6 +20,7 @@
 1. **Не трогать `dist/`** — скомпилированный вывод. Менять только `src/`, `prisma/`, `docs/`.
 2. **Push в main** — только Cursor, только по явной просьбе пользователя.
 3. **SSH для push:** `GIT_SSH_COMMAND="ssh -i ~/.ssh/id_ed25519_github -o IdentitiesOnly=yes" git push origin <ветка>`
+4. **Выгрузка карточек на WB** — не менять. `wildberries.adapter.ts` (convertToPlatform, tryUploadWithFullResponse, uploadFromCanonical) — формат проверен, работает. Подробнее: `docs/CURSOR-QODER-PROTOCOL.md`.
 
 ---
 
@@ -38,6 +39,6 @@
 
 ## Точка входа для Qoder
 
-1. **При старте задачи:** прочитай `docs/DEVELOPER-WORKFLOW.md`. Следуй разделу «Роль Qoder».
-2. **При разработке на сервере:** прочитай `docs/QODER-DEV-WORKFLOW.md`. Используй `npm run dev:start` / `npm run dev:stop`, коммить и пушить только после проверки.
+1. **При старте задачи:** прочитай `docs/DEVELOPER-WORKFLOW.md` и `docs/CURSOR-QODER-PROTOCOL.md`. Следуй разделу «Роль Qoder».
+2. **При разработке на сервере:** прочитай `docs/QODER-DEV-WORKFLOW.md`. Используй `npm run dev:parallel` / `npm run dev:parallel:stop`, проверяй на http://dev.handyseller.ru, коммить и пушить только после проверки.
 3. **После PR:** сообщи пользователю, что готово к merge.
