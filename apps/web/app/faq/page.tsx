@@ -5,6 +5,7 @@ import { HomeLogoLink } from "@/components/home-logo-link"
 import { Breadcrumb, generateBreadcrumbSchema } from "@/components/breadcrumb"
 import { TrackedLink } from "@/components/tracked-link"
 import { ScrollTracker } from "@/components/scroll-tracker"
+import { TelegramLink } from "@/components/telegram-link"
 import {
   ArrowRight,
   Palette,
@@ -13,7 +14,7 @@ import {
 } from "lucide-react"
 
 const CONTACTS = {
-  telegram: "https://t.me/Handyseller_bot",
+  telegramUsername: "Handyseller_bot",
   email: "support@handyseller.ru",
 }
 
@@ -327,15 +328,14 @@ export default function FAQPage() {
               нюансами продажи хендмейда на маркетплейсах.
             </p>
             <div className="flex flex-col sm:flex-row justify-center gap-3">
-              <a
-                href={CONTACTS.telegram}
-                target="_blank"
-                rel="noopener noreferrer"
+              <TelegramLink
+                username={CONTACTS.telegramUsername}
+                source="faq"
                 className="inline-flex items-center justify-center gap-2 rounded-md px-6 py-2.5 text-sm font-medium text-white shadow transition-colors hover:opacity-90 bg-[#0088cc]"
               >
                 <MessageCircle className="h-4 w-4" />
                 Написать в Telegram
-              </a>
+              </TelegramLink>
               <Button variant="outline" asChild>
                 <TrackedLink href="/register" goal="click_start_free">Попробовать HandySeller</TrackedLink>
               </Button>
@@ -399,14 +399,13 @@ export default function FAQPage() {
             <div className="space-y-3">
               <h4 className="font-bold text-sm">Контакты</h4>
               <div className="space-y-2">
-                <a
-                  href={CONTACTS.telegram}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                <TelegramLink
+                  username={CONTACTS.telegramUsername}
+                  source="footer_faq"
                   className="text-muted-foreground hover:text-primary block"
                 >
                   Telegram
-                </a>
+                </TelegramLink>
                 <a
                   href={`mailto:${CONTACTS.email}`}
                   className="text-muted-foreground hover:text-primary block"

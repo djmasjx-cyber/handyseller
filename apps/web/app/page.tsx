@@ -4,6 +4,7 @@ import type { Metadata } from "next"
 import { Button, Badge } from "@handyseller/ui"
 import { HomeLogoLink } from "@/components/home-logo-link"
 import { TrackedLink, TrackedAnchor } from "@/components/tracked-link"
+import { TelegramLink } from "@/components/telegram-link"
 import {
   ArrowRight,
   Zap,
@@ -19,10 +20,8 @@ import {
   MessageCircle,
 } from "lucide-react"
 
-// Контакты — ссылки ведут в личный чат с вами (каждый клиент — отдельный диалог)
 const CONTACTS = {
-  telegram: "https://t.me/Handyseller_bot",
-  max: "https://max.ru/join/rlSh6LsAcacmgoVr_EOP4zwroIV-7wo2D12VJMbn7Fk", // для 1-on-1 замените на ссылку из MAX → Профиль → Поделиться
+  telegramUsername: "Handyseller_bot",
   email: "support@handyseller.ru",
 }
 
@@ -649,9 +648,13 @@ export default function Home() {
             <div className="space-y-3">
               <h4 className="font-bold text-sm">Контакты</h4>
               <div className="space-y-2">
-                <a href={CONTACTS.telegram} target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-primary block">
+                <TelegramLink
+                  username={CONTACTS.telegramUsername}
+                  source="footer_main"
+                  className="text-muted-foreground hover:text-primary block"
+                >
                   Telegram
-                </a>
+                </TelegramLink>
                 <a href={`mailto:${CONTACTS.email}`} className="text-muted-foreground hover:text-primary block">
                   {CONTACTS.email}
                 </a>
