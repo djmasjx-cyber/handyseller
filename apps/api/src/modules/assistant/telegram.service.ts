@@ -36,6 +36,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   private pollingAborted = false;
   private lastUpdateId = 0;
   private readonly notificationMeta = new Map<number, NotificationMeta>();
+  // shortId (first 8 hex chars of UUID) -> full conversationId
+  private readonly shortIdMap = new Map<string, string>();
 
   constructor(
     private readonly configService: ConfigService,
@@ -91,19 +93,24 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
+    // Keep short ID in memory for tag-based replies (#shortId answer)
+    const shortId = params.conversationId.replace(/-/g, '').slice(0, 8);
+    this.shortIdMap.set(shortId, params.conversationId);
+
     const header =
       params.role === 'user'
-        ? '🧑‍💻 Сообщение клиента'
+        ? '🧑‍💻 Клиент'
         : params.role === 'assistant'
-          ? '🤖 Ответ ассистента'
-          : '👤 Сообщение оператора';
+          ? '🤖 Ассистент'
+          : '👤 Оператор';
 
-    const body = `${header}
-
-${params.text.slice(0, 800)}
-
-Conversation: ${params.conversationId}
-Session: ${params.sessionId}`;
+    const body = [
+      `${header} [#${shortId}]`,
+      '',
+      params.text.slice(0, 800),
+      '',
+      `Чтобы ответить клиенту: ответьте на это сообщение (reply) или напишите #${shortId} <текст>`,
+    ].join('\n');
 
     for (const chatId of this.operatorChatIds) {
       try {
@@ -197,29 +204,39 @@ Session: ${params.sessionId}`;
     const chatId = msg.chat.id;
     const text = msg.text.trim();
 
-    // In groups Telegram appends the bot username: /start@BotName
+    // /start is always handled (registers the chat as operator)
     if (text === '/start' || text.startsWith('/start@')) {
       await this.handleStartCommand(chatId, msg.chat.type);
       return;
     }
 
-    if (msg.reply_to_message) {
-      const replyToId = msg.reply_to_message.message_id;
-      const replyToText = msg.reply_to_message.text ?? '';
-      if (text === '/approve') {
-        await this.handleApproveCommand(chatId, replyToId, replyToText);
-        return;
-      }
-      await this.handleOperatorReply(
-        chatId,
-        text,
-        replyToId,
-        msg.reply_to_message?.text ?? '',
-      );
+    // Only process messages from registered operator chats — everything else is ignored
+    if (!this.operatorChatIds.includes(chatId)) {
+      this.logger.debug(`Ignored message from unregistered chat ${chatId}`);
       return;
     }
 
-    this.logger.debug(`Ignoring Telegram message from ${chatId}: ${text.slice(0, 50)}`);
+    // Reply to a bot message → operator is replying to a specific conversation
+    if (msg.reply_to_message) {
+      const replyToId = msg.reply_to_message.message_id;
+      const replyToText = msg.reply_to_message.text ?? '';
+      if (text === '/approve' || text.startsWith('/approve@')) {
+        await this.handleApproveCommand(chatId, replyToId, replyToText);
+        return;
+      }
+      await this.handleOperatorReply(chatId, text, replyToId, replyToText);
+      return;
+    }
+
+    // Tag-based reply: #shortId Answer text (e.g. #a2b4c6d8 Вот ваш ответ)
+    const tagMatch = text.match(/^#([a-f0-9]{8})\s+([\s\S]+)/i);
+    if (tagMatch) {
+      await this.handleTaggedReply(chatId, tagMatch[1].toLowerCase(), tagMatch[2].trim());
+      return;
+    }
+
+    // Everything else is treated as internal group discussion — silently ignored
+    this.logger.debug(`Internal discussion ignored from chat ${chatId}: ${text.slice(0, 50)}`);
   }
 
   private async handleOperatorReply(
@@ -254,6 +271,44 @@ Session: ${params.sessionId}`;
       text,
       question: meta.question,
     });
+  }
+
+  private async handleTaggedReply(
+    chatId: number,
+    shortId: string,
+    answer: string,
+  ): Promise<void> {
+    // Try in-memory map first, then fall back to DB prefix lookup
+    let conversationId = this.shortIdMap.get(shortId) ?? null;
+
+    if (!conversationId) {
+      try {
+        const conv = await this.prisma.assistantConversation.findFirst({
+          where: { id: { startsWith: shortId } },
+          select: { id: true },
+        });
+        conversationId = conv?.id ?? null;
+        if (conversationId) this.shortIdMap.set(shortId, conversationId);
+      } catch {
+        conversationId = null;
+      }
+    }
+
+    if (!conversationId) {
+      await this.sendMessage(
+        chatId,
+        `❌ Заявка #${shortId} не найдена. Проверьте ID из сообщения бота.`,
+      );
+      return;
+    }
+
+    this.eventEmitter.emit('operator.reply', {
+      conversationId,
+      text: answer,
+      question: '',
+    });
+
+    await this.sendMessage(chatId, `✅ Ответ отправлен клиенту по заявке #${shortId}`);
   }
 
   private async handleStartCommand(chatId: number, chatType?: string): Promise<void> {
