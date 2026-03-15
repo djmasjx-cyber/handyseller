@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
@@ -20,7 +20,7 @@ interface CompletionResponse {
 }
 
 @Injectable()
-export class YandexGptService {
+export class YandexGptService implements OnModuleInit {
   private readonly logger = new Logger(YandexGptService.name);
   private readonly apiUrl = 'https://llm.api.cloud.yandex.net/foundationModels/v1/completion';
 
@@ -28,6 +28,14 @@ export class YandexGptService {
     private readonly configService: ConfigService,
     private readonly httpService: HttpService,
   ) {}
+
+  onModuleInit(): void {
+    const key = this.configService.get<string>('YANDEX_GPT_API_KEY');
+    const folderId = this.configService.get<string>('YANDEX_GPT_FOLDER_ID');
+    this.logger.log(
+      `Yandex GPT: API key ${key ? 'set' : 'NOT SET'}, Folder ID ${folderId ? 'set' : 'NOT SET'}`,
+    );
+  }
 
   private get apiKey(): string {
     return this.configService.getOrThrow<string>('YANDEX_GPT_API_KEY');

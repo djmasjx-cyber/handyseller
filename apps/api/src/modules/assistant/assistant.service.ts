@@ -115,7 +115,12 @@ export class AssistantService {
       tokensUsed = result.tokensUsed;
 
       confidence = this.estimateConfidence(reply, relevantArticles.length);
-    } catch {
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      this.logger.warn(
+        `Assistant: Yandex GPT call failed — ${status ? `HTTP ${status}` : msg}`,
+      );
       reply =
         'Извините, сейчас я не могу ответить на ваш вопрос. Попробуйте позже или напишите нам в Telegram: @Handyseller_bot';
       confidence = 1; // не передаём оператору при ошибке GPT (нет ключей, сеть и т.д.)
