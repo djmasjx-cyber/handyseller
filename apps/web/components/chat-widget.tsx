@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 
 interface Message {
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "operator";
   content: string;
 }
 
@@ -30,9 +30,11 @@ export function ChatWidget() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [conversationStatus, setConversationStatus] = useState("active");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const sessionIdRef = useRef<string>("");
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     sessionIdRef.current = getSessionId();
@@ -47,6 +49,50 @@ export function ChatWidget() {
       inputRef.current.focus();
     }
   }, [open]);
+
+  const pollHistory = useCallback(async () => {
+    if (!sessionIdRef.current) return;
+    try {
+      const res = await fetch(
+        `/api/assistant/history?sessionId=${encodeURIComponent(sessionIdRef.current)}`
+      );
+      if (!res.ok) return;
+      const data = (await res.json()) as {
+        messages: Array<{ role: string; content: string }>;
+        status: string;
+      };
+      setConversationStatus(data.status);
+
+      const serverMessages: Message[] = data.messages.map((m) => ({
+        role: m.role as Message["role"],
+        content: m.content,
+      }));
+      setMessages(serverMessages);
+
+      if (data.status === "operator_replied" || data.status === "active") {
+        if (pollingRef.current) {
+          clearInterval(pollingRef.current);
+          pollingRef.current = null;
+        }
+      }
+    } catch {
+      // ignore polling errors
+    }
+  }, []);
+
+  useEffect(() => {
+    if (open && conversationStatus === "awaiting_operator") {
+      if (!pollingRef.current) {
+        pollingRef.current = setInterval(pollHistory, 3000);
+      }
+    }
+    return () => {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
+    };
+  }, [open, conversationStatus, pollHistory]);
 
   const sendMessage = useCallback(async () => {
     const text = input.trim();
@@ -66,6 +112,8 @@ export function ChatWidget() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = (await res.json()) as { reply: string };
       setMessages((prev) => [...prev, { role: "assistant", content: data.reply }]);
+
+      setTimeout(pollHistory, 500);
     } catch {
       setMessages((prev) => [
         ...prev,
@@ -77,7 +125,7 @@ export function ChatWidget() {
     } finally {
       setLoading(false);
     }
-  }, [input, loading]);
+  }, [input, loading, pollHistory]);
 
   return (
     <>
@@ -168,18 +216,46 @@ export function ChatWidget() {
 
             {messages.map((msg, i) => (
               <div key={i} className={`mb-3 flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                <div
-                  className="max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed whitespace-pre-wrap"
-                  style={
-                    msg.role === "user"
-                      ? { background: "hsl(346.8, 77.2%, 49.8%)", color: "white", borderBottomRightRadius: "4px" }
-                      : { background: "hsl(var(--muted))", color: "hsl(var(--foreground))", borderBottomLeftRadius: "4px" }
-                  }
-                >
-                  {msg.content}
+                {msg.role === "operator" && (
+                  <div className="mr-2 flex h-7 w-7 shrink-0 items-center justify-center rounded-full" style={{ background: "#2563eb" }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                      <circle cx="12" cy="7" r="4" />
+                    </svg>
+                  </div>
+                )}
+                <div>
+                  {msg.role === "operator" && (
+                    <p className="mb-1 text-xs font-medium" style={{ color: "#2563eb" }}>
+                      Оператор поддержки
+                    </p>
+                  )}
+                  <div
+                    className="max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed whitespace-pre-wrap"
+                    style={
+                      msg.role === "user"
+                        ? { background: "hsl(346.8, 77.2%, 49.8%)", color: "white", borderBottomRightRadius: "4px" }
+                        : msg.role === "operator"
+                          ? { background: "#dbeafe", color: "#1e3a5f", borderBottomLeftRadius: "4px", border: "1px solid #93c5fd" }
+                          : { background: "hsl(var(--muted))", color: "hsl(var(--foreground))", borderBottomLeftRadius: "4px" }
+                    }
+                  >
+                    {msg.content}
+                  </div>
                 </div>
               </div>
             ))}
+
+            {conversationStatus === "awaiting_operator" && !loading && (
+              <div className="mb-3 flex justify-start">
+                <div
+                  className="rounded-2xl px-3.5 py-2.5 text-xs italic"
+                  style={{ background: "#fef3c7", color: "#92400e", borderBottomLeftRadius: "4px" }}
+                >
+                  Ваш вопрос передан оператору. Ожидайте ответа...
+                </div>
+              </div>
+            )}
 
             {loading && (
               <div className="mb-3 flex justify-start">

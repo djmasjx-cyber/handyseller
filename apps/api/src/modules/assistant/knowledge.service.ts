@@ -86,4 +86,14 @@ export class KnowledgeService {
     }
     return { total: all.length, categories };
   }
+
+  async addFromOperatorAnswer(question: string, answer: string): Promise<void> {
+    const content = `Вопрос: ${question}\n\nОтвет: ${answer}`;
+    await this.upsertArticle({
+      title: `Q&A: ${question.slice(0, 100)}`,
+      content,
+      category: 'operator_qa',
+    });
+    this.logger.log(`Added operator Q&A to knowledge base: "${question.slice(0, 60)}..."`);
+  }
 }

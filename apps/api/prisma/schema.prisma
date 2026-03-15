@@ -510,6 +510,7 @@ model AssistantConversation {
   sessionId String   @map("session_id") @db.VarChar(128)
   ipAddress String?  @map("ip_address") @db.VarChar(45)
   userAgent String?  @map("user_agent") @db.Text
+  status    String   @default("active") @db.VarChar(30)
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 

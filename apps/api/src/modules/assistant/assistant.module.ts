@@ -5,11 +5,20 @@ import { AssistantService } from './assistant.service';
 import { KnowledgeService } from './knowledge.service';
 import { ContentParserService } from './content-parser.service';
 import { YandexGptService } from './yandex-gpt.service';
+import { TelegramService } from './telegram.service';
+import { LearningService } from './learning.service';
 
 @Module({
   imports: [HttpModule.register({ timeout: 30000 })],
   controllers: [AssistantController],
-  providers: [AssistantService, KnowledgeService, ContentParserService, YandexGptService],
-  exports: [AssistantService],
+  providers: [
+    AssistantService,
+    KnowledgeService,
+    ContentParserService,
+    YandexGptService,
+    TelegramService,
+    LearningService,
+  ],
+  exports: [AssistantService, TelegramService],
 })
 export class AssistantModule {}
