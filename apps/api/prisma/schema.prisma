@@ -468,6 +468,17 @@ model WbColor {
   @@map("wb_color")
 }
 
+/// WB предметы (категории второго уровня).
+/// Кешируются глобально — одна таблица на всех пользователей.
+/// Обновляются автоматически при запросе (TTL 30 дней) и раз в месяц по Cron.
+model WbSubject {
+  id        Int      @id            // WB subjectID
+  name      String   @db.VarChar(300)
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("wb_subject")
+}
+
 model VtbWebhook {
   id              String   @id @default(uuid())
   paymentId       String?  @map("payment_id")

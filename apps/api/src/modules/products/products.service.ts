@@ -128,6 +128,9 @@ export class ProductsService {
       ozonCategoryId?: number;
       ozonTypeId?: number;
       ozonCategoryPath?: string;
+      wbSubjectId?: number;
+      wbCategoryPath?: string;
+      barcodeWb?: string;
     },
   ) {
     const [limits, count] = await Promise.all([

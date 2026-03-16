@@ -1,4 +1,5 @@
-import { BadRequestException, Injectable, InternalServerErrorException } from '@nestjs/common';
+import { BadRequestException, Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
+import { Cron } from '@nestjs/schedule';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 
 function mapWbStatusToOurs(s: string): string {
@@ -63,6 +64,8 @@ import { WbSupplyService } from './wb-supply.service';
 
 @Injectable()
 export class MarketplacesService {
+  private readonly logger = new Logger(MarketplacesService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly crypto: CryptoService,
@@ -1553,7 +1556,34 @@ export class MarketplacesService {
   /**
    * Список категорий WB (subjects) для выбора при создании карточки.
    */
+  /**
+   * Возвращает список предметов (категорий) WB.
+   *
+   * Архитектура: глобальный DB-кеш с TTL 30 дней.
+   * - Попадание в кеш → мгновенный ответ из БД, без WB API.
+   * - Промах / устаревший кеш → запрос к WB API с токеном пользователя,
+   *   обновление таблицы wb_subject, ответ из БД.
+   * - Cron-задача обновляет кеш в 03:00 первого числа каждого месяца.
+   */
   async getWbCategoryList(userId: string): Promise<Array<{ subjectId: number; subjectName: string }>> {
+    const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 дней
+    const cutoff = new Date(Date.now() - CACHE_TTL_MS);
+
+    const freshCount = await this.prisma.wbSubject.count({
+      where: { updatedAt: { gte: cutoff } },
+    });
+
+    if (freshCount > 0) {
+      // Cache hit — возвращаем из БД без WB API
+      const rows = await this.prisma.wbSubject.findMany({ orderBy: { name: 'asc' } });
+      return rows.map((r) => ({ subjectId: r.id, subjectName: r.name }));
+    }
+
+    // Cache miss — обновляем через токен запрашивающего пользователя
+    return this.refreshWbSubjectCache(userId);
+  }
+
+  private async refreshWbSubjectCache(userId: string): Promise<Array<{ subjectId: number; subjectName: string }>> {
     const conn = await this.getMarketplaceConnection(userId, 'WILDBERRIES');
     if (!conn?.token) throw new BadRequestException('Wildberries не подключён. Подключите в разделе Маркетплейсы.');
     const adapter = this.adapterFactory.createAdapter('WILDBERRIES', {
@@ -1567,7 +1597,18 @@ export class MarketplacesService {
       throw new BadRequestException('Ошибка доступа к Wildberries');
     }
     try {
-      return await adapter.getCategoryList();
+      const categories = await adapter.getCategoryList();
+
+      // Upsert: добавляем новые, не трогаем уже существующие (skipDuplicates)
+      await this.prisma.wbSubject.createMany({
+        data: categories.map((c) => ({ id: c.subjectId, name: c.subjectName })),
+        skipDuplicates: true,
+      });
+      // Обновляем updatedAt для ВСЕХ записей — сбрасываем TTL
+      await this.prisma.wbSubject.updateMany({ data: { updatedAt: new Date() } });
+
+      const rows = await this.prisma.wbSubject.findMany({ orderBy: { name: 'asc' } });
+      return rows.map((r) => ({ subjectId: r.id, subjectName: r.name }));
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Не удалось загрузить категории WB';
       throw new BadRequestException(msg);
@@ -2708,6 +2749,13 @@ export class MarketplacesService {
           updates.packageContents = p.packageContents;
         if (p.richContent != null && (existing as { richContent?: string | null }).richContent !== p.richContent)
           updates.richContent = p.richContent;
+        // Fill category + barcode only if not yet set (don't overwrite manual changes)
+        if (p.subjectId && !(existing as { wbSubjectId?: number | null }).wbSubjectId)
+          updates.wbSubjectId = p.subjectId;
+        if (p.subjectName && !(existing as { wbCategoryPath?: string | null }).wbCategoryPath)
+          updates.wbCategoryPath = p.subjectName;
+        if (p.barcode && !(existing as { barcodeWb?: string | null }).barcodeWb)
+          updates.barcodeWb = p.barcode;
         if (Object.keys(updates).length > 0) {
           await this.prisma.product.update({
             where: { id: existing.id },
@@ -2744,6 +2792,9 @@ export class MarketplacesService {
           craftType: p.craftType,
           packageContents: p.packageContents,
           richContent: p.richContent,
+          wbSubjectId: p.subjectId,
+          wbCategoryPath: p.subjectName,
+          barcodeWb: p.barcode,
         });
         await this.productMappingService.upsertMapping(created.id, userId, 'WILDBERRIES', String(p.nmId), {
           externalArticle: p.vendorCode || undefined,
@@ -2917,5 +2968,27 @@ export class MarketplacesService {
         data: { imageUrl: WildberriesAdapter.wbCdnPhotoUrl(nmId) },
       });
     }
+  }
+
+  /**
+   * Фоновое обновление кеша WB-предметов — 1-е число каждого месяца в 03:00.
+   * Использует токен любого пользователя с подключённым WB.
+   * Не бросает исключений — только логирует ошибку.
+   */
+  @Cron('0 3 1 * *', { name: 'wb-subjects-monthly-refresh' })
+  async refreshWbSubjectsMonthly(): Promise<void> {
+    const conn = await this.prisma.marketplaceConnection.findFirst({
+      where: { marketplace: 'WILDBERRIES' },
+      select: { userId: true },
+    });
+    if (!conn) {
+      this.logger.debug('WB subjects refresh: no WB connections found, skipping.');
+      return;
+    }
+    this.logger.log('WB subjects cache: starting monthly refresh...');
+    await this.refreshWbSubjectCache(conn.userId).catch((err: unknown) =>
+      this.logger.warn(`Monthly WB subject refresh failed: ${String(err)}`),
+    );
+    this.logger.log('WB subjects cache: monthly refresh complete.');
   }
 }

@@ -2090,6 +2090,9 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       craftType?: string;
       packageContents?: string;
       richContent?: string;
+      subjectId?: number;
+      subjectName?: string;
+      barcode?: string;
     }>
   > {
     try {
@@ -2237,6 +2240,16 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
           seo?.description;
         const richContent = typeof richVal === 'string' && richVal.trim() ? richVal.trim() : undefined;
 
+        // Category (subject) — present in every card from WB Content API v2
+        const subjectId = Number(card.subjectID ?? card.subjectId ?? 0) || undefined;
+        const subjectName = (card.subjectName as string)?.trim() || undefined;
+
+        // Barcode — first SKU from the first size variant
+        const barcode =
+          (card.sizes as Array<{ skus?: string[] }>)?.[0]?.skus?.[0] ||
+          (good as { skus?: string[] } | undefined)?.skus?.[0] ||
+          undefined;
+
         return {
           nmId,
           vendorCode: String(good?.vendorCode ?? card.vendorCode ?? nmId),
@@ -2258,6 +2271,9 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
           craftType: findByAnyKey(['вид творчества', 'творчество', 'handmade'])?.trim() || undefined,
           packageContents: findByAnyKey(['комплектация', 'что входит'])?.trim() || undefined,
           richContent,
+          subjectId,
+          subjectName,
+          barcode,
         };
       });
     } catch (error) {
