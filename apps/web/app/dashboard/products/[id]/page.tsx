@@ -9,6 +9,7 @@ import { OzonCategorySelectModal } from "@/components/ozon-category-select-modal
 import { WbCategorySelectModal } from "@/components/wb-category-select-modal"
 import { CategoryAutocomplete, CategoryItem } from "@/components/category-autocomplete"
 import { WbColorSelectModal } from "@/components/wb-color-select-modal"
+import { proxyImageUrl } from "@/lib/image-proxy"
 
 // ── Photo Gallery component ──────────────────────────────────────────────────
 function PhotoGallery({
@@ -67,17 +68,20 @@ function PhotoGallery({
             style={{ borderColor: idx === 0 ? "hsl(346.8,77.2%,49.8%)" : "hsl(var(--border))" }}
           >
             {/* Thumbnail */}
-            {!imgErrors[idx] ? (
-              <img
-                src={url}
-                alt={`Фото ${idx + 1}`}
-                className="h-full w-full object-cover"
-                onError={() => setImgErrors((prev) => ({ ...prev, [idx]: true }))}
-              />
-            ) : (
-              <div className="flex h-full w-full flex-col items-center justify-center gap-1 p-1">
+            <img
+              src={proxyImageUrl(url)}
+              alt={`Фото ${idx + 1}`}
+              className="h-full w-full object-cover"
+              onError={(e) => {
+                // On proxy error — show placeholder icon
+                setImgErrors((prev) => ({ ...prev, [idx]: true }))
+                e.currentTarget.style.display = 'none'
+              }}
+            />
+            {imgErrors[idx] && (
+              <div className="absolute inset-0 flex h-full w-full flex-col items-center justify-center gap-1 p-1">
                 <ImageIcon className="h-6 w-6 text-muted-foreground/40" />
-                <span className="text-center text-[9px] leading-tight text-muted-foreground break-all line-clamp-3">{url.replace(/^https?:\/\//, "")}</span>
+                <span className="text-center text-[9px] leading-tight text-muted-foreground">Нет фото</span>
               </div>
             )}
 

@@ -4,7 +4,8 @@ import { useState, useEffect } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Badge, Input, Label, Textarea } from "@handyseller/ui"
 import Link from "next/link"
-import { Package, Download, Loader2, RefreshCw, Plus, Warehouse, History, Pencil, CreditCard, Search, Archive, ImageIcon } from "lucide-react"
+import { Package, Download, Loader2, RefreshCw, Plus, Warehouse, History, Pencil, CreditCard, Search, Archive } from "lucide-react"
+import { proxyImageUrl } from "@/lib/image-proxy"
 
 type HistoryEntry =
   | {
@@ -108,8 +109,6 @@ export default function ProductsPage() {
   const [limits, setLimits] = useState<SubscriptionLimits | null>(null)
   const [loading, setLoading] = useState(true)
   const [importingMarketplace, setImportingMarketplace] = useState<"WILDBERRIES" | "OZON" | null>(null)
-  const [syncingPhotos, setSyncingPhotos] = useState(false)
-  const [syncPhotosResult, setSyncPhotosResult] = useState<{ updated: number; errors: string[] } | null>(null)
 
   const token = typeof window !== "undefined" ? localStorage.getItem("accessToken") : null
 
@@ -614,24 +613,6 @@ export default function ProductsPage() {
   const handleImportFromWb = () => handleImportFromMarketplace("WILDBERRIES")
   const handleImportFromOzon = () => handleImportFromMarketplace("OZON")
 
-  const handleSyncPhotos = async () => {
-    if (!token || syncingPhotos) return
-    setSyncingPhotos(true)
-    setSyncPhotosResult(null)
-    try {
-      const res = await fetch("/api/marketplaces/sync-photos", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      const data = await res.json()
-      setSyncPhotosResult(data)
-      if (data.updated > 0) fetchProducts()
-    } catch {
-      setSyncPhotosResult({ updated: 0, errors: ["Ошибка при синхронизации"] })
-    } finally {
-      setSyncingPhotos(false)
-    }
-  }
 
   const handleOzonFboDebug = async () => {
     if (!token || !isOzonConnected) return
@@ -717,22 +698,6 @@ export default function ProductsPage() {
               </Button>
             </>
           )}
-          {(isWbConnected || isOzonConnected) && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleSyncPhotos}
-              disabled={syncingPhotos}
-              title="Подтянуть фото для товаров без изображений"
-            >
-              {syncingPhotos ? (
-                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-              ) : (
-                <ImageIcon className="mr-1.5 h-4 w-4" />
-              )}
-              Синхр. фото
-            </Button>
-          )}
         </div>
       </div>
 
@@ -752,17 +717,6 @@ export default function ProductsPage() {
         </div>
       )}
 
-      {syncPhotosResult && (
-        <div className={`rounded-lg border p-4 text-sm flex items-center justify-between gap-2 ${syncPhotosResult.errors.length > 0 ? "border-amber-500/50 bg-amber-500/10 text-amber-800" : "border-green-500/50 bg-green-500/10 text-green-800"}`}>
-          <span>
-            {syncPhotosResult.updated > 0
-              ? `✅ Фото обновлено у ${syncPhotosResult.updated} товар${syncPhotosResult.updated === 1 ? "а" : "ов"}.`
-              : "Все товары уже имеют фото или фото не удалось найти."}
-            {syncPhotosResult.errors.length > 0 && ` Ошибок: ${syncPhotosResult.errors.length}.`}
-          </span>
-          <button onClick={() => setSyncPhotosResult(null)} className="text-lg leading-none opacity-60 hover:opacity-100">×</button>
-        </div>
-      )}
 
       <Card>
         <CardHeader className="pb-3">
@@ -862,7 +816,7 @@ export default function ProductsPage() {
                       <td className="p-3">
                         {product.imageUrl ? (
                           <img
-                            src={product.imageUrl}
+                            src={proxyImageUrl(product.imageUrl)}
                             alt={product.title}
                             className="h-12 w-12 object-cover rounded-md border"
                           />

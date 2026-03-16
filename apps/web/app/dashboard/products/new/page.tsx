@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Label, Textarea } from "@handyseller/ui"
 import { ArrowLeft, Loader2, Package, CreditCard, X, Plus, ImageIcon, Star } from "lucide-react"
 import Link from "next/link"
+import { proxyImageUrl } from "@/lib/image-proxy"
 
 function PhotoGallery({
   photos,
@@ -49,13 +50,12 @@ function PhotoGallery({
         {photos.map((url, idx) => (
           <div key={`${url}-${idx}`} className="group relative h-24 w-24 shrink-0 overflow-hidden rounded-lg border-2 bg-muted/30 transition-all"
             style={{ borderColor: idx === 0 ? "hsl(346.8,77.2%,49.8%)" : "hsl(var(--border))" }}>
-            {!imgErrors[idx] ? (
-              <img src={url} alt={`Фото ${idx + 1}`} className="h-full w-full object-cover"
-                onError={() => setImgErrors((prev) => ({ ...prev, [idx]: true }))} />
-            ) : (
-              <div className="flex h-full w-full flex-col items-center justify-center gap-1 p-1">
+            <img src={proxyImageUrl(url)} alt={`Фото ${idx + 1}`} className="h-full w-full object-cover"
+                onError={(e) => { setImgErrors((prev) => ({ ...prev, [idx]: true })); e.currentTarget.style.display = 'none' }} />
+            {imgErrors[idx] && (
+              <div className="absolute inset-0 flex h-full w-full flex-col items-center justify-center gap-1 p-1">
                 <ImageIcon className="h-6 w-6 text-muted-foreground/40" />
-                <span className="text-center text-[9px] leading-tight text-muted-foreground break-all line-clamp-3">{url.replace(/^https?:\/\//, "")}</span>
+                <span className="text-center text-[9px] leading-tight text-muted-foreground">Нет фото</span>
               </div>
             )}
             <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors" />

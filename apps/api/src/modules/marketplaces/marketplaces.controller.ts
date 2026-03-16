@@ -219,11 +219,6 @@ export class MarketplacesController {
     return this.marketplacesService.syncProducts(userId, products, marketplace);
   }
 
-  @Post('sync-photos')
-  async syncMissingPhotos(@CurrentUser('userId') userId: string) {
-    return this.marketplacesService.syncMissingPhotos(userId);
-  }
-
   @Get('sync/status/:jobId')
   async getSyncStatus(
     @CurrentUser('userId') _userId: string,
