@@ -2893,21 +2893,62 @@ export class MarketplacesService {
 
   /**
    * For WB products without imageUrl: fill in CDN URL derived from nmId.
-   * Called automatically at the end of every WB import.
+   * Also repairs products where a previously-constructed CDN fallback URL was
+   * stored as imageUrl but the product already has working imageUrls (e.g., from Ozon).
+   * In that case we promote imageUrls[0] → imageUrl so the gallery shows a real photo.
+   * Called automatically at the end of every WB import and on products-page load.
    */
   async backfillWbPhotos(userId: string): Promise<void> {
     const mappings = await this.prisma.productMarketplaceMapping.findMany({
       where: { userId, marketplace: 'WILDBERRIES' },
-      include: { product: { select: { id: true, imageUrl: true } } },
+      include: {
+        product: {
+          select: {
+            id: true,
+            imageUrl: true,
+            imageUrls: true,
+          },
+        },
+      },
     });
+
     for (const m of mappings) {
-      if (m.product.imageUrl) continue;
       const nmId = parseInt(m.externalSystemId, 10);
       if (isNaN(nmId) || nmId <= 0) continue;
-      await this.prisma.product.update({
-        where: { id: m.product.id },
-        data: { imageUrl: WildberriesAdapter.wbCdnPhotoUrl(nmId) },
-      });
+
+      const { imageUrl, imageUrls } = m.product as {
+        id: string;
+        imageUrl: string | null;
+        imageUrls: unknown;
+      };
+
+      const extraUrls: string[] = Array.isArray(imageUrls)
+        ? (imageUrls as unknown[]).filter((u): u is string => typeof u === 'string' && u.startsWith('http'))
+        : [];
+
+      // Case 1: no imageUrl at all → fill from CDN formula
+      if (!imageUrl) {
+        await this.prisma.product.update({
+          where: { id: m.product.id },
+          data: { imageUrl: WildberriesAdapter.wbCdnPhotoUrl(nmId) },
+        });
+        continue;
+      }
+
+      // Case 2: imageUrl is our constructed CDN fallback (pattern: wbbasket.ru/.../big/1.jpg)
+      // AND the product has other working URLs in imageUrls → promote first imageUrl
+      const isCdnFallback =
+        imageUrl.includes('wbbasket.ru') && imageUrl.endsWith('/images/big/1.jpg');
+      if (isCdnFallback && extraUrls.length > 0) {
+        // Use the first real URL as main photo; keep the CDN fallback available in imageUrls
+        await this.prisma.product.update({
+          where: { id: m.product.id },
+          data: {
+            imageUrl: extraUrls[0],
+            imageUrls: extraUrls.slice(1).length > 0 ? extraUrls.slice(1) : undefined,
+          },
+        });
+      }
     }
   }
 }

@@ -2207,8 +2207,10 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
               .map((u) => u.replace(/\/images\/c\d+x\d+\//, '/images/big/'))
           : [];
         const images = mediaUrls;
-        // Fallback: construct CDN URL when API returns no mediaFiles
-        const imageUrl = images[0] ?? (nmId > 0 ? WildberriesAdapter.wbCdnPhotoUrl(nmId) : undefined);
+        // Use only actual API-provided URLs here.
+        // CDN fallback for products with no API photos is handled in backfillWbPhotos()
+        // to avoid overwriting a valid Ozon imageUrl for dual-marketplace products.
+        const imageUrl = images[0];
 
         // Dimensions: WB возвращает cm и kg, Product хранит mm и g
         const dims = (card.dimensions ?? good) as { width?: number; height?: number; length?: number; weightBrutto?: number } | undefined;
