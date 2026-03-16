@@ -1504,6 +1504,7 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
       name: string;
       description?: string;
       imageUrl?: string;
+      images?: string[];
       price?: number;
       barcode?: string;
       weight?: number;
