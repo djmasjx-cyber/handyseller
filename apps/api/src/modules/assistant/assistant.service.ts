@@ -5,39 +5,40 @@ import { KnowledgeService } from './knowledge.service';
 import { TelegramService } from './telegram.service';
 import { YandexGptService } from './yandex-gpt.service';
 
-const SYSTEM_PROMPT = `Ты — виртуальный помощник службы поддержки пользователей приложения HandySeller (app.handyseller.ru).
+const SYSTEM_PROMPT = `Ты — Лера, живой помощник поддержки HandySeller (app.handyseller.ru). Ты девушка, говоришь от первого лица женского рода: «помогла», «нашла», «посмотрела», «рада».
 
-Твоя основная задача:
-- помогать пользователям разбираться с функциональностью сервиса HandySeller,
-- давать точные, понятные и практичные ответы,
-- опираться на базу знаний и другие материалы сайта, которые тебе доступны. Отвечай так, как будто ты консультант сервиса, а не обычный чатбот.
+━━ ХАРАКТЕР ━━
+• Тёплая, живая, чуть неформальная — как коллега, которая хорошо знает продукт.
+• Пишешь так, словно набираешь сообщение руками: коротко, по-человечески, без «официоза».
+• Иногда добавляешь короткую эмпатичную реакцию: «Понятно!», «О, хороший вопрос», «Сейчас разберёмся 🙂».
 
-Источники и достоверность:
-1. Основной источник информации — страницы сайта и база знаний HandySeller, которые тебе передаются в запросе.
-2. Не придумывай факты и не «додумывай» детали, которых нет в предоставленных материалах.
-3. Если в базе знаний нет точного ответа, честно напиши об этом пользователю и предложи ближайшее по смыслу решение, явно указав, что это общий совет.
-4. Если вопрос не относится к теме приложения HandySeller (например, про погоду, общие шутки, посторонние сервисы), вежливо объясни, что ты создан для помощи по HandySeller, и мягко верни пользователя к релевантным вопросам.
+━━ ПЕРВОЕ СООБЩЕНИЕ (только если история пуста) ━━
+Напиши примерно так:
+«Привет! Я Лера, помогаю разобраться с HandySeller 😊
+Как вас зовут?»
+Не добавляй ничего лишнего — жди имени.
 
-Стиль общения:
-1. Всегда обращайся к пользователю на «вы», вежливо и уважительно, даже если он сам пишет на «ты».
-2. Пиши по-русски, простым и понятным языком, без профессионального жаргона, если пользователь сам о нём не просит.
-3. Не используй сленг, грубости и оценочные суждения.
-4. Не используй эмодзи и смайлики, пока пользователь сам их не начал активно использовать.
-5. Сохраняй спокойный, доброжелательный и профессиональный тон, даже если сообщение пользователя эмоциональное или резкое.
-6. Если диалог уже начался (у вас есть история переписки), **не повторяй приветствие, не пиши снова, что ты виртуальный помощник**. Просто продолжай разговор и отвечай по сути нового вопроса.
-7. Фразу «Я виртуальный помощник службы поддержки пользователей приложения HandySeller» можно использовать **не более одного раза за весь диалог** — только в самом первом ответе, если до этого в истории нет ни одного ответа ассистента.
+━━ ИМЕНА ━━
+• Как только узнала имя — используй его в каждом 2–3-м сообщении, естественно, без навязчивости.
+• Если имя уже есть в истории — не спрашивай снова, сразу обращайся.
 
-Формат и структура ответов:
-1. В начале ответа дай краткий и прямой вывод в 1–2 предложениях (суть решения).
-2. Затем, при необходимости, распиши детали: пошаговую инструкцию, варианты действий, ограничения.
-3. Для инструкций и пошаговых действий используй нумерованные или маркированные списки.
-4. Избегай лишней «воды»: пиши по делу, но так, чтобы ответ можно было выполнить «с первого раза».
-5. Если ответ основан на одной или нескольких конкретных статьях базы знаний, по возможности кратко укажи их названия.
+━━ ДЛИНА И ФОРМАТ ОТВЕТОВ ━━
+• Обычный ответ — 2–4 предложения. Не больше.
+• Если нужен список шагов — максимум 4–5 коротких пунктов.
+• Если тема большая — дай суть сначала, потом спроси: «Рассказать подробнее?»
+• Никаких длинных предисловий и резюме в конце.
+• Маркдаун использую только когда реально нужен список — без лишних заголовков.
 
-Работа с вопросами пользователя:
-1. Если вопрос сформулирован неясно или информации недостаточно, сначала задай 1–3 уточняющих вопроса, прежде чем давать подробный ответ.
-2. Если пользователь задает сразу несколько разных вопросов в одном сообщении, структурируй ответ по пунктам и отвечай на каждый отдельно.
-3. Если пользователь пишет общий вопрос вроде «привет», «здравствуйте» или «как подключить wb?», дай **конкретный, полезный следующий шаг** (например, куда нажать в приложении, какую страницу открыть, какие данные подготовить), а не общее рассуждение.`;
+━━ ИСТОЧНИКИ ━━
+• Отвечай по базе знаний HandySeller из контекста.
+• Если точного ответа нет — честно скажи: «Точно не знаю, но могу предположить...» и предложи вариант.
+• Если вопрос совсем не по HandySeller — мягко объясни, что специализируешься только на нём.
+
+━━ СТИЛЬ ━━
+• Обращение на «вы», но без чопорности.
+• Не повторяй приветствие если диалог уже идёт.
+• Если клиент расстроен — сначала посочувствуй, потом решай проблему.
+• Не используй канцеляризмы: «в случае если», «в данном случае», «настоящим уведомляю».`;
 
 const LOW_CONFIDENCE_THRESHOLD = 0.4;
 
@@ -99,40 +100,40 @@ export class AssistantService {
       ? relevantArticles.map((a, i) => `[${i + 1}] ${a.title}\n${a.content}`).join('\n\n---\n\n')
       : 'Контекст не найден. Ответь на основе общих знаний о продаже хендмейда на маркетплейсах.';
 
-    // Архитектура: Stateless query + Stateful display.
-    // Каждый вопрос обрабатывается независимо: GPT получает system + контекст + текущий вопрос.
-    // История переписки хранится в БД только для отображения в виджете и аналитики.
-    // Исключение: для коротких follow-up вопросов добавляем последнюю пару сообщений.
+    // Always pass the last 6 messages so Лера remembers the client's name
+    // and maintains conversational context without repetition.
+    const recentMessages = await this.prisma.assistantMessage.findMany({
+      where: { conversationId: conversation.id },
+      orderBy: { createdAt: 'desc' },
+      take: 6,
+    });
+
+    // Extract client name from history to inject into system context
+    const allHistory = recentMessages.slice().reverse();
+    const clientName = this.extractClientName(allHistory.map((m) => ({ role: m.role, content: m.content })));
+
+    const systemText = `${SYSTEM_PROMPT}\n\n${clientName ? `Имя клиента: ${clientName}. Обращайся к нему по имени.` : 'Имя клиента пока неизвестно. При первом ответе спроси, как его зовут.'}\n\nКонтекст из базы знаний:\n${contextBlock}`;
+
     const messages: Array<{ role: 'system' | 'user' | 'assistant'; text: string }> = [
-      {
-        role: 'system',
-        text: `${SYSTEM_PROMPT}\n\nКонтекст из базы знаний:\n${contextBlock}`,
-      },
+      { role: 'system', text: systemText },
     ];
 
-    // Detect follow-up: short questions or pronouns referring to previous answer
-    const followUpPatterns = /^(это|он|она|они|оно|там|тут|как|почему|зачем|а\s|и\s|ещё|ещe|еще|подробнее|расскажи|объясни|что дальше|что значит)/i;
-    const isFollowUp = params.message.trim().length < 25 || followUpPatterns.test(params.message.trim());
-
-    if (isFollowUp) {
-      const lastTwo = await this.prisma.assistantMessage.findMany({
-        where: { conversationId: conversation.id },
-        orderBy: { createdAt: 'desc' },
-        take: 2,
-      });
-      for (const msg of lastTwo.reverse()) {
-        if (msg.role === 'user' || msg.role === 'assistant') {
-          messages.push({ role: msg.role, text: msg.content });
-        }
+    // Add recent conversation history (without the current message which is added below)
+    for (const msg of allHistory) {
+      if (msg.role === 'user' || msg.role === 'assistant') {
+        messages.push({ role: msg.role, text: msg.content });
       }
     }
+
+    // Current user message goes last (it was already saved to DB above)
+    messages.push({ role: 'user', text: params.message });
 
     let reply: string;
     let tokensUsed = 0;
     let confidence = 1.0;
 
     try {
-      const result = await this.yandexGpt.completion(messages, 0.3, 2000);
+      const result = await this.yandexGpt.completion(messages, 0.4, 600);
       reply = result.text;
       tokensUsed = result.tokensUsed;
 
@@ -186,6 +187,42 @@ export class AssistantService {
     }
 
     return { reply, conversationId: conversation.id, confidence };
+  }
+
+  /**
+   * Extracts the client's first name from conversation history.
+   * Looks for common Russian name-introduction patterns.
+   */
+  private extractClientName(history: Array<{ role: string; content: string }>): string | null {
+    // Patterns where a user introduces themselves
+    const introPatterns = [
+      /меня зовут\s+([А-ЯЁA-Z][а-яёa-z]{1,20})/i,
+      /я\s+([А-ЯЁA-Z][а-яёa-z]{1,20})\b/i,
+      /мое имя\s+([А-ЯЁA-Z][а-яёa-z]{1,20})/i,
+      /моё имя\s+([А-ЯЁA-Z][а-яёa-z]{1,20})/i,
+      /зовите меня\s+([А-ЯЁA-Z][а-яёa-z]{1,20})/i,
+    ];
+    // Also look for assistant saying "Приятно познакомиться, Name" pattern
+    const assistantPattern = /познакомиться,?\s+([А-ЯЁA-Z][а-яёa-z]{1,20})/i;
+
+    for (const msg of history) {
+      if (msg.role === 'user') {
+        // Single word reply after name question = probably a name
+        const trimmed = msg.content.trim();
+        if (/^[А-ЯЁA-Z][а-яёa-z]{1,20}$/.test(trimmed)) {
+          return trimmed;
+        }
+        for (const pat of introPatterns) {
+          const m = trimmed.match(pat);
+          if (m?.[1]) return m[1];
+        }
+      }
+      if (msg.role === 'assistant') {
+        const m = msg.content.match(assistantPattern);
+        if (m?.[1]) return m[1];
+      }
+    }
+    return null;
   }
 
   private estimateConfidence(reply: string, contextCount: number): number {

@@ -151,21 +151,30 @@ export function ChatWidget() {
     if (!text || loading) return;
 
     setInput("");
-    // Optimistic: show user message immediately so it feels instant
+    // Optimistic: show user message immediately
     setMessages((prev) => [...prev, { role: "user", content: text }]);
-    setIsNearBottom(true); // user just sent — treat as "at bottom"
+    setIsNearBottom(true);
     setUnreadCount(0);
     setLoading(true);
-    // Scroll to show the sent message + loading dots immediately
     setTimeout(() => scrollToBottom("smooth"), 30);
 
     try {
-      await fetch("/api/assistant/message", {
+      // Send to backend (GPT runs server-side)
+      const res = await fetch("/api/assistant/message", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sessionId: sessionIdRef.current, message: text }),
       });
-      // Sync from server — picks up the saved user message + assistant reply (no duplicates)
+      const data = await res.json();
+      const replyLength: number = typeof data.reply === "string" ? data.reply.length : 120;
+
+      // Simulate typing time proportional to reply length:
+      // ~22 ms per character, min 900 ms, max 2800 ms.
+      // Keeps the "typing" dots visible just long enough to feel human.
+      const typingDelay = Math.min(Math.max(replyLength * 22, 900), 2800);
+      await new Promise<void>((resolve) => setTimeout(resolve, typingDelay));
+
+      // Now reveal the reply from server (single source of truth — no duplicates)
       await syncMessages();
     } catch {
       setMessages((prev) => [
@@ -306,31 +315,26 @@ export function ChatWidget() {
             className="relative flex-1 overflow-y-auto px-4 py-3"
           >
             {messages.length === 0 && !loading && (
-              <div className="flex h-full flex-col items-center justify-center text-center">
+              <div className="flex h-full flex-col items-center justify-center gap-3 text-center px-2">
                 <img
                   src="/lera-avatar.jpg"
                   alt="Лера"
-                  className="mb-3 h-14 w-14 rounded-full object-cover object-top ring-2 ring-white shadow-md"
-                  style={{ boxShadow: "0 0 0 4px hsl(346.8,77.2%,49.8%,0.15)" }}
+                  className="h-16 w-16 rounded-full object-cover object-top shadow-lg"
+                  style={{ boxShadow: "0 0 0 4px hsl(346.8,77.2%,49.8%,0.18)" }}
                 />
-                <p className="text-sm font-semibold" style={{ color: "hsl(var(--foreground))" }}>
-                  Привет! Меня зовут Лера 👋
-                </p>
-                <p className="mt-1 text-xs" style={{ color: "hsl(var(--muted-foreground))" }}>
-                  Ассистент HandySeller. Спрашивайте о продаже хендмейда на маркетплейсах
-                </p>
-                <div className="mt-4 flex flex-wrap justify-center gap-2">
-                  {[
-                    "Как начать продавать?",
-                    "Нужен ли сертификат?",
-                    "WB или Ozon?",
-                  ].map((q) => (
+                <div>
+                  <p className="text-sm font-semibold" style={{ color: "hsl(var(--foreground))" }}>
+                    Привет! Я Лера 👋
+                  </p>
+                  <p className="mt-0.5 text-xs leading-relaxed" style={{ color: "hsl(var(--muted-foreground))" }}>
+                    Напишите — и я сразу отвечу
+                  </p>
+                </div>
+                <div className="flex flex-wrap justify-center gap-2 mt-1">
+                  {["Как начать продавать?", "Как подключить WB?", "WB или Ozon?"].map((q) => (
                     <button
                       key={q}
-                      onClick={() => {
-                        setInput(q);
-                        setTimeout(() => inputRef.current?.focus(), 0);
-                      }}
+                      onClick={() => { setInput(q); setTimeout(() => inputRef.current?.focus(), 0); }}
                       className="rounded-full border px-3 py-1.5 text-xs transition-colors hover:border-[hsl(346.8,77.2%,49.8%)] hover:text-[hsl(346.8,77.2%,49.8%)]"
                       style={{ borderColor: "hsl(var(--border))", color: "hsl(var(--muted-foreground))" }}
                     >
@@ -385,15 +389,27 @@ export function ChatWidget() {
             )}
 
             {loading && (
-              <div className="mb-3 flex justify-start">
+              <div className="mb-3 flex items-end gap-2 justify-start">
+                {/* Lera avatar next to typing indicator */}
+                <img
+                  src="/lera-avatar.jpg"
+                  alt="Лера"
+                  className="h-6 w-6 rounded-full object-cover object-top shrink-0"
+                />
                 <div
-                  className="flex gap-1 rounded-2xl px-4 py-3"
+                  className="flex items-center gap-1.5 rounded-2xl px-4 py-3"
                   style={{ background: "hsl(var(--muted))", borderBottomLeftRadius: "4px" }}
                 >
-                  <span className="h-2 w-2 animate-bounce rounded-full" style={{ background: "hsl(var(--muted-foreground))", animationDelay: "0ms" }} />
-                  <span className="h-2 w-2 animate-bounce rounded-full" style={{ background: "hsl(var(--muted-foreground))", animationDelay: "150ms" }} />
-                  <span className="h-2 w-2 animate-bounce rounded-full" style={{ background: "hsl(var(--muted-foreground))", animationDelay: "300ms" }} />
+                  <span className="h-2 w-2 rounded-full" style={{ background: "hsl(var(--muted-foreground))", animation: "leraBounce 1.2s ease-in-out infinite", animationDelay: "0ms" }} />
+                  <span className="h-2 w-2 rounded-full" style={{ background: "hsl(var(--muted-foreground))", animation: "leraBounce 1.2s ease-in-out infinite", animationDelay: "200ms" }} />
+                  <span className="h-2 w-2 rounded-full" style={{ background: "hsl(var(--muted-foreground))", animation: "leraBounce 1.2s ease-in-out infinite", animationDelay: "400ms" }} />
                 </div>
+                <style>{`
+                  @keyframes leraBounce {
+                    0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+                    30% { transform: translateY(-5px); opacity: 1; }
+                  }
+                `}</style>
               </div>
             )}
 
