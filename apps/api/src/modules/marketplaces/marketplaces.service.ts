@@ -2679,6 +2679,14 @@ export class MarketplacesService {
         if (typeof p.description === 'string' && p.description.trim() && existing.description !== p.description.slice(0, 5000))
           updates.description = p.description.slice(0, 5000);
         if (p.imageUrl != null && existing.imageUrl !== p.imageUrl) updates.imageUrl = p.imageUrl;
+        if (p.images && p.images.length > 1) {
+          const additionalImages = p.images.slice(1);
+          const existingAdditional = Array.isArray((existing as { imageUrls?: unknown }).imageUrls)
+            ? (existing as { imageUrls?: unknown[] }).imageUrls
+            : [];
+          if (JSON.stringify(existingAdditional) !== JSON.stringify(additionalImages))
+            (updates as Record<string, unknown>).imageUrls = additionalImages;
+        }
         if (p.brand != null && (existing as { brand?: string | null }).brand !== p.brand) updates.brand = p.brand;
         if (p.color != null && (existing as { color?: string | null }).color !== p.color) updates.color = p.color;
         if (p.weight != null && (existing as { weight?: number | null }).weight !== p.weight) updates.weight = p.weight;
@@ -2716,6 +2724,7 @@ export class MarketplacesService {
           description: p.description?.slice(0, 5000),
           cost: 0,
           imageUrl: p.imageUrl,
+          imageUrls: p.images && p.images.length > 1 ? p.images.slice(1) : undefined,
           sku,
           article: p.vendorCode || undefined,
           brand: p.brand,
@@ -2798,16 +2807,22 @@ export class MarketplacesService {
         (await this.productsService.findByArticleForUserIds(userIds, p.offerId));
       if (existing) {
         const updates: {
-          article?: string; title?: string; description?: string; imageUrl?: string; barcodeOzon?: string;
+          article?: string; title?: string; description?: string; imageUrl?: string; imageUrls?: string[]; barcodeOzon?: string;
           weight?: number; width?: number; height?: number; length?: number;
           brand?: string; color?: string; ozonCategoryId?: number; ozonTypeId?: number; ozonCategoryPath?: string;
         } = {};
-        const ex = existing as { weight?: number | null; width?: number | null; height?: number | null; length?: number | null; brand?: string | null; color?: string | null; ozonCategoryId?: number | null; ozonTypeId?: number | null; ozonCategoryPath?: string | null };
+        const ex = existing as { weight?: number | null; width?: number | null; height?: number | null; length?: number | null; brand?: string | null; color?: string | null; ozonCategoryId?: number | null; ozonTypeId?: number | null; ozonCategoryPath?: string | null; imageUrls?: unknown };
         if (p.offerId && existing.article !== p.offerId) updates.article = p.offerId;
         if (p.name && existing.title !== p.name) updates.title = p.name.slice(0, 500);
         if (typeof p.description === 'string' && p.description.trim() && existing.description !== p.description.slice(0, 5000))
           updates.description = p.description.slice(0, 5000);
         if (p.imageUrl != null && existing.imageUrl !== p.imageUrl) updates.imageUrl = p.imageUrl;
+        if (p.images && p.images.length > 1) {
+          const additionalImages = p.images.slice(1);
+          const existingAdditional = Array.isArray(ex.imageUrls) ? ex.imageUrls : [];
+          if (JSON.stringify(existingAdditional) !== JSON.stringify(additionalImages))
+            updates.imageUrls = additionalImages;
+        }
         if (p.barcode != null && existing.barcodeOzon !== p.barcode) updates.barcodeOzon = p.barcode;
         if (p.weight != null && ex.weight !== p.weight) updates.weight = p.weight;
         if (p.width != null && ex.width !== p.width) updates.width = p.width;
@@ -2839,6 +2854,7 @@ export class MarketplacesService {
           description: p.description?.slice(0, 5000),
           cost: 0,
           imageUrl: p.imageUrl,
+          imageUrls: p.images && p.images.length > 1 ? p.images.slice(1) : undefined,
           article: p.offerId,
           barcodeOzon: p.barcode,
           weight: p.weight,

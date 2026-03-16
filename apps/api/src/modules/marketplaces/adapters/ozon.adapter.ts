@@ -1441,6 +1441,7 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
       name: string;
       description?: string;
       imageUrl?: string;
+      images?: string[];
       price?: number;
       barcode?: string;
       weight?: number;
@@ -1591,10 +1592,11 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
             if (aid === OzonAdapter.ATTR_COLOR) color = val.slice(0, 100);
           }
         }
-        const images = inf?.images ?? [];
-        const imageUrl = Array.isArray(images) && images.length > 0
-          ? (typeof images[0] === 'string' ? images[0] : (images[0] as { url?: string })?.url)
-          : undefined;
+        const rawImages = inf?.images ?? [];
+        const allImageUrls = (Array.isArray(rawImages) ? rawImages : [])
+          .map((img) => (typeof img === 'string' ? img : (img as { url?: string })?.url))
+          .filter((u): u is string => typeof u === 'string' && u.startsWith('http'));
+        const imageUrl = allImageUrls[0];
         const priceStr = inf?.marketing_price ?? inf?.price ?? inf?.old_price;
         const price = priceStr != null ? parseFloat(String(priceStr)) : undefined;
         const barcode = this.extractBarcode(inf);
@@ -1611,6 +1613,7 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
           name,
           description,
           imageUrl: imageUrl || undefined,
+          images: allImageUrls.length > 0 ? allImageUrls : undefined,
           price: typeof price === 'number' && !isNaN(price) ? price : undefined,
           barcode: barcode || undefined,
           weight: toInt(inf?.weight),

@@ -1,10 +1,105 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Label, Textarea } from "@handyseller/ui"
-import { ArrowLeft, Loader2, Package, CreditCard } from "lucide-react"
+import { ArrowLeft, Loader2, Package, CreditCard, X, Plus, ImageIcon, Star } from "lucide-react"
 import Link from "next/link"
+
+function PhotoGallery({
+  photos,
+  onChange,
+}: {
+  photos: string[]
+  onChange: (photos: string[]) => void
+}) {
+  const [addingUrl, setAddingUrl] = useState("")
+  const [showInput, setShowInput] = useState(false)
+  const [imgErrors, setImgErrors] = useState<Record<number, boolean>>({})
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const addPhoto = () => {
+    const url = addingUrl.trim()
+    if (!url.startsWith("http")) return
+    if (!photos.includes(url)) onChange([...photos, url])
+    setAddingUrl("")
+    setShowInput(false)
+  }
+
+  const removePhoto = (idx: number) => {
+    onChange(photos.filter((_, i) => i !== idx))
+    setImgErrors((prev) => { const next = { ...prev }; delete next[idx]; return next })
+  }
+
+  const makeMain = (idx: number) => {
+    if (idx === 0) return
+    const next = [...photos]
+    const [item] = next.splice(idx, 1)
+    next.unshift(item)
+    onChange(next)
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <Label>Фото <span className="text-muted-foreground font-normal text-xs">({photos.length})</span></Label>
+        <span className="text-xs text-muted-foreground">Первое фото — главное</span>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {photos.map((url, idx) => (
+          <div key={`${url}-${idx}`} className="group relative h-24 w-24 shrink-0 overflow-hidden rounded-lg border-2 bg-muted/30 transition-all"
+            style={{ borderColor: idx === 0 ? "hsl(346.8,77.2%,49.8%)" : "hsl(var(--border))" }}>
+            {!imgErrors[idx] ? (
+              <img src={url} alt={`Фото ${idx + 1}`} className="h-full w-full object-cover"
+                onError={() => setImgErrors((prev) => ({ ...prev, [idx]: true }))} />
+            ) : (
+              <div className="flex h-full w-full flex-col items-center justify-center gap-1 p-1">
+                <ImageIcon className="h-6 w-6 text-muted-foreground/40" />
+                <span className="text-center text-[9px] leading-tight text-muted-foreground break-all line-clamp-3">{url.replace(/^https?:\/\//, "")}</span>
+              </div>
+            )}
+            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors" />
+            {idx === 0 && (
+              <span className="absolute left-1 top-1 flex items-center gap-0.5 rounded-sm px-1 py-0.5 text-[9px] font-semibold text-white"
+                style={{ background: "hsl(346.8,77.2%,49.8%)" }}>
+                <Star className="h-2.5 w-2.5 fill-white" />Главное
+              </span>
+            )}
+            <div className="absolute inset-0 flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              {idx !== 0 && (
+                <button type="button" onClick={() => makeMain(idx)} title="Сделать главным"
+                  className="flex h-7 w-7 items-center justify-center rounded-full bg-white/90 text-gray-700 shadow hover:bg-white hover:text-yellow-500 transition-colors">
+                  <Star className="h-3.5 w-3.5" />
+                </button>
+              )}
+              <button type="button" onClick={() => removePhoto(idx)} title="Удалить"
+                className="flex h-7 w-7 items-center justify-center rounded-full bg-white/90 text-gray-700 shadow hover:bg-white hover:text-red-500 transition-colors">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+        ))}
+        <button type="button" onClick={() => { setShowInput(true); setTimeout(() => inputRef.current?.focus(), 50) }}
+          className="flex h-24 w-24 shrink-0 flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed transition-colors hover:border-[hsl(346.8,77.2%,49.8%)] hover:bg-muted/50"
+          style={{ borderColor: "hsl(var(--border))" }}>
+          <Plus className="h-5 w-5 text-muted-foreground" />
+          <span className="text-xs text-muted-foreground">Добавить</span>
+        </button>
+      </div>
+      {showInput && (
+        <div className="flex gap-2 items-center">
+          <Input ref={inputRef} type="url" value={addingUrl}
+            onChange={(e) => setAddingUrl(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addPhoto() } if (e.key === "Escape") { setShowInput(false); setAddingUrl("") } }}
+            placeholder="Вставьте URL фото (https://...)" className="flex-1 text-sm" />
+          <Button type="button" size="sm" onClick={addPhoto} disabled={!addingUrl.trim().startsWith("http")}>Добавить</Button>
+          <Button type="button" size="sm" variant="ghost" onClick={() => { setShowInput(false); setAddingUrl("") }}>Отмена</Button>
+        </div>
+      )}
+      <p className="text-xs text-muted-foreground">Фото сохраняются как URL. При выгрузке на WB или Ozon автоматически прикрепляются к карточке.</p>
+    </div>
+  )
+}
 
 export default function NewProductPage() {
   const router = useRouter()
@@ -23,6 +118,7 @@ export default function NewProductPage() {
     oldPrice: "",
     article: "",
     imageUrl: "",
+    imageUrls: [] as string[],
     brand: "",
     color: "",
     weight: "",
@@ -91,6 +187,7 @@ export default function NewProductPage() {
           oldPrice: form.oldPrice ? parseFloat(form.oldPrice) : undefined,
           article: form.article.trim() || undefined,
           imageUrl: form.imageUrl.trim() || undefined,
+          imageUrls: form.imageUrls.length > 0 ? form.imageUrls : undefined,
           brand: form.brand.trim() || undefined,
           color: form.color.trim() || undefined,
           weight: form.weight ? parseInt(form.weight, 10) : undefined,
@@ -259,19 +356,16 @@ export default function NewProductPage() {
                 <p className="text-xs text-muted-foreground">Если пусто — рассчитается при выгрузке на Ozon</p>
               </div>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="imageUrl">URL фото</Label>
-              <Input
-                id="imageUrl"
-                type="url"
-                value={form.imageUrl}
-                onChange={(e) => setForm((f) => ({ ...f, imageUrl: e.target.value }))}
-                placeholder="https://..."
-              />
-              <p className="text-xs text-muted-foreground">
-                Ссылка на изображение. Обязательно для Ozon и WB.
-              </p>
-            </div>
+            <PhotoGallery
+              photos={[form.imageUrl, ...form.imageUrls].filter(Boolean)}
+              onChange={(photos) =>
+                setForm((f) => ({
+                  ...f,
+                  imageUrl: photos[0] ?? "",
+                  imageUrls: photos.slice(1),
+                }))
+              }
+            />
 
             <div className="border-t pt-4 space-y-4">
               <p className="text-sm font-medium text-muted-foreground">Для выгрузки на маркетплейсы</p>

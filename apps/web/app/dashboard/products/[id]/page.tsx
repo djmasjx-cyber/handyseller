@@ -1,14 +1,171 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useParams } from "next/navigation"
 import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Label, Textarea } from "@handyseller/ui"
-import { ArrowLeft, Loader2, Package, Save, History } from "lucide-react"
+import { ArrowLeft, Loader2, Package, Save, History, X, Plus, ImageIcon, Star } from "lucide-react"
 import Link from "next/link"
 import { OzonCategorySelectModal } from "@/components/ozon-category-select-modal"
 import { WbCategorySelectModal } from "@/components/wb-category-select-modal"
 import { CategoryAutocomplete, CategoryItem } from "@/components/category-autocomplete"
 import { WbColorSelectModal } from "@/components/wb-color-select-modal"
+
+// ── Photo Gallery component ──────────────────────────────────────────────────
+function PhotoGallery({
+  photos,
+  hasError,
+  onChange,
+}: {
+  photos: string[]
+  hasError?: boolean
+  onChange: (photos: string[]) => void
+}) {
+  const [addingUrl, setAddingUrl] = useState("")
+  const [showInput, setShowInput] = useState(false)
+  const [imgErrors, setImgErrors] = useState<Record<number, boolean>>({})
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const addPhoto = () => {
+    const url = addingUrl.trim()
+    if (!url.startsWith("http")) return
+    if (!photos.includes(url)) onChange([...photos, url])
+    setAddingUrl("")
+    setShowInput(false)
+  }
+
+  const removePhoto = (idx: number) => {
+    onChange(photos.filter((_, i) => i !== idx))
+    setImgErrors((prev) => {
+      const next = { ...prev }
+      delete next[idx]
+      return next
+    })
+  }
+
+  const makeMain = (idx: number) => {
+    if (idx === 0) return
+    const next = [...photos]
+    const [item] = next.splice(idx, 1)
+    next.unshift(item)
+    onChange(next)
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <Label className={hasError ? "text-destructive" : ""}>
+          Фото <span className="text-muted-foreground font-normal text-xs">({photos.length})</span>
+        </Label>
+        <span className="text-xs text-muted-foreground">Первое фото — главное. WB принимает до 30 фото, Ozon — до 15.</span>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        {photos.map((url, idx) => (
+          <div
+            key={`${url}-${idx}`}
+            className="group relative h-24 w-24 shrink-0 overflow-hidden rounded-lg border-2 bg-muted/30 transition-all"
+            style={{ borderColor: idx === 0 ? "hsl(346.8,77.2%,49.8%)" : "hsl(var(--border))" }}
+          >
+            {/* Thumbnail */}
+            {!imgErrors[idx] ? (
+              <img
+                src={url}
+                alt={`Фото ${idx + 1}`}
+                className="h-full w-full object-cover"
+                onError={() => setImgErrors((prev) => ({ ...prev, [idx]: true }))}
+              />
+            ) : (
+              <div className="flex h-full w-full flex-col items-center justify-center gap-1 p-1">
+                <ImageIcon className="h-6 w-6 text-muted-foreground/40" />
+                <span className="text-center text-[9px] leading-tight text-muted-foreground break-all line-clamp-3">{url.replace(/^https?:\/\//, "")}</span>
+              </div>
+            )}
+
+            {/* Overlay on hover */}
+            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors" />
+
+            {/* "Главное" badge */}
+            {idx === 0 && (
+              <span className="absolute left-1 top-1 flex items-center gap-0.5 rounded-sm px-1 py-0.5 text-[9px] font-semibold text-white"
+                style={{ background: "hsl(346.8,77.2%,49.8%)" }}>
+                <Star className="h-2.5 w-2.5 fill-white" />
+                Главное
+              </span>
+            )}
+
+            {/* Action buttons (shown on hover) */}
+            <div className="absolute inset-0 flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              {idx !== 0 && (
+                <button
+                  type="button"
+                  onClick={() => makeMain(idx)}
+                  title="Сделать главным"
+                  className="flex h-7 w-7 items-center justify-center rounded-full bg-white/90 text-gray-700 shadow hover:bg-white hover:text-yellow-500 transition-colors"
+                >
+                  <Star className="h-3.5 w-3.5" />
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => removePhoto(idx)}
+                title="Удалить"
+                className="flex h-7 w-7 items-center justify-center rounded-full bg-white/90 text-gray-700 shadow hover:bg-white hover:text-red-500 transition-colors"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+        ))}
+
+        {/* Add photo button */}
+        <button
+          type="button"
+          onClick={() => {
+            setShowInput(true)
+            setTimeout(() => inputRef.current?.focus(), 50)
+          }}
+          className="flex h-24 w-24 shrink-0 flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed transition-colors hover:border-[hsl(346.8,77.2%,49.8%)] hover:bg-muted/50"
+          style={{ borderColor: "hsl(var(--border))" }}
+        >
+          <Plus className="h-5 w-5 text-muted-foreground" />
+          <span className="text-xs text-muted-foreground">Добавить</span>
+        </button>
+      </div>
+
+      {/* URL input for adding photos */}
+      {showInput && (
+        <div className="flex gap-2 items-center">
+          <Input
+            ref={inputRef}
+            type="url"
+            value={addingUrl}
+            onChange={(e) => setAddingUrl(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") { e.preventDefault(); addPhoto() }
+              if (e.key === "Escape") { setShowInput(false); setAddingUrl("") }
+            }}
+            placeholder="Вставьте URL фото (https://...)"
+            className="flex-1 text-sm"
+          />
+          <Button type="button" size="sm" onClick={addPhoto} disabled={!addingUrl.trim().startsWith("http")}>
+            Добавить
+          </Button>
+          <Button type="button" size="sm" variant="ghost" onClick={() => { setShowInput(false); setAddingUrl("") }}>
+            Отмена
+          </Button>
+        </div>
+      )}
+
+      {hasError && (
+        <p className="text-xs text-destructive">Добавьте хотя бы одно фото для выгрузки на маркетплейс</p>
+      )}
+      <p className="text-xs text-muted-foreground">
+        Фото сохраняются как URL. При выгрузке на WB или Ozon они автоматически прикрепляются к карточке.
+      </p>
+    </div>
+  )
+}
+// ────────────────────────────────────────────────────────────────────────────
 
 interface Product {
   id: string
@@ -78,7 +235,7 @@ export default function ProductCardPage() {
     oldPrice: "",
     article: "",
     imageUrl: "",
-    imageUrls: "", // Доп. фото WB: по одному URL на строку
+    imageUrls: [] as string[], // Доп. фото (все кроме главного)
     stock: "",
     seoTitle: "",
     seoKeywords: "",
@@ -146,7 +303,7 @@ export default function ProductCardPage() {
           oldPrice: p.oldPrice != null ? String(p.oldPrice) : "",
           article: p.article ?? "",
           imageUrl: p.imageUrl ?? "",
-          imageUrls: Array.isArray(p.imageUrls) ? p.imageUrls.filter(Boolean).join("\n") : "",
+          imageUrls: Array.isArray(p.imageUrls) ? p.imageUrls.filter(Boolean) : [],
           stock: String(p.stock ?? 0),
           seoTitle: p.seoTitle ?? "",
           seoKeywords: p.seoKeywords ?? "",
@@ -260,7 +417,7 @@ export default function ProductCardPage() {
     if (!form.title?.trim()) wbMissingFields.push("Название")
     if (!form.article?.trim()) wbMissingFields.push("Артикул")
     if (!form.wbSubjectId?.trim()) wbMissingFields.push("Категория WB")
-    const hasWbPhoto = (form.imageUrl?.trim().startsWith("http")) || (form.imageUrls?.trim() && form.imageUrls.trim().split(/\r?\n/).some((u) => u.trim().startsWith("http")))
+    const hasWbPhoto = form.imageUrl?.trim().startsWith("http") || form.imageUrls.some((u) => u.startsWith("http"))
     if (!hasWbPhoto) wbMissingFields.push("Фото (URL)")
     const wbPriceVal = form.price ? parseFloat(form.price) : NaN
     if (isNaN(wbPriceVal) || wbPriceVal <= 0) wbMissingFields.push("Ваша цена (₽)")
@@ -357,14 +514,8 @@ export default function ProductCardPage() {
     const label = cfg?.short ?? marketplace
     try {
       // Передаём данные из формы (включая imageUrl), чтобы не терять фото при выгрузке без сохранения
-      const images: string[] = []
-      if (form.imageUrl?.trim().startsWith("http")) images.push(form.imageUrl.trim())
-      if (form.imageUrls?.trim()) {
-        for (const u of form.imageUrls.trim().split(/\r?\n/)) {
-          const url = u.trim()
-          if (url.startsWith("http") && !images.includes(url)) images.push(url)
-        }
-      }
+      const allPhotos = [form.imageUrl, ...form.imageUrls].filter((u) => u.startsWith("http"))
+      const images: string[] = [...new Set(allPhotos)]
       const productPayload = {
         id: product.id,
         name: form.title?.trim() || product.title || "",
@@ -684,7 +835,7 @@ export default function ProductCardPage() {
         seoKeywords: form.seoKeywords.trim() || "",
         seoDescription: form.seoDescription.trim() || "",
         imageUrl: form.imageUrl.trim() || "",
-        imageUrls: form.imageUrls.trim() ? form.imageUrls.trim().split(/\r?\n/).map((u) => u.trim()).filter((u) => u.startsWith("http")) : undefined,
+        imageUrls: form.imageUrls.length > 0 ? form.imageUrls : undefined,
         brand: form.brand.trim() || undefined,
         color: form.color.trim() || undefined,
         weight: form.weight ? parseInt(form.weight, 10) : undefined,
@@ -744,7 +895,7 @@ export default function ProductCardPage() {
               ...payload,
               stock,
               imageUrl: form.imageUrl.trim() || prev.imageUrl,
-              imageUrls: form.imageUrls.trim() ? form.imageUrls.trim().split(/\r?\n/).map((u) => u.trim()).filter((u) => u.startsWith("http")) : undefined,
+              imageUrls: form.imageUrls.length > 0 ? form.imageUrls : undefined,
             }
           : null
       )
@@ -1570,46 +1721,18 @@ export default function ProductCardPage() {
             <CardDescription>Себестоимость для аналитики. Остаток синхронизируется с WB, Ozon.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label>Фото</Label>
-              <div className="flex flex-col sm:flex-row gap-4 items-start min-w-0">
-                <div className="shrink-0 w-24 h-24 sm:w-32 sm:h-32 rounded-lg border-2 border-dashed border-muted-foreground/30 bg-muted/30 flex items-center justify-center overflow-hidden">
-                  {form.imageUrl ? (
-                    <>
-                      <img src={form.imageUrl} alt="" className="w-full h-full object-cover" onError={(e) => { e.currentTarget.style.display = "none"; (e.currentTarget.nextElementSibling as HTMLElement)?.classList.remove("hidden") }} />
-                      <span className="hidden text-xs text-muted-foreground text-center px-2">Ошибка</span>
-                    </>
-                  ) : (
-                    <span className="text-xs text-muted-foreground text-center px-2">Нет фото</span>
-                  )}
-                </div>
-                <div className="flex-1 min-w-0 w-full">
-                  <Label htmlFor="imageUrl" className="sr-only">URL фото {isOzonConnected && "*"}</Label>
-                  <Input
-                    id="imageUrl"
-                    type="url"
-                    value={form.imageUrl}
-                    onChange={(e) => setForm((f) => ({ ...f, imageUrl: e.target.value }))}
-                    placeholder="https://..."
-                    className={`min-w-0 ${(ozonMissingFields.includes("Фото (URL)") || wbMissingFields.includes("Фото (URL)")) ? "border-destructive ring-destructive" : ""}`}
-                  />
-                  <p className="text-xs text-muted-foreground mt-1">WB: /content/v3/media/save. Ozon: images[].</p>
-                  {isWbConnected && (
-                    <>
-                      <Label htmlFor="imageUrls" className="mt-3 block text-xs text-muted-foreground">Доп. фото для WB (URL, по одному на строку)</Label>
-                      <Textarea
-                        id="imageUrls"
-                        value={form.imageUrls}
-                        onChange={(e) => setForm((f) => ({ ...f, imageUrls: e.target.value }))}
-                        placeholder="Один URL на строку"
-                        rows={3}
-                        className="mt-1 text-sm font-mono"
-                      />
-                    </>
-                  )}
-                </div>
-              </div>
-            </div>
+            {/* ── Photo gallery ── */}
+            <PhotoGallery
+              photos={[form.imageUrl, ...form.imageUrls].filter(Boolean)}
+              hasError={ozonMissingFields.includes("Фото (URL)") || wbMissingFields.includes("Фото (URL)")}
+              onChange={(photos) =>
+                setForm((f) => ({
+                  ...f,
+                  imageUrl: photos[0] ?? "",
+                  imageUrls: photos.slice(1),
+                }))
+              }
+            />
             <div className="space-y-2">
               <Label htmlFor="cost">Себестоимость (₽)</Label>
               <Input

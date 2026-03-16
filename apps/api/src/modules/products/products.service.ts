@@ -109,6 +109,7 @@ export class ProductsService {
       oldPrice?: number;
       article?: string;
       imageUrl?: string;
+      imageUrls?: string[];
       sku?: string;
       brand?: string;
       barcodeOzon?: string;

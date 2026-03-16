@@ -2049,6 +2049,7 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       name: string;
       description?: string;
       imageUrl?: string;
+      images?: string[];
       price?: number;
       brand?: string;
       color?: string;
@@ -2171,6 +2172,9 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
           (typeof card.description === 'string' && card.description.trim()) || findByKey('описание');
         const mediaFiles = (card.mediaFiles as Array<{ url?: string }>) ?? [];
         const imageUrl = mediaFiles[0]?.url;
+        const images = mediaFiles
+          .map((m) => m?.url)
+          .filter((u): u is string => typeof u === 'string' && u.startsWith('http'));
 
         // Dimensions: WB возвращает cm и kg, Product хранит mm и g
         const dims = (card.dimensions ?? good) as { width?: number; height?: number; length?: number; weightBrutto?: number } | undefined;
@@ -2199,6 +2203,7 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
           name,
           description,
           imageUrl: imageUrl || undefined,
+          images: images.length > 0 ? images : undefined,
           price: priceMap.get(nmId),
           brand: (card.brand as string)?.trim() || undefined,
           color: findByAnyKey(['цвет'])?.trim() || undefined,
