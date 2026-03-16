@@ -30,6 +30,33 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
   /** Кэш nmId → chrtIds[] (все размеры для обновления остатков) */
   private chrtIdsCache = new Map<number, number[]>();
 
+  /**
+   * Construct a WB CDN photo URL from nmId.
+   *
+   * Formula is stable: each basket covers a fixed vol range.
+   * Baskets 1–17 use irregular widths (legacy); basket 18+ each cover 216 vols.
+   * This formula handles current and future WB CDN expansion automatically.
+   */
+  static wbCdnPhotoUrl(nmId: number): string {
+    const vol = Math.floor(nmId / 100000);
+    const part = Math.floor(nmId / 1000);
+
+    // Verified low-vol ranges (baskets 1–17)
+    const LOW: [number, number, number][] = [
+      [0, 143, 1], [144, 287, 2], [288, 431, 3],
+      [432, 719, 4], [720, 1007, 5], [1008, 1061, 6],
+      [1062, 1115, 7], [1116, 1169, 8], [1170, 1313, 9],
+      [1314, 1601, 10], [1602, 1655, 11], [1656, 1919, 12],
+      [1920, 2045, 13], [2046, 2189, 14], [2190, 2405, 15],
+      [2406, 2621, 16], [2622, 2837, 17],
+    ];
+    const low = LOW.find(([mn, mx]) => vol >= mn && vol <= mx);
+    // For vol >= 2838: each basket covers 216 vols (extends automatically)
+    const basket = low ? low[2] : 18 + Math.floor((vol - 2838) / 216);
+    const b = String(basket).padStart(2, '0');
+    return `https://basket-${b}.wbbasket.ru/vol${vol}/part${part}/${nmId}/images/big/1.jpg`;
+  }
+
   private authHeader(token?: string) {
     const t = token ?? this.config.apiKey;
     const auth = t.startsWith('Bearer ') ? t : `Bearer ${t}`;
@@ -2180,7 +2207,8 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
               .map((u) => u.replace(/\/images\/c\d+x\d+\//, '/images/big/'))
           : [];
         const images = mediaUrls;
-        const imageUrl = images[0] ?? undefined;
+        // Fallback: construct CDN URL when API returns no mediaFiles
+        const imageUrl = images[0] ?? (nmId > 0 ? WildberriesAdapter.wbCdnPhotoUrl(nmId) : undefined);
 
         // Dimensions: WB возвращает cm и kg, Product хранит mm и g
         const dims = (card.dimensions ?? good) as { width?: number; height?: number; length?: number; weightBrutto?: number } | undefined;

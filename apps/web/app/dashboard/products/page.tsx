@@ -181,6 +181,11 @@ export default function ProductsPage() {
     fetchWbStockFbo()
     fetchOzonStockFbo()
     setLoading(false)
+    // Автоматически заполнить CDN-фото для WB товаров без imageUrl (тихо, без UI)
+    fetch("/api/marketplaces/backfill-wb-photos", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    }).then((r) => r.ok && fetchProducts()).catch(() => {})
     const t = setInterval(fetchProducts, 60000)
     return () => clearInterval(t)
   }, [router, token])

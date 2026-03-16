@@ -219,6 +219,13 @@ export class MarketplacesController {
     return this.marketplacesService.syncProducts(userId, products, marketplace);
   }
 
+  /** Called automatically by the frontend on products page load to fill missing WB photos */
+  @Post('backfill-wb-photos')
+  async backfillWbPhotos(@CurrentUser('userId') userId: string) {
+    await this.marketplacesService.backfillWbPhotos(userId);
+    return { ok: true };
+  }
+
   @Get('sync/status/:jobId')
   async getSyncStatus(
     @CurrentUser('userId') _userId: string,

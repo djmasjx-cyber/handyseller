@@ -2756,6 +2756,9 @@ export class MarketplacesService {
       });
     }
 
+    // Backfill CDN URLs for any WB products that still have no imageUrl
+    await this.backfillWbPhotos(userId).catch(() => {/* non-critical */});
+
     return { imported, skipped, articlesUpdated: articlesUpdated > 0 ? articlesUpdated : undefined, errors };
   }
 
@@ -2888,4 +2891,23 @@ export class MarketplacesService {
     return { imported, skipped, articlesUpdated: articlesUpdated > 0 ? articlesUpdated : undefined, errors };
   }
 
+  /**
+   * For WB products without imageUrl: fill in CDN URL derived from nmId.
+   * Called automatically at the end of every WB import.
+   */
+  async backfillWbPhotos(userId: string): Promise<void> {
+    const mappings = await this.prisma.productMarketplaceMapping.findMany({
+      where: { userId, marketplace: 'WILDBERRIES' },
+      include: { product: { select: { id: true, imageUrl: true } } },
+    });
+    for (const m of mappings) {
+      if (m.product.imageUrl) continue;
+      const nmId = parseInt(m.externalSystemId, 10);
+      if (isNaN(nmId) || nmId <= 0) continue;
+      await this.prisma.product.update({
+        where: { id: m.product.id },
+        data: { imageUrl: WildberriesAdapter.wbCdnPhotoUrl(nmId) },
+      });
+    }
+  }
 }
