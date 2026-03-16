@@ -30,6 +30,36 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
   /** Кэш nmId → chrtIds[] (все размеры для обновления остатков) */
   private chrtIdsCache = new Map<number, number[]>();
 
+  /**
+   * Generate a WB CDN photo URL from nmId.
+   * Used as fallback when mediaFiles is empty in the Content API response.
+   * Pattern: https://basket-{basket}.wbbasket.ru/vol{vol}/part{part}/{nmId}/images/big/1.jpg
+   */
+  static wbCdnPhotoUrl(nmId: number): string {
+    const vol = Math.floor(nmId / 100000);
+    const part = Math.floor(nmId / 1000);
+    let basket: string;
+    if (vol <= 143) basket = '01';
+    else if (vol <= 287) basket = '02';
+    else if (vol <= 431) basket = '03';
+    else if (vol <= 719) basket = '04';
+    else if (vol <= 1007) basket = '05';
+    else if (vol <= 1061) basket = '06';
+    else if (vol <= 1115) basket = '07';
+    else if (vol <= 1169) basket = '08';
+    else if (vol <= 1313) basket = '09';
+    else if (vol <= 1601) basket = '10';
+    else if (vol <= 1655) basket = '11';
+    else if (vol <= 1919) basket = '12';
+    else if (vol <= 2045) basket = '13';
+    else if (vol <= 2189) basket = '14';
+    else if (vol <= 2405) basket = '15';
+    else if (vol <= 2621) basket = '16';
+    else if (vol <= 2837) basket = '17';
+    else basket = '18';
+    return `https://basket-${basket}.wbbasket.ru/vol${vol}/part${part}/${nmId}/images/big/1.jpg`;
+  }
+
   private authHeader(token?: string) {
     const t = token ?? this.config.apiKey;
     const auth = t.startsWith('Bearer ') ? t : `Bearer ${t}`;
@@ -2171,10 +2201,11 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
         const description =
           (typeof card.description === 'string' && card.description.trim()) || findByKey('описание');
         const mediaFiles = (card.mediaFiles as Array<{ url?: string }>) ?? [];
-        const imageUrl = mediaFiles[0]?.url;
         const images = mediaFiles
           .map((m) => m?.url)
           .filter((u): u is string => typeof u === 'string' && u.startsWith('http'));
+        // Fallback to WB CDN URL when mediaFiles is empty (common for older cards)
+        const imageUrl = images[0] ?? (nmId > 0 ? WildberriesAdapter.wbCdnPhotoUrl(nmId) : undefined);
 
         // Dimensions: WB возвращает cm и kg, Product хранит mm и g
         const dims = (card.dimensions ?? good) as { width?: number; height?: number; length?: number; weightBrutto?: number } | undefined;

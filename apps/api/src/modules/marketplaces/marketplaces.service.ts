@@ -2887,4 +2887,73 @@ export class MarketplacesService {
 
     return { imported, skipped, articlesUpdated: articlesUpdated > 0 ? articlesUpdated : undefined, errors };
   }
+
+  /**
+   * Sync photos for products that have no imageUrl.
+   * For WB products — uses CDN fallback URL by nmId.
+   * For Ozon products — re-fetches product info from Ozon API.
+   * Returns count of updated products.
+   */
+  async syncMissingPhotos(userId: string): Promise<{ updated: number; errors: string[] }> {
+    const errors: string[] = [];
+    let updated = 0;
+
+    // 1. WB: find products with empty imageUrl that have a WB mapping
+    const wbMappings = await this.prisma.productMarketplaceMapping.findMany({
+      where: { userId, marketplace: 'WILDBERRIES' },
+      include: { product: { select: { id: true, imageUrl: true } } },
+    });
+
+    for (const m of wbMappings) {
+      if (m.product.imageUrl) continue; // already has photo
+      const nmId = parseInt(m.externalSystemId, 10);
+      if (isNaN(nmId) || nmId <= 0) continue;
+      try {
+        const cdnUrl = WildberriesAdapter.wbCdnPhotoUrl(nmId);
+        await this.prisma.product.update({
+          where: { id: m.product.id },
+          data: { imageUrl: cdnUrl },
+        });
+        updated++;
+      } catch (err) {
+        errors.push(`WB nmId=${m.externalSystemId}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    // 2. Ozon: re-fetch products without imageUrl from Ozon API
+    const ozonConn = await this.prisma.marketplaceConnection.findFirst({
+      where: { userId, marketplace: 'OZON' },
+    });
+    if (ozonConn?.token) {
+      const adapter = this.adapterFactory.createAdapter('OZON', {
+        encryptedToken: ozonConn.token,
+        encryptedRefreshToken: ozonConn.refreshToken,
+        sellerId: ozonConn.sellerId ?? undefined,
+        warehouseId: ozonConn.warehouseId ?? undefined,
+      });
+      if (adapter instanceof OzonAdapter) {
+        const ozonMappings = await this.prisma.productMarketplaceMapping.findMany({
+          where: { userId, marketplace: 'OZON' },
+          include: { product: { select: { id: true, imageUrl: true } } },
+        });
+        const withoutPhoto = ozonMappings.filter((m) => !m.product.imageUrl);
+        for (const m of withoutPhoto) {
+          try {
+            const p = await adapter.getProductFromOzonByProductId(m.externalSystemId);
+            if (p?.imageUrl) {
+              await this.prisma.product.update({
+                where: { id: m.product.id },
+                data: { imageUrl: p.imageUrl },
+              });
+              updated++;
+            }
+          } catch (err) {
+            errors.push(`Ozon productId=${m.externalSystemId}: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
+      }
+    }
+
+    return { updated, errors };
+  }
 }
