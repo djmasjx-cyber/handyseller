@@ -2197,13 +2197,17 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
           String(card.vendorCode ?? good?.vendorCode ?? nmId);
         const description =
           (typeof card.description === 'string' && card.description.trim()) || findByKey('описание');
-        // WB Content API v2 returns mediaFiles as string[] (URL strings directly),
-        // not as Array<{url: string}>. Normalize size variants to /big/ for best quality.
+        // WB Content API v2 returns mediaFiles as string[] of photo URLs.
+        // IMPORTANT: WB often returns protocol-relative URLs starting with "//"
+        // (e.g. "//basket-04.wbbasket.ru/vol.../c246x328/1.jpg").
+        // We MUST handle both "https://" and "//" prefixes; filtering on startsWith('http')
+        // silently drops all WB photos, leaving images empty.
         const rawMediaFiles = card.mediaFiles;
         const mediaUrls: string[] = Array.isArray(rawMediaFiles)
           ? (rawMediaFiles as unknown[])
               .map((m) => (typeof m === 'string' ? m : (m as { url?: string })?.url ?? ''))
-              .filter((u) => typeof u === 'string' && u.startsWith('http'))
+              .filter((u) => typeof u === 'string' && (u.startsWith('http') || u.startsWith('//')))
+              .map((u) => (u.startsWith('//') ? `https:${u}` : u))
               .map((u) => u.replace(/\/images\/c\d+x\d+\//, '/images/big/'))
           : [];
         const images = mediaUrls;

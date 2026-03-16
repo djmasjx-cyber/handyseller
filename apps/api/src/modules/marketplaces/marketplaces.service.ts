@@ -2678,11 +2678,11 @@ export class MarketplacesService {
         if (newTitle && existing.title !== newTitle) updates.title = newTitle;
         if (typeof p.description === 'string' && p.description.trim() && existing.description !== p.description.slice(0, 5000))
           updates.description = p.description.slice(0, 5000);
-        // WB import always wins: prefer real API URL, fall back to CDN formula.
-        // This ensures that running "Import from WB" always sets the WB main photo,
-        // regardless of what was previously stored (e.g., an Ozon photo).
-        const wbMainPhoto = p.imageUrl ?? WildberriesAdapter.wbCdnPhotoUrl(p.nmId);
-        if (existing.imageUrl !== wbMainPhoto) updates.imageUrl = wbMainPhoto;
+        // WB import always sets the WB main photo.
+        // p.imageUrl comes from mediaFiles[0] (real WB CDN URL).
+        // When WB genuinely provides no photos, we leave imageUrl untouched here;
+        // backfillWbPhotos() runs after import and fills from CDN formula as last resort.
+        if (p.imageUrl != null && existing.imageUrl !== p.imageUrl) updates.imageUrl = p.imageUrl;
         // Additional photos: only update when API returned multiple images
         if (p.images && p.images.length > 1) {
           const additionalImages = p.images.slice(1);
@@ -2728,7 +2728,7 @@ export class MarketplacesService {
           title,
           description: p.description?.slice(0, 5000),
           cost: 0,
-          imageUrl: p.imageUrl ?? WildberriesAdapter.wbCdnPhotoUrl(p.nmId),
+          imageUrl: p.imageUrl, // real URL from WB API; backfillWbPhotos fills null later
           imageUrls: p.images && p.images.length > 1 ? p.images.slice(1) : undefined,
           sku,
           article: p.vendorCode || undefined,
@@ -2897,11 +2897,11 @@ export class MarketplacesService {
   }
 
   /**
-   * Fill/repair imageUrl for WB products:
-   * - null imageUrl → set CDN formula URL
-   * - imageUrl from a non-WB domain (e.g., Ozon) → replace with CDN formula URL
-   *   (can happen when a previous buggy backfill promoted an Ozon URL to imageUrl)
-   * Called automatically at the end of every WB import and on products-page load.
+   * For WB products that still have no imageUrl after import: attempt CDN formula.
+   * NOTE: CDN formula is best-effort and may return 404 for high nmIds.
+   * The primary source of photos is always WB Content API mediaFiles — this is
+   * just a last-resort placeholder so the product isn't completely photo-less.
+   * Called automatically at end of WB import and on products-page load.
    */
   async backfillWbPhotos(userId: string): Promise<void> {
     const mappings = await this.prisma.productMarketplaceMapping.findMany({
@@ -2909,12 +2909,9 @@ export class MarketplacesService {
       include: { product: { select: { id: true, imageUrl: true } } },
     });
     for (const m of mappings) {
+      if (m.product.imageUrl) continue; // already has any photo — keep it
       const nmId = parseInt(m.externalSystemId, 10);
       if (isNaN(nmId) || nmId <= 0) continue;
-      const cur = m.product.imageUrl;
-      // Skip if already a WB CDN URL (correct source)
-      if (cur && cur.includes('wbbasket.ru')) continue;
-      // Fill null OR repair non-WB URLs (e.g., Ozon photo promoted by previous bug)
       await this.prisma.product.update({
         where: { id: m.product.id },
         data: { imageUrl: WildberriesAdapter.wbCdnPhotoUrl(nmId) },
