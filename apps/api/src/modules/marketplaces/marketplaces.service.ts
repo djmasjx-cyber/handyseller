@@ -2678,7 +2678,12 @@ export class MarketplacesService {
         if (newTitle && existing.title !== newTitle) updates.title = newTitle;
         if (typeof p.description === 'string' && p.description.trim() && existing.description !== p.description.slice(0, 5000))
           updates.description = p.description.slice(0, 5000);
-        if (p.imageUrl != null && existing.imageUrl !== p.imageUrl) updates.imageUrl = p.imageUrl;
+        // WB import always wins: prefer real API URL, fall back to CDN formula.
+        // This ensures that running "Import from WB" always sets the WB main photo,
+        // regardless of what was previously stored (e.g., an Ozon photo).
+        const wbMainPhoto = p.imageUrl ?? WildberriesAdapter.wbCdnPhotoUrl(p.nmId);
+        if (existing.imageUrl !== wbMainPhoto) updates.imageUrl = wbMainPhoto;
+        // Additional photos: only update when API returned multiple images
         if (p.images && p.images.length > 1) {
           const additionalImages = p.images.slice(1);
           const existingAdditional = Array.isArray((existing as { imageUrls?: unknown }).imageUrls)
@@ -2723,7 +2728,7 @@ export class MarketplacesService {
           title,
           description: p.description?.slice(0, 5000),
           cost: 0,
-          imageUrl: p.imageUrl,
+          imageUrl: p.imageUrl ?? WildberriesAdapter.wbCdnPhotoUrl(p.nmId),
           imageUrls: p.images && p.images.length > 1 ? p.images.slice(1) : undefined,
           sku,
           article: p.vendorCode || undefined,
@@ -2892,63 +2897,28 @@ export class MarketplacesService {
   }
 
   /**
-   * For WB products without imageUrl: fill in CDN URL derived from nmId.
-   * Also repairs products where a previously-constructed CDN fallback URL was
-   * stored as imageUrl but the product already has working imageUrls (e.g., from Ozon).
-   * In that case we promote imageUrls[0] → imageUrl so the gallery shows a real photo.
+   * Fill/repair imageUrl for WB products:
+   * - null imageUrl → set CDN formula URL
+   * - imageUrl from a non-WB domain (e.g., Ozon) → replace with CDN formula URL
+   *   (can happen when a previous buggy backfill promoted an Ozon URL to imageUrl)
    * Called automatically at the end of every WB import and on products-page load.
    */
   async backfillWbPhotos(userId: string): Promise<void> {
     const mappings = await this.prisma.productMarketplaceMapping.findMany({
       where: { userId, marketplace: 'WILDBERRIES' },
-      include: {
-        product: {
-          select: {
-            id: true,
-            imageUrl: true,
-            imageUrls: true,
-          },
-        },
-      },
+      include: { product: { select: { id: true, imageUrl: true } } },
     });
-
     for (const m of mappings) {
       const nmId = parseInt(m.externalSystemId, 10);
       if (isNaN(nmId) || nmId <= 0) continue;
-
-      const { imageUrl, imageUrls } = m.product as {
-        id: string;
-        imageUrl: string | null;
-        imageUrls: unknown;
-      };
-
-      const extraUrls: string[] = Array.isArray(imageUrls)
-        ? (imageUrls as unknown[]).filter((u): u is string => typeof u === 'string' && u.startsWith('http'))
-        : [];
-
-      // Case 1: no imageUrl at all → fill from CDN formula
-      if (!imageUrl) {
-        await this.prisma.product.update({
-          where: { id: m.product.id },
-          data: { imageUrl: WildberriesAdapter.wbCdnPhotoUrl(nmId) },
-        });
-        continue;
-      }
-
-      // Case 2: imageUrl is our constructed CDN fallback (pattern: wbbasket.ru/.../big/1.jpg)
-      // AND the product has other working URLs in imageUrls → promote first imageUrl
-      const isCdnFallback =
-        imageUrl.includes('wbbasket.ru') && imageUrl.endsWith('/images/big/1.jpg');
-      if (isCdnFallback && extraUrls.length > 0) {
-        // Use the first real URL as main photo; keep the CDN fallback available in imageUrls
-        await this.prisma.product.update({
-          where: { id: m.product.id },
-          data: {
-            imageUrl: extraUrls[0],
-            imageUrls: extraUrls.slice(1).length > 0 ? extraUrls.slice(1) : undefined,
-          },
-        });
-      }
+      const cur = m.product.imageUrl;
+      // Skip if already a WB CDN URL (correct source)
+      if (cur && cur.includes('wbbasket.ru')) continue;
+      // Fill null OR repair non-WB URLs (e.g., Ozon photo promoted by previous bug)
+      await this.prisma.product.update({
+        where: { id: m.product.id },
+        data: { imageUrl: WildberriesAdapter.wbCdnPhotoUrl(nmId) },
+      });
     }
   }
 }
