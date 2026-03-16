@@ -2203,6 +2203,8 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
         // We MUST handle both "https://" and "//" prefixes; filtering on startsWith('http')
         // silently drops all WB photos, leaving images empty.
         const rawMediaFiles = card.mediaFiles;
+        // DEBUG: log raw mediaFiles for first item to see exact WB API format
+        console.log(`[WB DEBUG] nmId=${nmId} rawMediaFiles=${JSON.stringify(Array.isArray(rawMediaFiles) ? rawMediaFiles.slice(0, 2) : rawMediaFiles)}`);
         const mediaUrls: string[] = Array.isArray(rawMediaFiles)
           ? (rawMediaFiles as unknown[])
               .map((m) => (typeof m === 'string' ? m : (m as { url?: string })?.url ?? ''))
