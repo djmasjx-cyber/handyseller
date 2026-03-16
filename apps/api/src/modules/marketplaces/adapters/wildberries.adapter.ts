@@ -2197,25 +2197,23 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
           String(card.vendorCode ?? good?.vendorCode ?? nmId);
         const description =
           (typeof card.description === 'string' && card.description.trim()) || findByKey('описание');
-        // WB Content API v2 returns mediaFiles as string[] of photo URLs.
-        // IMPORTANT: WB often returns protocol-relative URLs starting with "//"
-        // (e.g. "//basket-04.wbbasket.ru/vol.../c246x328/1.jpg").
-        // We MUST handle both "https://" and "//" prefixes; filtering on startsWith('http')
-        // silently drops all WB photos, leaving images empty.
-        const rawMediaFiles = card.mediaFiles;
-        // DEBUG: log raw mediaFiles for first item to see exact WB API format
-        console.log(`[WB DEBUG] nmId=${nmId} rawMediaFiles=${JSON.stringify(Array.isArray(rawMediaFiles) ? rawMediaFiles.slice(0, 2) : rawMediaFiles)}`);
-        const mediaUrls: string[] = Array.isArray(rawMediaFiles)
-          ? (rawMediaFiles as unknown[])
-              .map((m) => (typeof m === 'string' ? m : (m as { url?: string })?.url ?? ''))
-              .filter((u) => typeof u === 'string' && (u.startsWith('http') || u.startsWith('//')))
+        // WB Content API v2 returns photos in card.photos[] as objects with size keys:
+        // { big: "https://...", square: "https://...", c516x688: "https://..." }
+        // NOTE: card.mediaFiles does NOT exist in v2 responses — the correct field is photos.
+        const rawPhotos = card.photos as Array<Record<string, string>> | undefined;
+        const mediaUrls: string[] = Array.isArray(rawPhotos)
+          ? rawPhotos
+              .map((p) => {
+                // Prefer full-size 'big', fall back to other available sizes
+                const url = p.big ?? p.c516x688 ?? p.square ?? Object.values(p).find(Boolean) ?? '';
+                return typeof url === 'string' ? url : '';
+              })
+              .filter((u) => u.startsWith('http') || u.startsWith('//'))
               .map((u) => (u.startsWith('//') ? `https:${u}` : u))
-              .map((u) => u.replace(/\/images\/c\d+x\d+\//, '/images/big/'))
           : [];
         const images = mediaUrls;
-        // Use only actual API-provided URLs here.
-        // CDN fallback for products with no API photos is handled in backfillWbPhotos()
-        // to avoid overwriting a valid Ozon imageUrl for dual-marketplace products.
+        // Use only actual API-provided photo URLs.
+        // backfillWbPhotos() fills null imageUrl as last resort via CDN formula.
         const imageUrl = images[0];
 
         // Dimensions: WB возвращает cm и kg, Product хранит mm и g
