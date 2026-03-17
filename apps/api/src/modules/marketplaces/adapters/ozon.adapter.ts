@@ -1051,35 +1051,82 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
       'Api-Key': this.config.apiKey,
       'Content-Type': 'application/json',
     };
-    const { data } = await firstValueFrom(
-      this.httpService.post(
-        `${this.API_BASE}/v3/posting/fbs/list`,
-        {
+
+    // Try multiple date formats and ranges to diagnose 400 errors
+    const attempts: Array<{ label: string; body: Record<string, unknown> }> = [
+      {
+        label: 'cutoff 7d (no ms)',
+        body: {
           dir: 'asc',
           filter: {
-            cutoff_from: since.toISOString(),
-            cutoff_to: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+            cutoff_from: new Date(Date.now() - 7 * 86400000).toISOString().replace(/\.\d+Z$/, 'Z'),
+            cutoff_to: new Date(Date.now() + 7 * 86400000).toISOString().replace(/\.\d+Z$/, 'Z'),
           },
-          limit: 10,
-          offset: 0,
-          with: { analytics_data: false, financial_data: false },
+          limit: 5, offset: 0,
         },
-        { headers, timeout: 15000 },
-      ),
-    );
-    return {
-      // Top-level keys
-      topLevelKeys: Object.keys(data ?? {}),
-      // Is result an array?
-      resultIsArray: Array.isArray(data?.result),
-      resultType: typeof data?.result,
-      resultKeys: data?.result && typeof data.result === 'object' ? Object.keys(data.result) : null,
-      // FBS v3 should have result.postings
-      postingsIsArray: Array.isArray(data?.result?.postings),
-      postingsCount: Array.isArray(data?.result?.postings) ? data.result.postings.length : null,
-      // First posting sample
-      firstPosting: data?.result?.postings?.[0] ?? data?.result?.[0] ?? null,
-    };
+      },
+      {
+        label: 'cutoff 30d (no ms)',
+        body: {
+          dir: 'asc',
+          filter: {
+            cutoff_from: new Date(Date.now() - 30 * 86400000).toISOString().replace(/\.\d+Z$/, 'Z'),
+            cutoff_to: new Date(Date.now() + 14 * 86400000).toISOString().replace(/\.\d+Z$/, 'Z'),
+          },
+          limit: 5, offset: 0,
+        },
+      },
+      {
+        label: 'in_process_at 30d (no ms)',
+        body: {
+          dir: 'asc',
+          filter: {
+            in_process_at_from: new Date(Date.now() - 30 * 86400000).toISOString().replace(/\.\d+Z$/, 'Z'),
+            in_process_at_to: new Date().toISOString().replace(/\.\d+Z$/, 'Z'),
+          },
+          limit: 5, offset: 0,
+        },
+      },
+      {
+        label: 'since/to 30d (FBO-style)',
+        body: {
+          dir: 'asc',
+          filter: {
+            since: new Date(Date.now() - 30 * 86400000).toISOString(),
+            to: new Date().toISOString(),
+          },
+          limit: 5, offset: 0,
+        },
+      },
+    ];
+
+    const results: Array<{ label: string; status: number | string; topLevelKeys?: string[]; postingsCount?: number | null; firstPosting?: unknown; error?: unknown }> = [];
+
+    for (const attempt of attempts) {
+      try {
+        const { data, status } = await firstValueFrom(
+          this.httpService.post(`${this.API_BASE}/v3/posting/fbs/list`, attempt.body, { headers, timeout: 10000 }),
+        );
+        results.push({
+          label: attempt.label,
+          status,
+          topLevelKeys: Object.keys(data ?? {}),
+          postingsCount: Array.isArray(data?.result?.postings) ? data.result.postings.length : null,
+          firstPosting: data?.result?.postings?.[0] ?? null,
+        });
+        // If this attempt succeeded, no need to try more
+        break;
+      } catch (err: unknown) {
+        const axErr = err as { response?: { status?: number; data?: unknown } };
+        results.push({
+          label: attempt.label,
+          status: axErr?.response?.status ?? 'no-response',
+          error: axErr?.response?.data ?? (err instanceof Error ? err.message : String(err)),
+        });
+      }
+    }
+
+    return { sellerId: this.config.sellerId, attempts: results };
   }
 
   async getOrders(since?: Date): Promise<OrderData[]> {
