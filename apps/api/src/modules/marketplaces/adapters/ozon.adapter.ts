@@ -163,6 +163,17 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
     return val.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 100) || `HS_${Math.random().toString(36).slice(2, 10)}`;
   }
 
+  /**
+   * Нормализовать URL изображений перед отправкой на Ozon:
+   *  - протокол-относительные ("//cdn.wbbasket.ru/...") → "https://cdn.wbbasket.ru/..."
+   *  - убрать всё, что не начинается с https:// (http без s Ozon не принимает)
+   */
+  private normalizeImageUrls(urls: string[] | undefined | null): string[] {
+    return (urls ?? [])
+      .map((u) => (typeof u === 'string' && u.startsWith('//') ? `https:${u}` : u))
+      .filter((u): u is string => typeof u === 'string' && u.startsWith('https://'));
+  }
+
   /** Заголовки для запросов к Ozon API */
   private ozonHeaders() {
     return {
@@ -253,8 +264,21 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
     if (id === 9048 || name.includes('название модели') || name.includes('модель')) return (product.name || offerId).slice(0, 500);
     if (name.includes('тип')) return (product.craftType || product.name || offerId).trim().slice(0, 500);
 
-    // Цвет → Название цвета (attr 10096)
-    if (id === OzonAdapter.ATTR_COLOR || name.includes('цвет') || name.includes('название цвета')) {
+    // Аннотация / описание — берём из product.description
+    if (id === 4191 || name.includes('аннотация') || (name.includes('описание') && !name.includes('категор'))) {
+      const desc = [
+        product.description?.trim(),
+        product.richContent?.trim(),
+      ].filter(Boolean).join('\n\n') || (product.name || offerId).slice(0, 500);
+      return desc.slice(0, 5000);
+    }
+
+    // Название цвета (attr 4818 = свободный текст; 10096 = словарный «Цвет товара» — не трогаем)
+    if (id === OzonAdapter.ATTR_COLOR || name.includes('название цвета')) {
+      return (product.color ?? '').trim().slice(0, 100) || 'Без цвета';
+    }
+    // «Цвет товара» (словарный) — тоже маппим на наш цвет если попадает
+    if (name === 'цвет' || name === 'цвет товара') {
       return (product.color ?? '').trim().slice(0, 100) || 'Без цвета';
     }
 
@@ -296,8 +320,8 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
   } {
     const priceNum = Math.round(Number(product.price ?? 1));
     const offerId = this.sanitizeOfferId(product.vendorCode ?? `HS_${product.id.slice(0, 8)}`);
-    // Штрих-код: только если уже есть (barcodeOzon или barcode). Иначе не передаём — Ozon сгенерирует свой (OZN...).
-    const barcode = (product.barcodeOzon ?? product.barcode)?.trim() || undefined;
+    // Штрих-код: только barcodeOzon (выданный Ozon). Никогда не передаём WB-баркод — у каждого маркета свой.
+    const barcode = product.barcodeOzon?.trim() || undefined;
     const priceStr = String(priceNum);
     // Ozon требует скидку >20% при цене ≤400 (old_price > price / 0.8)
     // Если oldPrice указан вручную — используем его, иначе авторасчёт
@@ -308,7 +332,7 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
         : Math.max(priceNum + 1, Math.round((product.price ?? 1) * 1.25));
     const oldPriceStr = String(oldPriceNum);
 
-    const validImages = product.images?.filter((u) => typeof u === 'string' && u.startsWith('http')) ?? [];
+    const validImages = this.normalizeImageUrls(product.images);
 
     const height = product.height ?? 100;
     const width = product.width ?? 100;
@@ -453,7 +477,7 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
         throw new Error('Ozon не принимает цену 0 или отрицательную.');
       }
 
-      const validImages = product.images?.filter((u) => typeof u === 'string' && u.startsWith('http')) ?? [];
+      const validImages = this.normalizeImageUrls(product.images);
       if (validImages.length === 0) {
         throw new Error(
           'Добавьте URL фото товара в карточке. Ozon требует хотя бы одно изображение.',
@@ -1058,7 +1082,7 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
         product.itemsPerPack != null;
 
       if (hasContentUpdate && product.vendorCode && product.name) {
-        const validImages = product.images?.filter((u) => typeof u === 'string' && u.startsWith('http')) ?? [];
+        const validImages = this.normalizeImageUrls(product.images);
         try {
           const fullProduct: ProductData = {
             id: product.id ?? '',
@@ -1068,7 +1092,7 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
             stock: product.stock ?? 0,
             images: validImages,
             vendorCode: product.vendorCode,
-            barcode: product.barcodeOzon ?? product.barcode,
+            barcode: product.barcodeOzon,
             brand: product.brand,
             weight: product.weight,
             width: product.width,
@@ -1086,6 +1110,11 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
             barcodeOzon: product.barcodeOzon,
           };
           const { item } = this.buildImportPayload(fullProduct);
+          this.logger.log(
+            `[updateProduct] product_id=${marketplaceProductId} offer_id=${String(product.vendorCode)} ` +
+            `description=${String(item.description ?? '(not set)').slice(0, 60)} ` +
+            `images=${validImages.length} color=${String(product.color ?? '—')}`,
+          );
           // Если новые изображения не переданы — убираем поле images из запроса,
           // чтобы Ozon сохранил существующие фото карточки.
           if (validImages.length === 0) {
@@ -1666,9 +1695,9 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
    * Получение списка товаров с Ozon для импорта в каталог.
    * v3/product/list → v3/product/info/list (пачками).
    */
-  /** Атрибуты Ozon: 4180 = Бренд, 10096 = Цвет */
+  /** Атрибуты Ozon: 4180 = Бренд, 4818 = Название цвета (свободный текст), 10096 = Цвет товара (словарный — НЕ используем) */
   private static readonly ATTR_BRAND = 4180;
-  private static readonly ATTR_COLOR = 10096;
+  private static readonly ATTR_COLOR = 4818;
 
   async getProductsFromOzon(): Promise<
     Array<{
