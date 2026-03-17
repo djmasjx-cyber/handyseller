@@ -3,58 +3,8 @@ import { OrderStatus } from '@prisma/client';
 import { OrdersService } from './orders.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { PrismaService } from '../../common/database/prisma.service';
 import { CreateManualOrderDto } from './dto/create-manual-order.dto';
 
-/** Временный публичный endpoint для диагностики FBS без JWT.
- *  Требует ?secret=hs-fbs-diag-2026
- *  userId определяется автоматически из первого Ozon-подключения в БД. */
-@Controller('orders-diag')
-export class OrdersDiagController {
-  constructor(
-    private ordersService: OrdersService,
-    private prisma: PrismaService,
-  ) {}
-
-  private checkSecret(secret: string) {
-    if (secret !== 'hs-fbs-diag-2026') throw new BadRequestException('forbidden');
-  }
-
-  private async resolveUserId(userId?: string): Promise<string> {
-    if (userId?.trim()) return userId.trim();
-    const conn = await this.prisma.marketplaceConnection.findFirst({
-      where: { marketplace: 'OZON', token: { not: null } },
-      select: { userId: true },
-    });
-    if (!conn) throw new BadRequestException('No Ozon connection found');
-    return conn.userId;
-  }
-
-  @Get('ozon-fbs')
-  async ozonFbsPublic(
-    @Query('secret') secret: string,
-    @Query('userId') userId?: string,
-    @Query('days') days?: string,
-  ) {
-    this.checkSecret(secret);
-    const uid = await this.resolveUserId(userId);
-    const n = days ? parseInt(days, 10) : 30;
-    return this.ordersService.diagOzonFbs(uid, isNaN(n) ? 30 : n);
-  }
-
-  @Post('sync')
-  async syncPublic(
-    @Query('secret') secret: string,
-    @Query('userId') userId?: string,
-    @Query('days') days?: string,
-  ) {
-    this.checkSecret(secret);
-    const uid = await this.resolveUserId(userId);
-    const n = days ? parseInt(days, 10) : 30;
-    const since = new Date(Date.now() - (isNaN(n) ? 30 : n) * 24 * 60 * 60 * 1000);
-    return this.ordersService.syncFromMarketplaces(uid, since);
-  }
-}
 
 @Controller('orders')
 @UseGuards(JwtAuthGuard)
