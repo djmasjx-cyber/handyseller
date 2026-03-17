@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { OrdersService } from './orders.service';
-import { OrdersController } from './orders.controller';
+import { OrdersController, OrdersDiagController } from './orders.controller';
 import { OrdersSyncCron } from './orders-sync.cron';
 import { OrdersHoldTransitionCron } from './orders-hold-transition.cron';
 import { OrdersStatsTokenSyncListener } from './orders-stats-token-sync.listener';
@@ -11,7 +11,7 @@ import { SalesSourcesModule } from '../sales-sources/sales-sources.module';
 
 @Module({
   imports: [EventEmitterModule, MarketplacesModule, ProductsModule, SalesSourcesModule],
-  controllers: [OrdersController],
+  controllers: [OrdersController, OrdersDiagController],
   providers: [OrdersService, OrdersSyncCron, OrdersHoldTransitionCron, OrdersStatsTokenSyncListener],
   exports: [OrdersService],
 })
