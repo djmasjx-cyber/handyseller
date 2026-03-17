@@ -248,9 +248,34 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
   ): string {
     const id = attr.id;
     const name = (attr.name ?? '').toLowerCase();
+
     if (id === 4180 || name.includes('бренд')) return (product.brand || 'Ручная работа').trim().slice(0, 200);
     if (id === 9048 || name.includes('название модели') || name.includes('модель')) return (product.name || offerId).slice(0, 500);
     if (name.includes('тип')) return (product.craftType || product.name || offerId).trim().slice(0, 500);
+
+    // Цвет → Название цвета (attr 10096)
+    if (id === OzonAdapter.ATTR_COLOR || name.includes('цвет') || name.includes('название цвета')) {
+      return (product.color ?? '').trim().slice(0, 100) || 'Без цвета';
+    }
+
+    // Кол-во в упаковке → Единиц в одном товаре
+    if (
+      name.includes('единиц') ||
+      name.includes('упаков') ||
+      name.includes('кол-во') ||
+      name.includes('количество') ||
+      name.includes('items_in_pack') ||
+      name.includes('quantity_in')
+    ) {
+      return String(product.itemsPerPack ?? 1);
+    }
+
+    // Материал
+    if (name.includes('материал')) return (product.material ?? '').trim().slice(0, 500) || (product.name || offerId).slice(0, 500);
+
+    // Страна производства
+    if (name.includes('страна')) return (product.countryOfOrigin ?? '').trim() || 'Россия';
+
     return (product.name || offerId).slice(0, 500);
   }
 
@@ -329,22 +354,44 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
       attributes,
     };
 
-    const extra: string[] = [];
-    if (product.color?.trim()) extra.push(`Цвет: ${product.color.trim()}`);
-    if (product.itemsPerPack != null && product.itemsPerPack > 0) extra.push(`Кол-во в упаковке: ${product.itemsPerPack}`);
-    if (product.material?.trim()) extra.push(`Материал: ${product.material.trim()}`);
-    if (product.craftType?.trim()) extra.push(`Вид творчества: ${product.craftType.trim()}`);
-    if (product.countryOfOrigin?.trim()) extra.push(`Страна производства: ${product.countryOfOrigin.trim()}`);
-    if (product.packageContents?.trim()) extra.push(`Комплектация: ${product.packageContents.trim()}`);
+    // Аннотация (description): только наше поле «Описание» + richContent.
+    // Цвет и кол-во в упаковке передаются отдельными атрибутами — не дублируем в тексте.
     let desc = product.description?.trim() ?? '';
     if (product.richContent?.trim()) {
       desc = desc ? `${desc}\n\n${product.richContent.trim()}` : product.richContent.trim();
     }
-    if (extra.length) {
-      desc = desc ? `${desc}\n\n${extra.join('\n')}` : extra.join('\n');
+    // Дополнительные текстовые поля без специальных атрибутов Ozon — добавляем в аннотацию
+    const extraText: string[] = [];
+    if (product.material?.trim()) extraText.push(`Материал: ${product.material.trim()}`);
+    if (product.craftType?.trim()) extraText.push(`Вид творчества: ${product.craftType.trim()}`);
+    if (product.packageContents?.trim()) extraText.push(`Комплектация: ${product.packageContents.trim()}`);
+    if (extraText.length) {
+      desc = desc ? `${desc}\n\n${extraText.join('\n')}` : extraText.join('\n');
     }
     if (desc) {
       item.description = desc.slice(0, 5000);
+    }
+
+    // Цвет → Название цвета (attr 10096): добавляем атрибутом если не передан через requiredAttributes
+    const hasColorAttr = (attributes as Array<{ id: number }>).some((a) => a.id === OzonAdapter.ATTR_COLOR);
+    if (!hasColorAttr && product.color?.trim()) {
+      (attributes as Array<{ id: number; complex_id: number; values: Array<{ dictionary_value_id: number; value: string }> }>).push({
+        id: OzonAdapter.ATTR_COLOR,
+        complex_id: 0,
+        values: [{ dictionary_value_id: 0, value: product.color.trim().slice(0, 100) }],
+      });
+    }
+
+    // Кол-во в упаковке → Единиц в одном товаре (attr 9461): добавляем атрибутом
+    // Ozon attr 9461 = «Единиц в одном товаре» (общий для большинства категорий)
+    const ATTR_ITEMS_IN_PACK = 9461;
+    const hasPackAttr = (attributes as Array<{ id: number }>).some((a) => a.id === ATTR_ITEMS_IN_PACK);
+    if (!hasPackAttr && product.itemsPerPack != null && product.itemsPerPack > 0) {
+      (attributes as Array<{ id: number; complex_id: number; values: Array<{ dictionary_value_id: number; value: string }> }>).push({
+        id: ATTR_ITEMS_IN_PACK,
+        complex_id: 0,
+        values: [{ dictionary_value_id: 0, value: String(product.itemsPerPack) }],
+      });
     }
 
     const mapping: Record<string, { our: unknown; ozon: unknown }> = {
