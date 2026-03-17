@@ -1,0 +1,158 @@
+npm warn config ignoring workspace config at /home/ubuntu/handyseller-repo/apps/api/.npmrc
+
+> api@0.1.0 dev
+> nest start --watch
+
+[2J[3J[H[[90m9:39:56 AM[0m] Starting compilation in watch mode...
+
+[[90m9:40:28 AM[0m] Found 0 errors. Watching for file changes.
+
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [NestFactory] Starting Nest application...
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [InstanceLoader] CryptoModule dependencies initialized +91ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [InstanceLoader] DatabaseModule dependencies initialized +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [InstanceLoader] LoggerModule dependencies initialized +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [InstanceLoader] PassportModule dependencies initialized +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [InstanceLoader] EventEmitterModule dependencies initialized +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [InstanceLoader] BullModule dependencies initialized +1ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [InstanceLoader] ThrottlerModule dependencies initialized +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [InstanceLoader] HttpModule dependencies initialized +1ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [InstanceLoader] ConfigHostModule dependencies initialized +6ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [InstanceLoader] DiscoveryModule dependencies initialized +1ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [InstanceLoader] MonitoringModule dependencies initialized +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [InstanceLoader] ConfigModule dependencies initialized +4ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [InstanceLoader] ConfigModule dependencies initialized +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [InstanceLoader] EventEmitterModule dependencies initialized +1ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [InstanceLoader] ScheduleModule dependencies initialized +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [InstanceLoader] BullModule dependencies initialized +2ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [InstanceLoader] AppModule dependencies initialized +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [InstanceLoader] BullModule dependencies initialized +1ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [InstanceLoader] JwtModule dependencies initialized +1ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [InstanceLoader] UsersModule dependencies initialized +1ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [InstanceLoader] SubscriptionsModule dependencies initialized +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [InstanceLoader] SalesSourcesModule dependencies initialized +1ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [InstanceLoader] AnalyticsModule dependencies initialized +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [InstanceLoader] AdminModule dependencies initialized +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [InstanceLoader] MaterialsModule dependencies initialized +1ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [InstanceLoader] ProductsModule dependencies initialized +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [InstanceLoader] AuthModule dependencies initialized +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [InstanceLoader] PaymentsModule dependencies initialized +1ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [InstanceLoader] MarketplacesModule dependencies initialized +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [InstanceLoader] DashboardModule dependencies initialized +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [InstanceLoader] OrdersModule dependencies initialized +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RoutesResolver] AppController {/api}: +10ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/health, GET} route +2ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/health/ready, GET} route +1ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RoutesResolver] AuthController {/api/auth}: +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/auth/register, POST} route +1ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/auth/login, POST} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/auth/refresh, POST} route +1ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/auth/logout, POST} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RoutesResolver] UsersController {/api/users}: +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/users/me, GET} route +1ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/users/me, PATCH} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RoutesResolver] ProductsController {/api/products}: +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/products, GET} route +1ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/products/archive, GET} route +1ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/products/lookup, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/products/search, GET} route +1ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/products/:id, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/products/replenish, POST} route +1ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/products/:id/stock, POST} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/products/:id/stock-history, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/products/:id/history, GET} route +1ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/products/:id, PATCH} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/products/:id, DELETE} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/products/:id/restore, POST} route +1ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/products, POST} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RoutesResolver] SubscriptionsController {/api/subscriptions}: +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/subscriptions/me, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RoutesResolver] MaterialsController {/api/materials}: +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/materials, GET} route +1ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/materials, POST} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RoutesResolver] MarketplacesController {/api/marketplaces}: +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces, GET} route +1ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/user, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/wb-fbo-stock, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/ozon-fbo-stock, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/ozon-fbo-stock-debug, GET} route +1ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/wb-colors, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/wb-colors/sync, POST} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/connect, POST} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/:marketplace/warehouse, PATCH} route +1ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/:marketplace/stats-token, PATCH} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/:marketplace, DELETE} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/sync, POST} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/sync/status/:jobId, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/orders, GET} route +1ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/orders-stats-by-status, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/statistics, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/linked-products-stats, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/order-costs/sync, POST} route +1ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/wb-stock/:displayId, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/wb-stock/:displayId/sync, POST} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/wb-barcode/:productId, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/wb-barcode/:productId/load, POST} route +1ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/ozon/categories, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/ozon/warehouses, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/wb/warehouses, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/wb/categories, GET} route +1ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/ozon/categories/attributes, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/ozon-test, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/ozon-stock/:displayIdOrArticle, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/ozon-stock-debug/:displayIdOrArticle, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/ozon-stock/:displayIdOrArticle/sync, POST} route +1ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/ozon-check/:productId, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/ozon-validate/:productId, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/wb-validate/:productId, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/wb-export-diagnostic/:productId, POST} route +1ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/wb-export-preview/:productId, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/ozon-export-diagnostic/:productId, POST} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/ozon-export-preview/:productId, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/ozon-debug/:productId, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/ozon-delete-mapping/:productId, POST} route +1ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/ozon-refresh-mapping/:productId, POST} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/ozon-barcode/:productId/load, POST} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/wb-supply, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/wb-supply/trbx, POST} route +1ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/wb-supply/trbx/stickers, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/wb-supply/deliver, POST} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/wb-supply/barcode, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/ozon-import-diagnostic, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/marketplaces/import, POST} route +1ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RoutesResolver] OrdersController {/api/orders}: +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/orders, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/orders, POST} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/orders/sync, POST} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/orders/wb-raw, GET} route +1ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/orders/wb-status, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/orders/:id/wb-sticker, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/orders/:id/retry-wb-push, POST} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/orders/retry-stock-reserve, POST} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/orders/:id/status, PATCH} route +1ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RoutesResolver] SalesSourcesController {/api/sales-sources}: +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/sales-sources, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/sales-sources, POST} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RoutesResolver] AnalyticsController {/api/analytics}: +1ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/analytics/summary, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/analytics/monthly, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/analytics/products, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RoutesResolver] DashboardController {/api/dashboard}: +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/dashboard, GET} route +1ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RoutesResolver] AdminController {/api/admin}: +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/admin/users/:userId/subscription, PATCH} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/admin/users, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/admin/payments/stats, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/admin/payments/webhooks, GET} route +1ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/admin/payments/:id, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/admin/debug-wb-order, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/admin/payments, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/admin/orders/retry-stock-reserve, POST} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/admin/payments/:id/refund, POST} route +1ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/admin/orders/fbo-by-article, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RoutesResolver] PaymentsController {/api/payments}: +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/payments/create, POST} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/payments/:id/status, GET} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RoutesResolver] PaymentsWebhookController {/api/payments/webhook}: +1ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [RouterExplorer] Mapped {/api/payments/webhook/vtb, POST} route +0ms
+[Nest] 10553  - 03/10/2026, 9:40:29 AM     LOG [NestApplication] Nest application successfully started +163ms
+2026-03-10 09:43:02.348 [32minfo[39m GET /health 200 2926.192 ms [eff94b03-86d2-4292-abde-9ffb87e40a74] ip=::ffff:127.0.0.1 {"service":"handyseller-api","method":"GET","url":"/health","status":"200","responseTime":"2926.192"}

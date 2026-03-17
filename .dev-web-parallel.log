@@ -1,0 +1,82 @@
+▲ Next.js 16.1.6 (Turbopack)
+- Local:         http://localhost:3002
+- Network:       http://10.130.0.21:3002
+
+✓ Starting...
+Attention: Next.js now collects completely anonymous telemetry regarding usage.
+This information is used to shape Next.js' roadmap and prioritize features.
+You can learn more, including how to opt-out if you'd not like to participate in this anonymous program, by visiting the following URL:
+https://nextjs.org/telemetry
+
+[1m[31mFATAL[39m[0m: An unexpected Turbopack error occurred:
+OS file watch limit reached. about ["/home/ubuntu/handyseller-repo/"]
+Error [TurbopackInternalError]: OS file watch limit reached. about ["/home/ubuntu/handyseller-repo/"]
+    at <unknown> (TurbopackInternalError: OS file watch limit reached. about ["/home/ubuntu/handyseller-repo/"]) {
+  location: undefined
+}
+[?25h
+▲ Next.js 16.1.6 (Turbopack)
+- Local:         http://localhost:3002
+- Network:       http://10.130.0.21:3002
+
+✓ Starting...
+Error: Turbopack build failed with 1 errors:
+./apps/web/app
+Error: Next.js inferred your workspace root, but it may not be correct.
+    We couldn't find the Next.js package (next/package.json) from the project directory: /home/ubuntu/handyseller-repo/apps/web/app
+     To fix this, set turbopack.root in your Next.js config, or ensure the Next.js package is resolvable from this directory.
+    Note: For security and performance reasons, files outside of the project directory will not be compiled.
+    See https://nextjs.org/docs/app/api-reference/config/next-config-js/turbopack#root-directory for more information.
+
+    at ignore-listed frames
+[?25h
+▲ Next.js 16.1.6 (webpack)
+- Local:         http://localhost:3002
+- Network:       http://10.130.0.21:3002
+
+✓ Starting...
+Unhandled Rejection: Error: It looks like you're trying to use TypeScript but do not have the required package(s) installed.
+
+Please install @types/react by running:
+
+	npm install --save-dev @types/react
+
+If you are not trying to use TypeScript, please remove the tsconfig.json file from your package root (and any TypeScript files in your app and pages directories).
+
+    at ignore-listed frames
+
+> web@0.1.0 dev
+> next dev
+
+sh: 1: next: not found
+npm error Lifecycle script `dev` failed with error:
+npm error code 127
+npm error path /home/ubuntu/handyseller-repo/apps/web
+npm error workspace web@0.1.0
+npm error location /home/ubuntu/handyseller-repo/apps/web
+npm error command failed
+npm error command sh -c next dev
+Now using node v20.20.1 (npm v10.8.2)
+
+> web@0.1.0 dev
+> next dev
+
+sh: 1: next: not found
+npm error Lifecycle script `dev` failed with error:
+npm error code 127
+npm error path /home/ubuntu/handyseller-repo/apps/web
+npm error workspace web@0.1.0
+npm error location /home/ubuntu/handyseller-repo/apps/web
+npm error command failed
+npm error command sh -c next dev
+Now using node v20.20.1 (npm v10.8.2)
+
+> web@0.1.0 dev
+> next dev
+
+▲ Next.js 16.1.6 (Turbopack)
+- Local:         http://localhost:3002
+- Network:       http://10.130.0.21:3002
+
+✓ Starting...
+✓ Ready in 6.8s

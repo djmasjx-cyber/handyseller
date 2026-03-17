@@ -1,0 +1,15 @@
+{
+  "headers": {
+    "x-nextjs-stale-time": "300",
+    "x-nextjs-prerender": "1",
+    "x-next-cache-tags": "_N_T_/layout,_N_T_/kak-prodavat-hendmeid-na-yandex-markete/layout,_N_T_/kak-prodavat-hendmeid-na-yandex-markete/page,_N_T_/kak-prodavat-hendmeid-na-yandex-markete"
+  },
+  "segmentPaths": [
+    "/_tree",
+    "/_full",
+    "/kak-prodavat-hendmeid-na-yandex-markete/__PAGE__",
+    "/kak-prodavat-hendmeid-na-yandex-markete",
+    "/_index",
+    "/_head"
+  ]
+}

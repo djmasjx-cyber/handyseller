@@ -318,7 +318,8 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
     typeId: number;
     attributeIds: number[];
   } {
-    const priceNum = Math.round(Number(product.price ?? 1));
+    // Цена всегда 1 руб — клиент устанавливает реальную цену вручную на Ozon
+    const priceNum = 1;
     const offerId = this.sanitizeOfferId(product.vendorCode ?? `HS_${product.id.slice(0, 8)}`);
     // Штрих-код: только barcodeOzon (выданный Ozon). Никогда не передаём WB-баркод — у каждого маркета свой.
     const barcode = product.barcodeOzon?.trim() || undefined;
@@ -378,7 +379,7 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
       attributes,
     };
 
-    // Аннотация (description): только наше поле «Описание» + richContent.
+    // Аннотация (attr 4191): наше поле «Описание» + richContent + доп. поля.
     // Цвет и кол-во в упаковке передаются отдельными атрибутами — не дублируем в тексте.
     let desc = product.description?.trim() ?? '';
     if (product.richContent?.trim()) {
@@ -392,8 +393,14 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
     if (extraText.length) {
       desc = desc ? `${desc}\n\n${extraText.join('\n')}` : extraText.join('\n');
     }
-    if (desc) {
-      item.description = desc.slice(0, 5000);
+    // Описание → атрибут 4191 («Аннотация»), а не item.description
+    const hasAnnotationAttr = (attributes as Array<{ id: number }>).some((a) => a.id === OzonAdapter.ATTR_ANNOTATION);
+    if (!hasAnnotationAttr && desc) {
+      (attributes as Array<{ id: number; complex_id: number; values: Array<{ dictionary_value_id: number; value: string }> }>).push({
+        id: OzonAdapter.ATTR_ANNOTATION,
+        complex_id: 0,
+        values: [{ dictionary_value_id: 0, value: desc.slice(0, 5000) }],
+      });
     }
 
     // Цвет → Название цвета (attr 10096): добавляем атрибутом если не передан через requiredAttributes
@@ -471,8 +478,8 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
           'Ozon не подключён или данные устарели. Подключите Ozon заново в разделе Маркетплейсы (Client ID и API Key).',
         );
       }
-      // Цена задаётся на Ozon клиентом; при создании используем placeholder 1
-      const priceNum = Math.round(Number(product.price ?? 1));
+      // Цена всегда 1 руб — клиент устанавливает реальную цену вручную на Ozon (1 руб плейсхолдер)
+      const priceNum = 1;
       if (priceNum <= 0) {
         throw new Error('Ozon не принимает цену 0 или отрицательную.');
       }
@@ -1049,17 +1056,8 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
         await this.setStock(offerId, marketplaceProductId, product.stock);
       }
 
-      // 2. Цена — отдельный endpoint /v1/product/import/prices.
-      //    v3/product/import НЕ обновляет цену для существующих товаров.
-      if (product.price != null && product.price > 0 && product.vendorCode) {
-        const offerIdForPrice = this.sanitizeOfferId(product.vendorCode ?? `HS_${(product.id ?? '').toString().slice(0, 8)}`);
-        try {
-          await this.updateProductPrices(offerIdForPrice, product.price, product.oldPrice);
-        } catch (priceErr) {
-          this.logger.warn(`Ozon price update failed for offer_id=${offerIdForPrice}:`, priceErr);
-          // Не прерываем — продолжаем обновлять контент
-        }
-      }
+      // 2. Цена НЕ обновляется — клиент всегда устанавливает цену вручную на Ozon.
+      // (endpoint /v1/product/import/prices не используется)
 
       // 3. Контент: название, описание, атрибуты, габариты, изображения.
       //    Ozon обновляет по offer_id через v3/product/import (работает как upsert).
@@ -1110,9 +1108,12 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
             barcodeOzon: product.barcodeOzon,
           };
           const { item } = this.buildImportPayload(fullProduct);
+          // Получаем аннотацию из атрибутов (attr 4191)
+          const annot = ((item.attributes as Array<{ id: number; values: Array<{ value: string }> }>) ?? [])
+            .find(a => a.id === OzonAdapter.ATTR_ANNOTATION)?.values[0]?.value ?? '(not set)';
           this.logger.log(
             `[updateProduct] product_id=${marketplaceProductId} offer_id=${String(product.vendorCode)} ` +
-            `description=${String(item.description ?? '(not set)').slice(0, 60)} ` +
+            `annotation=${annot.slice(0, 60)} ` +
             `images=${validImages.length} color=${String(product.color ?? '—')}`,
           );
           // Если новые изображения не переданы — убираем поле images из запроса,
@@ -1695,9 +1696,10 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
    * Получение списка товаров с Ozon для импорта в каталог.
    * v3/product/list → v3/product/info/list (пачками).
    */
-  /** Атрибуты Ozon: 4180 = Бренд, 4818 = Название цвета (свободный текст), 10096 = Цвет товара (словарный — НЕ используем) */
+  /** Атрибуты Ozon: 4180 = Бренд, 4818 = Название цвета (свободный текст), 4191 = Аннотация (описание), 10096 = Цвет товара (словарный — НЕ используем) */
   private static readonly ATTR_BRAND = 4180;
   private static readonly ATTR_COLOR = 4818;
+  private static readonly ATTR_ANNOTATION = 4191;
 
   async getProductsFromOzon(): Promise<
     Array<{

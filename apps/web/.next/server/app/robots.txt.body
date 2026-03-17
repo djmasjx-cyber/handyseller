@@ -1,0 +1,10 @@
+User-Agent: *
+Allow: /
+Disallow: /api/
+Disallow: /_next/
+Disallow: /admin/
+Disallow: /dashboard/
+Disallow: /app/
+
+Host: https://app.handyseller.ru
+Sitemap: https://app.handyseller.ru/sitemap.xml
