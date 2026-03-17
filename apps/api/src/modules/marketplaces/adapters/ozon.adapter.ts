@@ -595,17 +595,14 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
           productId = await this.findProductIdByOfferId(offerId);
         }
         if (productId) {
-          // Товар уже существует — обновляем остатки принудительно
-          const stockToSend = typeof product.stock === 'number' ? product.stock : 0;
+          // Товар уже существует — обновляем контент и остатки
+          this.logger.log(`Озон (skipped): товар уже существует, обновляем контент для product_id=${productId}`);
           try {
-            if (this.config.warehouseId) {
-              await this.setStock(offerId, String(productId), stockToSend);
-              this.logger.log(`Озон (skipped): остатки обновлены для product_id=${productId}, stock=${stockToSend}`);
-            } else {
-              this.logger.warn(`Озон (skipped): warehouseId не настроен — остатки НЕ обновлены для product_id=${productId}`);
-            }
-          } catch (stockErr) {
-            this.logger.error(`Озон (skipped): ошибка обновления остатков для product_id=${productId}: ${stockErr instanceof Error ? stockErr.message : String(stockErr)}`);
+            await this.updateProduct(String(productId), product);
+            this.logger.log(`Озон (skipped): контент обновлён для product_id=${productId}`);
+          } catch (updateErr) {
+            this.logger.warn(`Озон (skipped): ошибка обновления контента для product_id=${productId}:`, updateErr);
+            // Не падаем — товар уже на Ozon
           }
           return String(productId);
         }
