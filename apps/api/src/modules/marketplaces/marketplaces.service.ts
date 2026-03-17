@@ -2245,6 +2245,104 @@ export class MarketplacesService {
   }
 
   /**
+  /**
+   * Диагностика Ozon FBS: сырой ответ API + пошаговый трейс маппинга для каждого отправления.
+   * Позволяет найти причину, почему FBS-заказы не попадают в систему.
+   */
+  async diagOzonFbsRaw(userId: string, days: number) {
+    const conn = await this.getMarketplaceConnection(userId, 'OZON');
+    if (!conn?.token) return { error: 'Ozon не подключён', conn: null };
+
+    const adapter = this.adapterFactory.createAdapter('OZON', {
+      encryptedToken: conn.token,
+      encryptedRefreshToken: conn.refreshToken,
+      sellerId: conn.sellerId ?? undefined,
+      warehouseId: conn.warehouseId ?? undefined,
+    });
+    if (!adapter || !(adapter instanceof OzonAdapter)) return { error: 'Не удалось создать адаптер Ozon' };
+
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    // 1. Сырой ответ FBS API (через приватный метод HTTP)
+    let rawFbsResponse: unknown = null;
+    let rawFbsError: string | null = null;
+    try {
+      rawFbsResponse = await (adapter as OzonAdapter).diagGetFbsRaw(since);
+    } catch (err) {
+      rawFbsError = err instanceof Error ? err.message : String(err);
+    }
+
+    // 2. Распарсенные заказы через getOrders (после нашего фикса)
+    let parsedOrders: unknown = null;
+    let parsedError: string | null = null;
+    try {
+      parsedOrders = await adapter.getOrders(since);
+    } catch (err) {
+      parsedError = err instanceof Error ? err.message : String(err);
+    }
+
+    // 3. Трейс маппинга: для каждого заказа проверяем, найден ли товар
+    const mappingTrace: Array<{
+      postingNumber: string;
+      productId: string;
+      mappingFound: boolean;
+      mappingProductId?: string;
+      mappingProductTitle?: string;
+      mappingError?: string;
+    }> = [];
+
+    if (Array.isArray(parsedOrders)) {
+      for (const od of (parsedOrders as Array<{ marketplaceOrderId: string; productId: string }>) .slice(0, 20)) {
+        try {
+          const product = await this.productMappingService.findProductByExternalId(userId, 'OZON', od.productId);
+          mappingTrace.push({
+            postingNumber: od.marketplaceOrderId,
+            productId: od.productId,
+            mappingFound: !!product,
+            mappingProductId: product?.id,
+            mappingProductTitle: (product as { title?: string } | null)?.title,
+          });
+        } catch (err) {
+          mappingTrace.push({
+            postingNumber: od.marketplaceOrderId,
+            productId: od.productId,
+            mappingFound: false,
+            mappingError: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+    }
+
+    // 4. Существующие маппинги Ozon в БД
+    const existingMappings = await this.prisma.productMarketplaceMapping.findMany({
+      where: { userId, marketplace: 'OZON' },
+      include: { product: { select: { id: true, title: true, article: true } } },
+      take: 20,
+    });
+
+    return {
+      connectionInfo: {
+        hasSellerId: !!conn.sellerId,
+        hasToken: !!conn.token,
+        warehouseId: conn.warehouseId,
+        sinceDate: since.toISOString(),
+      },
+      rawFbsResponse,
+      rawFbsError,
+      parsedOrdersCount: Array.isArray(parsedOrders) ? (parsedOrders as unknown[]).length : null,
+      parsedOrders: Array.isArray(parsedOrders) ? (parsedOrders as unknown[]).slice(0, 5) : null,
+      parsedError,
+      mappingTrace,
+      existingOzonMappings: existingMappings.map((m) => ({
+        externalSystemId: m.externalSystemId,
+        externalArticle: m.externalArticle,
+        productTitle: m.product?.title,
+        productArticle: m.product?.article,
+      })),
+    };
+  }
+
+  /**
    * Проверка подключения к Ozon. GET /api/marketplaces/ozon-test
    * Проверяет наличие Client-Id и успешность запроса к API.
    */

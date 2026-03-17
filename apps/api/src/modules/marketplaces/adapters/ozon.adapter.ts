@@ -1041,6 +1041,48 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
     }
   }
 
+  /**
+   * Диагностика: возвращает сырой ответ /v3/posting/fbs/list без обработки.
+   * Используется в /api/orders/ozon-fbs-diag для анализа структуры ответа.
+   */
+  async diagGetFbsRaw(since: Date): Promise<unknown> {
+    const headers = {
+      'Client-Id': this.config.sellerId ?? '',
+      'Api-Key': this.config.apiKey,
+      'Content-Type': 'application/json',
+    };
+    const { data } = await firstValueFrom(
+      this.httpService.post(
+        `${this.API_BASE}/v3/posting/fbs/list`,
+        {
+          dir: 'asc',
+          filter: {
+            since: since.toISOString(),
+            to: new Date().toISOString(),
+            status: 'all',
+          },
+          limit: 10,
+          offset: 0,
+          with: { analytics_data: false, financial_data: false },
+        },
+        { headers, timeout: 15000 },
+      ),
+    );
+    return {
+      // Top-level keys
+      topLevelKeys: Object.keys(data ?? {}),
+      // Is result an array?
+      resultIsArray: Array.isArray(data?.result),
+      resultType: typeof data?.result,
+      resultKeys: data?.result && typeof data.result === 'object' ? Object.keys(data.result) : null,
+      // FBS v3 should have result.postings
+      postingsIsArray: Array.isArray(data?.result?.postings),
+      postingsCount: Array.isArray(data?.result?.postings) ? data.result.postings.length : null,
+      // First posting sample
+      firstPosting: data?.result?.postings?.[0] ?? data?.result?.[0] ?? null,
+    };
+  }
+
   async getOrders(since?: Date): Promise<OrderData[]> {
     const dateFrom = since || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     const headers = {

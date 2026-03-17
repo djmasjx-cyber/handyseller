@@ -259,6 +259,15 @@ export class OrdersService {
     return this.marketplacesService.getWbOrderStatus(userId, orderIdOrSrid);
   }
 
+  /**
+   * Диагностика Ozon FBS: возвращает сырой ответ API, извлечённые данные
+   * и результат маппинга каждого отправления.
+   * GET /orders/ozon-fbs-diag?days=30
+   */
+  async diagOzonFbs(userId: string, days = 14) {
+    return this.marketplacesService.diagOzonFbsRaw(userId, days);
+  }
+
   /** Отладка: получить сырые заказы с WB без сохранения */
   async getRawOrdersFromWb(userId: string) {
     const orders = await this.marketplacesService.getOrdersFromAllMarketplaces(userId, new Date(Date.now() - 14 * 24 * 60 * 60 * 1000));

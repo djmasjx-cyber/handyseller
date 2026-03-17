@@ -58,6 +58,19 @@ export class OrdersController {
     return this.ordersService.getWbOrderStatusDebug(userId, orderId.trim());
   }
 
+  /**
+   * Диагностика Ozon FBS: сырой ответ API + результат маппинга.
+   * GET /api/orders/ozon-fbs-diag?days=30
+   */
+  @Get('ozon-fbs-diag')
+  async ozonFbsDiag(
+    @CurrentUser('userId') userId: string,
+    @Query('days') days?: string,
+  ) {
+    const n = days ? parseInt(days, 10) : 14;
+    return this.ordersService.diagOzonFbs(userId, isNaN(n) ? 14 : n);
+  }
+
   /** Получить стикер заказа WB (PNG base64). Для WB при статусе «На сборке» в ЛК. */
   @Get(':id/wb-sticker')
   async getWbSticker(@CurrentUser('userId') userId: string, @Param('id') orderId: string) {
