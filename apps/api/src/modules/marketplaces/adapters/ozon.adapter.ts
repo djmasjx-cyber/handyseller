@@ -1057,9 +1057,8 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
         {
           dir: 'asc',
           filter: {
-            since: since.toISOString(),
-            to: new Date().toISOString(),
-            status: 'all',
+            cutoff_from: since.toISOString(),
+            cutoff_to: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
           },
           limit: 10,
           offset: 0,
@@ -1151,32 +1150,46 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
 
     // FBS — собственные склады.
     // API v3 returns { result: { postings: [...] } } — NOT result as array (unlike FBO v2).
-    // Bug was: iterating data.result (object) silently threw TypeError → all FBS orders skipped.
+    //
+    // Critical fixes vs previous version:
+    // 1. v3 requires `cutoff_from`/`cutoff_to`, NOT `since`/`to` (those are FBO v2 fields)
+    // 2. `status: 'all'` is invalid in v3 → causes HTTP 400. Omit it to get all statuses.
+    // 3. cutoff_to must reach into the future (+14 days) to capture fresh orders whose
+    //    shipment deadline hasn't passed yet.
     try {
-      const { data } = await firstValueFrom(
-        this.httpService.post(
-          `${this.API_BASE}/v3/posting/fbs/list`,
-          {
-            dir: 'asc',
-            filter: {
-              since: dateFrom.toISOString(),
-              to: new Date().toISOString(),
-              status: 'all',
+      let fbsOffset = 0;
+      const fbsLimit = 500;
+      while (true) {
+        const { data } = await firstValueFrom(
+          this.httpService.post(
+            `${this.API_BASE}/v3/posting/fbs/list`,
+            {
+              dir: 'asc',
+              filter: {
+                cutoff_from: dateFrom.toISOString(),
+                cutoff_to: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+                // No `status` filter → returns all statuses
+              },
+              limit: fbsLimit,
+              offset: fbsOffset,
+              with: { analytics_data: true, financial_data: true, barcodes: true },
             },
-            limit: 1000,
-            offset: 0,
-            with: { analytics_data: true, financial_data: true },
-          },
-          { headers, timeout: 15000 },
-        ),
-      );
-      // v3: result.postings; fallback to result[] for forward compatibility
-      const postings = (data?.result?.postings ?? (Array.isArray(data?.result) ? data.result : [])) as FbsPosting[];
-      for (const posting of postings) {
-        if (posting?.posting_number && !seen.has(posting.posting_number)) {
-          seen.add(posting.posting_number);
-          result.push(toOrderData(posting, false));
+            { headers, timeout: 15000 },
+          ),
+        );
+        // v3: result.postings; fallback to result[] for forward compatibility
+        const postings = (
+          data?.result?.postings ??
+          (Array.isArray(data?.result) ? data.result : [])
+        ) as FbsPosting[];
+        for (const posting of postings) {
+          if (posting?.posting_number && !seen.has(posting.posting_number)) {
+            seen.add(posting.posting_number);
+            result.push(toOrderData(posting, false));
+          }
         }
+        if (postings.length < fbsLimit) break;
+        fbsOffset += fbsLimit;
       }
     } catch (error) {
       this.logError(error, 'getOrders FBS');
