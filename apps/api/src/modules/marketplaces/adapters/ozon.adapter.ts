@@ -1049,47 +1049,78 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
       'Content-Type': 'application/json',
     };
 
-    type Posting = {
+    // FBS v3 response: { result: { postings: [...] } }
+    // FBO v2 response: { result: [...] } or { postings: [...] }
+    type FbsPosting = {
       posting_number: string;
-      products?: Array<{ product_id?: number; sku?: number; offer_id?: string; price?: number }>;
+      order_id?: number;
+      order_number?: string;
+      products?: Array<{ product_id?: number; sku?: number; offer_id?: string; price?: number; quantity?: number }>;
+      // FBS v3: customer info lives under `addressee` and `customer`
+      addressee?: { name?: string; phone?: string };
+      customer?: { name?: string; phone?: string; address?: { address_tail?: string; comment?: string } };
+      // FBO v2: flat fields
       customer_name?: string;
       phone?: string;
       address?: { address_tail?: string };
       status: string;
       created_at: string;
+      in_process_at?: string;
     };
 
-    const toOrderData = (posting: Posting, isFbo = false): OrderData => {
+    const toOrderData = (posting: FbsPosting, isFbo = false): OrderData => {
       const p0 = posting.products?.[0];
       const productId = p0?.product_id != null ? String(p0.product_id)
         : p0?.sku != null ? String(p0.sku)
         : '';
+      // FBS v3 uses `addressee`, FBO v2 uses flat `customer_name`/`phone`
+      const customerName =
+        posting.addressee?.name ??
+        posting.customer?.name ??
+        posting.customer_name ??
+        'Аноним';
+      const customerPhone =
+        posting.addressee?.phone ??
+        posting.customer?.phone ??
+        posting.phone;
+      const deliveryAddress =
+        posting.customer?.address?.address_tail ??
+        posting.customer?.address?.comment ??
+        posting.address?.address_tail;
+      const quantity = posting.products?.reduce((s, pr) => s + (pr.quantity ?? 1), 0) ?? 1;
       return {
-      id: posting.posting_number,
-      marketplaceOrderId: posting.posting_number,
-      productId,
-      customerName: posting.customer_name ?? 'Аноним',
-      customerPhone: posting.phone,
-      deliveryAddress: posting.address?.address_tail,
-      status: posting.status,
-      rawStatus: posting.status, // для подсчёта «отказ покупателя» vs «отмена продавца»
-      amount: posting.products?.reduce((sum: number, p) => sum + (p.price ?? 0), 0) ?? 0,
-      createdAt: new Date(posting.created_at),
-      isFbo,
-    };
+        id: posting.posting_number,
+        marketplaceOrderId: posting.posting_number,
+        productId,
+        customerName,
+        customerPhone,
+        deliveryAddress,
+        status: posting.status,
+        rawStatus: posting.status,
+        amount: posting.products?.reduce((sum: number, p) => sum + (p.price ?? 0), 0) ?? 0,
+        quantity,
+        createdAt: new Date(posting.in_process_at ?? posting.created_at),
+        isFbo,
+      };
     };
 
     const seen = new Set<string>();
     const result: OrderData[] = [];
 
-    // FBS — собственные склады
+    // FBS — собственные склады.
+    // API v3 returns { result: { postings: [...] } } — NOT result as array (unlike FBO v2).
+    // Bug was: iterating data.result (object) silently threw TypeError → all FBS orders skipped.
     try {
       const { data } = await firstValueFrom(
         this.httpService.post(
           `${this.API_BASE}/v3/posting/fbs/list`,
           {
             dir: 'asc',
-            filter: { since: dateFrom.toISOString(), status: 'all' },
+            filter: {
+              since: dateFrom.toISOString(),
+              to: new Date().toISOString(),
+              status: 'all',
+            },
             limit: 1000,
             offset: 0,
             with: { analytics_data: true, financial_data: true },
@@ -1097,9 +1128,10 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
           { headers, timeout: 15000 },
         ),
       );
-      for (const p of data?.result ?? []) {
-        const posting = p as Posting;
-        if (!seen.has(posting.posting_number)) {
+      // v3: result.postings; fallback to result[] for forward compatibility
+      const postings = (data?.result?.postings ?? (Array.isArray(data?.result) ? data.result : [])) as FbsPosting[];
+      for (const posting of postings) {
+        if (posting?.posting_number && !seen.has(posting.posting_number)) {
           seen.add(posting.posting_number);
           result.push(toOrderData(posting, false));
         }
@@ -1125,7 +1157,7 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
             { headers, timeout: 15000 },
           ),
         );
-        const items = (data?.result ?? data?.postings ?? []) as Posting[];
+        const items = (data?.result ?? data?.postings ?? []) as FbsPosting[];
         for (const posting of items) {
           if (posting?.posting_number && !seen.has(posting.posting_number)) {
             seen.add(posting.posting_number);
