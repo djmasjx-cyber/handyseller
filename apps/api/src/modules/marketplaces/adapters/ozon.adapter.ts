@@ -1176,6 +1176,7 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
         posting.customer?.address?.comment ??
         posting.address?.address_tail;
       const quantity = posting.products?.reduce((s, pr) => s + (pr.quantity ?? 1), 0) ?? 1;
+      const ozonOfferId = (p0?.offer_id ?? '').trim() || undefined;
       return {
         id: posting.posting_number,
         marketplaceOrderId: posting.posting_number,
@@ -1185,10 +1186,11 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
         deliveryAddress,
         status: posting.status,
         rawStatus: posting.status,
-        amount: posting.products?.reduce((sum: number, p) => sum + (p.price ?? 0), 0) ?? 0,
+        amount: posting.products?.reduce((sum: number, p) => sum + (Number(p.price) ?? 0), 0) ?? 0,
         quantity,
         createdAt: new Date(posting.in_process_at ?? posting.created_at),
         isFbo,
+        ozonOfferId,
       };
     };
 
@@ -1196,13 +1198,10 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
     const result: OrderData[] = [];
 
     // FBS — собственные склады.
-    // API v3 returns { result: { postings: [...] } } — NOT result as array (unlike FBO v2).
-    //
-    // Critical fixes vs previous version:
-    // 1. v3 requires `cutoff_from`/`cutoff_to`, NOT `since`/`to` (those are FBO v2 fields)
-    // 2. `status: 'all'` is invalid in v3 → causes HTTP 400. Omit it to get all statuses.
-    // 3. cutoff_to must reach into the future (+14 days) to capture fresh orders whose
-    //    shipment deadline hasn't passed yet.
+    // API v3 filter uses `since`/`to` (same as FBO v2) — confirmed working via diag.
+    // `cutoff_from`/`cutoff_to` causes 400 (requires ProcessedAtFrom which is a separate field).
+    // `status` filter omitted → returns all statuses.
+    // Response structure: { result: { postings: [...] } }  ←  NOT result[] like FBO v2.
     try {
       let fbsOffset = 0;
       const fbsLimit = 500;
@@ -1213,13 +1212,13 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
             {
               dir: 'asc',
               filter: {
-                cutoff_from: dateFrom.toISOString(),
-                cutoff_to: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
-                // No `status` filter → returns all statuses
+                since: dateFrom.toISOString(),
+                to: new Date().toISOString(),
+                // No `status` → all statuses
               },
               limit: fbsLimit,
               offset: fbsOffset,
-              with: { analytics_data: true, financial_data: true, barcodes: true },
+              with: { analytics_data: false, financial_data: false },
             },
             { headers, timeout: 15000 },
           ),

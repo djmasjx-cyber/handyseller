@@ -95,6 +95,8 @@ export interface OrderData {
   wbFulfillmentType?: 'FBS' | 'DBS' | 'DBW';
   /** FBO (Fulfillment by Operator): товар со склада маркетплейса — не списывать остаток «Мой склад». WB: DBW. Ozon: из fbo/list. */
   isFbo?: boolean;
+  /** Ozon FBS v3: offer_id (seller article) из products[]. Используется для маппинга когда sku ≠ product_id. */
+  ozonOfferId?: string;
 }
 
 export interface SyncResult {

@@ -750,7 +750,9 @@ export class OrdersService {
 
       try {
         // Маппинг товара маркета → наш Product (WB: sku = WB-{userId8}-{nmId})
-        const product = await this.findProductByMarketplaceId(userId, marketplace, od.productId);
+        // Ozon FBS v3: ozonOfferId = offer_id (seller article) для поиска по externalArticle
+        const ozonOfferId = (od as { ozonOfferId?: string }).ozonOfferId;
+        const product = await this.findProductByMarketplaceId(userId, marketplace, od.productId, ozonOfferId);
         if (!product) {
           errors.push(`Заказ ${externalId}: товар ${od.productId} не найден в каталоге`);
           continue;
@@ -931,8 +933,9 @@ export class OrdersService {
     userId: string,
     marketplace: MarketplaceType,
     marketplaceProductId: string,
+    ozonOfferId?: string,
   ) {
-    // 1. Сначала — маппинг по системному ID (надёжно)
+    // 1. Маппинг по системному ID (externalSystemId) — надёжно для FBO
     const product = await this.productMappingService.findProductByExternalId(
       userId,
       marketplace,
@@ -950,18 +953,35 @@ export class OrdersService {
       return (await this.productsService.findByArticle(userId, marketplaceProductId)) ?? null;
     }
 
-    // 3. Fallback для Ozon: автосоздание товара из Ozon при синхронизации заказа (FBO и др.)
-    if (marketplace === 'OZON' && marketplaceProductId?.trim()) {
-      const created = await this.marketplacesService.ensureOzonProductInCatalog(userId, marketplaceProductId.trim());
-      if (created) return created;
-      const offerId = await this.marketplacesService.getOzonOfferIdByProductId(userId, marketplaceProductId);
-      if (offerId) {
-        const byArticle = await this.productsService.findByArticle(userId, offerId);
-        if (byArticle) {
-          await this.productMappingService.upsertMapping(byArticle.id, userId, 'OZON', marketplaceProductId, {
-            externalArticle: offerId,
+    if (marketplace === 'OZON') {
+      // 3. Ozon FBS v3: products[].sku ≠ product_id в маппинге.
+      //    offer_id = seller article = externalArticle в маппинге → ищем по нему первым.
+      if (ozonOfferId?.trim()) {
+        const byArticle = await this.productMappingService.findProductByExternalArticle([userId], 'OZON', ozonOfferId.trim());
+        if (byArticle) return byArticle;
+        // Fallback: товар найден по артикулу в каталоге, но маппинг отсутствует — создаём связку
+        const byProductArticle = await this.productsService.findByArticle(userId, ozonOfferId.trim());
+        if (byProductArticle) {
+          await this.productMappingService.upsertMapping(byProductArticle.id, userId, 'OZON', marketplaceProductId, {
+            externalArticle: ozonOfferId.trim(),
           });
-          return byArticle;
+          return byProductArticle;
+        }
+      }
+
+      // 4. Fallback: автосоздание/привязка товара по product_id (FBO, legacy)
+      if (marketplaceProductId?.trim()) {
+        const created = await this.marketplacesService.ensureOzonProductInCatalog(userId, marketplaceProductId.trim());
+        if (created) return created;
+        const offerId = await this.marketplacesService.getOzonOfferIdByProductId(userId, marketplaceProductId);
+        if (offerId) {
+          const byArticle = await this.productsService.findByArticle(userId, offerId);
+          if (byArticle) {
+            await this.productMappingService.upsertMapping(byArticle.id, userId, 'OZON', marketplaceProductId, {
+              externalArticle: offerId,
+            });
+            return byArticle;
+          }
         }
       }
     }
