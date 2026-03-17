@@ -947,6 +947,43 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
     }
   }
 
+  /**
+   * Обновить цену товара на Ozon через /v1/product/import/prices.
+   * Вызывается отдельно от v3/product/import, т.к. Ozon обновляет цены независимо от контента.
+   */
+  private async updateProductPrices(offerId: string, price: number, oldPrice?: number): Promise<void> {
+    const headers = {
+      'Client-Id': this.config.sellerId ?? '',
+      'Api-Key': this.config.apiKey,
+      'Content-Type': 'application/json',
+    };
+    const priceStr = String(Math.round(Math.max(1, price)));
+    const oldPriceStr = oldPrice && oldPrice > price ? String(Math.round(oldPrice)) : '0';
+    const { data } = await firstValueFrom(
+      this.httpService.post(
+        `${this.API_BASE}/v1/product/import/prices`,
+        {
+          prices: [
+            {
+              offer_id: offerId,
+              price: priceStr,
+              old_price: oldPriceStr,
+              currency_code: 'RUB',
+              auto_action_enabled: 'DISABLED',
+            },
+          ],
+        },
+        { headers },
+      ),
+    );
+    const resultItem = (data?.result?.[0] as { updated?: boolean; errors?: unknown[] } | undefined);
+    if (resultItem && !resultItem.updated) {
+      this.logger.warn(`Ozon price update not applied: offer_id=${offerId}, errors=${JSON.stringify(resultItem.errors)}`);
+    } else {
+      this.logger.log(`Ozon price updated: offer_id=${offerId}, price=${priceStr}, old_price=${oldPriceStr}`);
+    }
+  }
+
   async updateProduct(
     marketplaceProductId: string,
     product: Partial<ProductData>,
@@ -963,9 +1000,7 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
         'Content-Type': 'application/json',
       };
 
-      // Остаток: по product_id и offer_id (offer_id нужен для склада)
-      // Для старых товаров externalArticle в маппинге может быть пустым или не совпадать с Ozon.
-      // Получаем фактический offer_id через API — гарантирует корректную передачу остатков.
+      // 1. Остаток: получаем фактический offer_id с Ozon (гарантирует актуальность).
       if (product.stock !== undefined) {
         if (!this.config.warehouseId || !this.config.sellerId) {
           throw new Error(
@@ -990,11 +1025,25 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
         await this.setStock(offerId, marketplaceProductId, product.stock);
       }
 
-      // Обновление описания, названия, изображений и атрибутов через v3/product/import (Ozon обновляет по offer_id)
+      // 2. Цена — отдельный endpoint /v1/product/import/prices.
+      //    v3/product/import НЕ обновляет цену для существующих товаров.
+      if (product.price != null && product.price > 0 && product.vendorCode) {
+        const offerIdForPrice = this.sanitizeOfferId(product.vendorCode ?? `HS_${(product.id ?? '').toString().slice(0, 8)}`);
+        try {
+          await this.updateProductPrices(offerIdForPrice, product.price, product.oldPrice);
+        } catch (priceErr) {
+          this.logger.warn(`Ozon price update failed for offer_id=${offerIdForPrice}:`, priceErr);
+          // Не прерываем — продолжаем обновлять контент
+        }
+      }
+
+      // 3. Контент: название, описание, атрибуты, габариты, изображения.
+      //    Ozon обновляет по offer_id через v3/product/import (работает как upsert).
+      //    Вызываем всегда при наличии хотя бы одного контентного поля — изображения опциональны.
       const hasContentUpdate =
         product.name != null ||
         product.description != null ||
-        (product.images != null && product.images.length > 0) ||
+        product.images != null ||
         product.weight != null ||
         product.width != null ||
         product.length != null ||
@@ -1007,50 +1056,57 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
         product.packageContents != null ||
         product.richContent != null ||
         product.itemsPerPack != null;
+
       if (hasContentUpdate && product.vendorCode && product.name) {
         const validImages = product.images?.filter((u) => typeof u === 'string' && u.startsWith('http')) ?? [];
-        if (validImages.length > 0) {
-          try {
-            const fullProduct: ProductData = {
-              id: product.id ?? '',
-              name: product.name,
-              description: product.description ?? '',
-              price: product.price ?? 1,
-              stock: product.stock ?? 0,
-              images: validImages,
-              vendorCode: product.vendorCode,
-              barcode: product.barcodeOzon ?? product.barcode,
-              brand: product.brand,
-              weight: product.weight,
-              width: product.width,
-              length: product.length,
-              height: product.height,
-              color: product.color,
-              material: product.material,
-              craftType: product.craftType,
-              countryOfOrigin: product.countryOfOrigin,
-              packageContents: product.packageContents,
-              richContent: product.richContent,
-              itemsPerPack: product.itemsPerPack,
-              ozonCategoryId: product.ozonCategoryId,
-              ozonTypeId: product.ozonTypeId,
-              barcodeOzon: product.barcodeOzon,
-            };
-            const { item } = this.buildImportPayload(fullProduct);
-            const { status: httpStatus, data } = await firstValueFrom(
-              this.httpService.post(
-                `${this.API_BASE}/v3/product/import`,
-                { items: [item] },
-                { headers, validateStatus: () => true },
-              ),
-            );
-            if (httpStatus >= 400 || data?.code || data?.message) {
-              this.logger.warn(`Ozon v3/import (update) HTTP ${httpStatus}: ${JSON.stringify(data)}`);
-            }
-          } catch (contentErr) {
-            this.logger.warn('Ozon v3/import (content update) failed:', contentErr);
-            // Не падаем — цена и остаток уже обновлены
+        try {
+          const fullProduct: ProductData = {
+            id: product.id ?? '',
+            name: product.name,
+            description: product.description ?? '',
+            price: product.price ?? 1,
+            stock: product.stock ?? 0,
+            images: validImages,
+            vendorCode: product.vendorCode,
+            barcode: product.barcodeOzon ?? product.barcode,
+            brand: product.brand,
+            weight: product.weight,
+            width: product.width,
+            length: product.length,
+            height: product.height,
+            color: product.color,
+            material: product.material,
+            craftType: product.craftType,
+            countryOfOrigin: product.countryOfOrigin,
+            packageContents: product.packageContents,
+            richContent: product.richContent,
+            itemsPerPack: product.itemsPerPack,
+            ozonCategoryId: product.ozonCategoryId,
+            ozonTypeId: product.ozonTypeId,
+            barcodeOzon: product.barcodeOzon,
+          };
+          const { item } = this.buildImportPayload(fullProduct);
+          // Если новые изображения не переданы — убираем поле images из запроса,
+          // чтобы Ozon сохранил существующие фото карточки.
+          if (validImages.length === 0) {
+            delete (item as Record<string, unknown>)['images'];
+            delete (item as Record<string, unknown>)['primary_image'];
           }
+          const { status: httpStatus, data } = await firstValueFrom(
+            this.httpService.post(
+              `${this.API_BASE}/v3/product/import`,
+              { items: [item] },
+              { headers, validateStatus: () => true },
+            ),
+          );
+          if (httpStatus >= 400 || data?.code || data?.message) {
+            this.logger.warn(`Ozon v3/import (update) HTTP ${httpStatus}: ${JSON.stringify(data)}`);
+          } else {
+            this.logger.log(`Ozon content updated for product_id=${marketplaceProductId}, offer_id=${product.vendorCode}`);
+          }
+        } catch (contentErr) {
+          this.logger.warn('Ozon v3/import (content update) failed:', contentErr);
+          // Не падаем — цена и остаток уже обновлены
         }
       }
 
