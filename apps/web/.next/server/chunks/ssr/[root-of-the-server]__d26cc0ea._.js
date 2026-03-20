@@ -11,6 +11,16 @@ module.exports=[72123,(a,b,c)=>{let{createClientModuleProxy:d}=a.r(11857);a.n(d(
                 accurateTrackBounce: true,
                 webvisor: true
               });
-            `}}),(0,b.jsx)("noscript",{children:(0,b.jsx)("div",{children:(0,b.jsx)("img",{src:"https://mc.yandex.ru/watch/107695847",style:{position:"absolute",left:"-9999px"},alt:""})})})]})})}a.s(["default",()=>l,"metadata",0,j],28992)}];
+            `}}),(0,b.jsx)("noscript",{children:(0,b.jsx)("div",{children:(0,b.jsx)("img",{src:"https://mc.yandex.ru/watch/107695847",style:{position:"absolute",left:"-9999px"},alt:""})})}),(0,b.jsx)(c.default,{id:"top-mail-ru",strategy:"afterInteractive",dangerouslySetInnerHTML:{__html:`
+              var _tmr = window._tmr || (window._tmr = []);
+              _tmr.push({id: "3751305", type: "pageView", start: (new Date()).getTime()});
+              (function (d, w, id) {
+                if (d.getElementById(id)) return;
+                var ts = d.createElement("script"); ts.type = "text/javascript"; ts.async = true; ts.id = id;
+                ts.src = "https://top-fwz1.mail.ru/js/code.js";
+                var f = function () {var s = d.getElementsByTagName("script")[0]; s.parentNode.insertBefore(ts, s);};
+                if (w.opera == "[object Opera]") { d.addEventListener("DOMContentLoaded", f, false); } else { f(); }
+              })(document, window, "tmr-code");
+            `}}),(0,b.jsx)("noscript",{children:(0,b.jsx)("div",{children:(0,b.jsx)("img",{src:"https://top-fwz1.mail.ru/counter?id=3751305;js=na",style:{position:"absolute",left:"-9999px"},alt:"Top.Mail.Ru"})})})]})})}a.s(["default",()=>l,"metadata",0,j],28992)}];
 
 //# sourceMappingURL=%5Broot-of-the-server%5D__d26cc0ea._.js.map
