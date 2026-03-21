@@ -224,4 +224,3 @@ export function validateFile(
 
 // Re-export for backward compatibility with old import names
 export { uploadToStorage as uploadToCloudinary };
-export type { UploadSignature, UploadResult, UploadProgress };
