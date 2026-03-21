@@ -700,6 +700,10 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
    * Загрузка медиа (фото + видео) на WB через POST /content/v3/media/save.
    * Формат: { nmId, data: ["url1", "url2"] } — data это массив строк URL (не объектов!).
    * WB скачивает файлы по URL — они должны быть публично доступны.
+   * 
+   * ВАЖНО: WB CDN URL (basket-*.wbbasket.ru) пропускаются — они уже на карточке WB.
+   * Нельзя перезалить WB CDN URL через API — WB не может скачать с собственного CDN.
+   * 
    * @returns Объект с результатом: success, uploadedCount, errors
    */
   private async uploadMedia(
@@ -708,14 +712,31 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
     videoUrl?: string,
   ): Promise<{ success: boolean; uploadedCount: number; errors: string[] }> {
     const errors: string[] = [];
+    
+    // Паттерны WB CDN — эти URL уже на карточке WB, перезаливать нельзя
+    const isWbCdnUrl = (u: string) =>
+      /\.wbbasket\.ru\//i.test(u) ||
+      /images\.wbstatic\.net\//i.test(u) ||
+      /\/vol\d+\/part\d+\/\d+\/images\//i.test(u);
       
-    // Собираем все медиа URL (фото + видео)
-    const allUrls = images.filter((u) => typeof u === 'string' && u.trim().startsWith('http')).map((u) => u.trim());
-    if (videoUrl?.trim().startsWith('http')) {
+    // Собираем все медиа URL (фото + видео), ИСКЛЮЧАЯ WB CDN
+    const allUrls = images
+      .filter((u) => typeof u === 'string' && u.trim().startsWith('http'))
+      .map((u) => u.trim())
+      .filter((u) => !isWbCdnUrl(u)); // Пропускаем WB CDN URL
+    
+    if (videoUrl?.trim().startsWith('http') && !isWbCdnUrl(videoUrl.trim())) {
       allUrls.push(videoUrl.trim());
+    }
+    
+    // Подсчитаем сколько WB CDN URL пропущено
+    const wbCdnCount = images.filter((u) => typeof u === 'string' && isWbCdnUrl(u.trim())).length;
+    if (wbCdnCount > 0) {
+      console.log(`[WildberriesAdapter] Пропущено ${wbCdnCount} WB CDN URL (уже на карточке WB)`);
     }
       
     if (allUrls.length === 0) {
+      // Нет новых фото для загрузки (все WB CDN или пусто)
       return { success: true, uploadedCount: 0, errors: [] };
     }
   
@@ -733,6 +754,7 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       console.warn(`[WildberriesAdapter] ${skipped} медиа URL пропущено (недоступны)`);
     }
   
+    console.log(`[WildberriesAdapter] Загружаем ${validUrls.length} медиа для nmId=${nmId}`);
     const maxRetries = 4;
     const retryDelayMs = 3000;
     const body = { nmId, data: validUrls };
@@ -771,23 +793,12 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
   /**
    * Проверка доступности URL медиафайлов.
    * WB скачивает файлы по URL — недоступные будут отклонены.
-   * WB CDN URL (basket-*.wbbasket.ru, images.wbstatic.net) пропускаются без валидации — они уже на серверах WB.
+   * Примечание: WB CDN URL уже отфильтрованы в uploadMedia().
    */
   private async validateMediaUrls(urls: string[]): Promise<string[]> {
     const valid: string[] = [];
-    // Паттерны WB CDN — эти URL уже на серверах WB, валидация не нужна
-    const isWbCdnUrl = (u: string) =>
-      /\.wbbasket\.ru\//i.test(u) ||
-      /images\.wbstatic\.net\//i.test(u) ||
-      /\bwildberries\.ru\//i.test(u);
 
     for (const url of urls) {
-      // WB CDN URL — пропускаем без проверки
-      if (isWbCdnUrl(url)) {
-        valid.push(url);
-        continue;
-      }
-      // Внешние URL — проверяем доступность
       try {
         const res = await firstValueFrom(
           this.httpService.head(url, { timeout: 5000, validateStatus: () => true }),
