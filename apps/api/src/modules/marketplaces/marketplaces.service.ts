@@ -509,7 +509,7 @@ export class MarketplacesService {
         continue;
       }
 
-      let productsToSync = await this.enrichProductsWithMarketplaceMappings(ids, products, conn.marketplace);
+      let productsToSync = await this.enrichProductsWithMarketplaceMappings(ids, products, conn.marketplace, userId);
 
       try {
         const result = await withRetry(
@@ -626,11 +626,13 @@ export class MarketplacesService {
 
   /** Обогатить products external ID из ProductMarketplaceMapping — для обновления при повторной выгрузке.
    * userIds: текущий userId + linkedToUserId (для привязанных аккаунтов).
-   * Для Ozon: включаем все активные связки (не только syncStock: true), чтобы остаток передавался по всем товарам со связкой. */
+   * Для Ozon: включаем все активные связки (не только syncStock: true), чтобы остаток передавался по всем товарам со связкой.
+   * userId передаётся в каждый product для re-hosting WB CDN URL → S3. */
   private async enrichProductsWithMarketplaceMappings(
     userIds: string[],
     products: ProductData[],
     marketplace: 'WILDBERRIES' | 'OZON' | 'YANDEX' | 'AVITO',
+    userId: string,
   ): Promise<ProductData[]> {
     const mappings = await this.prisma.productMarketplaceMapping.findMany({
       where: {
@@ -650,20 +652,22 @@ export class MarketplacesService {
           m = ozonForProduct.find((x) => (x.externalArticle ?? '').trim() === vendorCode) ?? ozonForProduct[0];
         }
       }
-      if (!m) return p;
+      // Добавляем userId для re-hosting WB CDN → S3
+      const enriched: ProductData = { ...p, userId };
+      if (!m) return enriched;
       const extId = m.externalSystemId;
       if (marketplace === 'WILDBERRIES') {
         const wbNmId = parseInt(extId, 10);
-        return !isNaN(wbNmId) ? { ...p, wbNmId } : p;
+        return !isNaN(wbNmId) ? { ...enriched, wbNmId } : enriched;
       }
       if (marketplace === 'OZON') {
-        const enriched = { ...p, ozonProductId: extId };
-        enriched.vendorCode = m.externalArticle?.trim() || enriched.vendorCode;
-        return enriched;
+        const ozonEnriched = { ...enriched, ozonProductId: extId };
+        ozonEnriched.vendorCode = m.externalArticle?.trim() || ozonEnriched.vendorCode;
+        return ozonEnriched;
       }
-      if (marketplace === 'YANDEX') return { ...p, yandexProductId: extId };
-      if (marketplace === 'AVITO') return { ...p, avitoProductId: extId };
-      return p;
+      if (marketplace === 'YANDEX') return { ...enriched, yandexProductId: extId };
+      if (marketplace === 'AVITO') return { ...enriched, avitoProductId: extId };
+      return enriched;
     });
   }
 

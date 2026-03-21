@@ -2,6 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { BaseMarketplaceAdapter, MarketplaceConfig } from './base-marketplace.adapter';
 import { CryptoService } from '../../../common/crypto/crypto.service';
+import { MediaService } from '../../media/media.service';
 import { WildberriesAdapter } from './wildberries.adapter';
 import { OzonAdapter } from './ozon.adapter';
 import { YandexAdapter } from './yandex.adapter';
@@ -22,6 +23,7 @@ export class MarketplaceAdapterFactory {
   constructor(
     private readonly crypto: CryptoService,
     private readonly httpService: HttpService,
+    private readonly mediaService: MediaService,
   ) {}
 
   private safeDecrypt(value: string, marketplace: string): string {
@@ -46,7 +48,7 @@ export class MarketplaceAdapterFactory {
       statsToken,
       baseUrl: 'https://seller.wildberries.ru',
     };
-    return new WildberriesAdapter(this.crypto, this.httpService, config);
+    return new WildberriesAdapter(this.crypto, this.httpService, config, this.mediaService);
   }
 
   createOzonAdapter(connection: ConnectionConfig): OzonAdapter {

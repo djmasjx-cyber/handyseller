@@ -70,6 +70,10 @@ export interface ProductData {
   yandexProductId?: string;
   /** Avito: external id из ProductMarketplaceMapping */
   avitoProductId?: string;
+  /** Видео URL */
+  videoUrl?: string;
+  /** User ID — для re-hosting WB CDN URL в S3 */
+  userId?: string;
 }
 
 export interface OrderData {

@@ -11,6 +11,7 @@ import {
 } from './base-marketplace.adapter';
 import type { CanonicalProduct } from '../canonical/canonical-product.types';
 import { CryptoService } from '../../../common/crypto/crypto.service';
+import { MediaService } from '../../media/media.service';
 
 @Injectable()
 export class WildberriesAdapter extends BaseMarketplaceAdapter {
@@ -23,6 +24,7 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
   /** Prices API */
   private readonly PRICES_API = 'https://discounts-prices-api.wildberries.ru';
   private readonly httpService: HttpService;
+  private readonly mediaService: MediaService | null;
   /** Кэш warehouseId если не задан в конфиге */
   private cachedWarehouseId: string | null = null;
   /** Кэш nmId → chrtId (с 09.02 WB требует chrtId для остатков, не sku/nmId) */
@@ -67,12 +69,14 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
     crypto: CryptoService,
     httpService: HttpService,
     config: MarketplaceConfig,
+    mediaService?: MediaService | null,
   ) {
     super(crypto, {
       ...config,
       baseUrl: config.baseUrl || 'https://seller.wildberries.ru',
     });
     this.httpService = httpService;
+    this.mediaService = mediaService ?? null;
   }
 
   /**
@@ -701,8 +705,8 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
    * Формат: { nmId, data: ["url1", "url2"] } — data это массив строк URL (не объектов!).
    * WB скачивает файлы по URL — они должны быть публично доступны.
    * 
-   * ВАЖНО: WB CDN URL (basket-*.wbbasket.ru) пропускаются — они уже на карточке WB.
-   * Нельзя перезалить WB CDN URL через API — WB не может скачать с собственного CDN.
+   * WB CDN URL (basket-*.wbbasket.ru) автоматически перезаливаются в S3,
+   * т.к. WB API не может скачать с собственного CDN.
    * 
    * @returns Объект с результатом: success, uploadedCount, errors
    */
@@ -710,34 +714,66 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
     nmId: number,
     images: string[],
     videoUrl?: string,
+    userId?: string,
   ): Promise<{ success: boolean; uploadedCount: number; errors: string[] }> {
     const errors: string[] = [];
     
-    // Паттерны WB CDN — эти URL уже на карточке WB, перезаливать нельзя
+    // Паттерны WB CDN
     const isWbCdnUrl = (u: string) =>
       /\.wbbasket\.ru\//i.test(u) ||
       /images\.wbstatic\.net\//i.test(u) ||
       /\/vol\d+\/part\d+\/\d+\/images\//i.test(u);
       
-    // Собираем все медиа URL (фото + видео), ИСКЛЮЧАЯ WB CDN
-    const allUrls = images
+    // Собираем все медиа URL (фото + видео)
+    let allUrls = images
       .filter((u) => typeof u === 'string' && u.trim().startsWith('http'))
-      .map((u) => u.trim())
-      .filter((u) => !isWbCdnUrl(u)); // Пропускаем WB CDN URL
+      .map((u) => u.trim());
     
-    if (videoUrl?.trim().startsWith('http') && !isWbCdnUrl(videoUrl.trim())) {
+    if (videoUrl?.trim().startsWith('http')) {
       allUrls.push(videoUrl.trim());
     }
     
-    // Подсчитаем сколько WB CDN URL пропущено
-    const wbCdnCount = images.filter((u) => typeof u === 'string' && isWbCdnUrl(u.trim())).length;
-    if (wbCdnCount > 0) {
-      console.log(`[WildberriesAdapter] Пропущено ${wbCdnCount} WB CDN URL (уже на карточке WB)`);
+    if (allUrls.length === 0) {
+      return { success: true, uploadedCount: 0, errors: [] };
+    }
+
+    // Перезаливаем WB CDN URL в S3 (если есть MediaService)
+    const wbCdnUrls = allUrls.filter(isWbCdnUrl);
+    if (wbCdnUrls.length > 0 && this.mediaService?.isEnabled() && userId) {
+      console.log(`[WildberriesAdapter] Перезаливаем ${wbCdnUrls.length} WB CDN URL в S3...`);
+      const rehosted = await this.reHostWbCdnToS3(wbCdnUrls, userId);
+      
+      // Заменяем WB CDN URL на S3 URL
+      allUrls = allUrls.map((url) => {
+        if (isWbCdnUrl(url)) {
+          const s3Url = rehosted.get(url);
+          if (s3Url) {
+            return s3Url;
+          }
+        }
+        return url;
+      });
+      
+      // Удаляем URL которые не удалось перезалить
+      allUrls = allUrls.filter((url) => !isWbCdnUrl(url));
+      
+      const rehostedCount = rehosted.size;
+      const failedCount = wbCdnUrls.length - rehostedCount;
+      if (failedCount > 0) {
+        errors.push(`${failedCount} WB CDN URL не удалось перезалить`);
+      }
+      if (rehostedCount > 0) {
+        console.log(`[WildberriesAdapter] Перезалито ${rehostedCount} из ${wbCdnUrls.length} WB CDN URL`);
+      }
+    } else if (wbCdnUrls.length > 0) {
+      // MediaService не настроен — пропускаем WB CDN
+      console.log(`[WildberriesAdapter] Пропущено ${wbCdnUrls.length} WB CDN URL (нет S3 для re-host)`);
+      allUrls = allUrls.filter((url) => !isWbCdnUrl(url));
     }
       
     if (allUrls.length === 0) {
-      // Нет новых фото для загрузки (все WB CDN или пусто)
-      return { success: true, uploadedCount: 0, errors: [] };
+      // Нет URL для загрузки
+      return { success: errors.length === 0, uploadedCount: 0, errors };
     }
   
     // Предварительная проверка доступности URL
@@ -745,7 +781,7 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
     if (validUrls.length === 0) {
       const msg = 'Все URL медиафайлов недоступны. Убедитесь, что изображения публично доступны.';
       console.warn(`[WildberriesAdapter] ${msg}`);
-      return { success: false, uploadedCount: 0, errors: [msg] };
+      return { success: false, uploadedCount: 0, errors: [msg, ...errors] };
     }
       
     const skipped = allUrls.length - validUrls.length;
@@ -788,6 +824,28 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
     console.warn(`[WildberriesAdapter] Ошибка загрузки медиа для nmId=${nmId}: ${msg}`);
       
     return { success: false, uploadedCount: 0, errors };
+  }
+
+  /**
+   * Перезалить WB CDN URL в S3.
+   * Наш сервер может скачать с WB CDN, а WB API — нет.
+   * Поэтому мы скачиваем и заливаем в S3, а потом отдаём S3 URL.
+   */
+  private async reHostWbCdnToS3(urls: string[], userId: string): Promise<Map<string, string>> {
+    const result = new Map<string, string>();
+    if (!this.mediaService?.isEnabled()) return result;
+
+    for (const url of urls) {
+      try {
+        const uploaded = await this.mediaService.uploadFromUrl(url, userId);
+        result.set(url, uploaded.url);
+        console.log(`[WildberriesAdapter] Re-hosted: ${url.slice(0, 60)}... → ${uploaded.url.slice(0, 60)}...`);
+      } catch (err) {
+        console.warn(`[WildberriesAdapter] Не удалось re-host: ${url.slice(0, 80)}`, err instanceof Error ? err.message : err);
+      }
+    }
+
+    return result;
   }
   
   /**
