@@ -771,10 +771,23 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
   /**
    * Проверка доступности URL медиафайлов.
    * WB скачивает файлы по URL — недоступные будут отклонены.
+   * WB CDN URL (basket-*.wbbasket.ru, images.wbstatic.net) пропускаются без валидации — они уже на серверах WB.
    */
   private async validateMediaUrls(urls: string[]): Promise<string[]> {
     const valid: string[] = [];
+    // Паттерны WB CDN — эти URL уже на серверах WB, валидация не нужна
+    const isWbCdnUrl = (u: string) =>
+      /\.wbbasket\.ru\//i.test(u) ||
+      /images\.wbstatic\.net\//i.test(u) ||
+      /\bwildberries\.ru\//i.test(u);
+
     for (const url of urls) {
+      // WB CDN URL — пропускаем без проверки
+      if (isWbCdnUrl(url)) {
+        valid.push(url);
+        continue;
+      }
+      // Внешние URL — проверяем доступность
       try {
         const res = await firstValueFrom(
           this.httpService.head(url, { timeout: 5000, validateStatus: () => true }),
