@@ -61,3 +61,4 @@ infra/terraform/*.zip
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+apps/web/.next/

@@ -1,7 +1,10 @@
-import { Controller, Get, Query, Res, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Query, Body, Res, BadRequestException, UseGuards, Request } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { Response } from 'express';
 import { firstValueFrom } from 'rxjs';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { MediaService } from './media.service';
+import { GetUploadSignatureDto, ConfirmUploadDto, UploadFromUrlDto } from './dto/upload.dto';
 
 /** Allowed domains for image proxying (WB CDN, Ozon CDN, etc.) */
 const ALLOWED_HOSTS = [
@@ -31,7 +34,10 @@ function isAllowedUrl(url: string): boolean {
 
 @Controller('media')
 export class MediaController {
-  constructor(private readonly httpService: HttpService) {}
+  constructor(
+    private readonly httpService: HttpService,
+    private readonly mediaService: MediaService,
+  ) {}
 
   /**
    * Server-side image proxy.
@@ -89,5 +95,61 @@ export class MediaController {
       res.set({ 'Content-Type': 'image/gif', 'Cache-Control': 'no-store' });
       res.send(emptyGif);
     }
+  }
+
+  /**
+   * Check if storage is configured.
+   * GET /api/media/status
+   */
+  @Get('status')
+  getStatus() {
+    return {
+      storageEnabled: this.mediaService.isEnabled(),
+    };
+  }
+
+  /**
+   * Get presigned URL for direct browser-to-S3 upload.
+   * Requires authentication.
+   * POST /api/media/upload-signature
+   */
+  @UseGuards(JwtAuthGuard)
+  @Post('upload-signature')
+  async getUploadSignature(
+    @Request() req: { user: { userId: string } },
+    @Body() dto: GetUploadSignatureDto,
+  ) {
+    const userId = req.user.userId;
+    return this.mediaService.getUploadSignature(
+      userId,
+      dto.filename,
+      dto.contentType || 'image/jpeg',
+    );
+  }
+
+  /**
+   * Confirm an upload exists in storage.
+   * Requires authentication.
+   * POST /api/media/confirm
+   */
+  @UseGuards(JwtAuthGuard)
+  @Post('confirm')
+  async confirmUpload(@Body() dto: ConfirmUploadDto) {
+    return this.mediaService.confirmUpload(dto.key);
+  }
+
+  /**
+   * Upload image from external URL (server-side).
+   * Requires authentication.
+   * POST /api/media/upload-from-url
+   */
+  @UseGuards(JwtAuthGuard)
+  @Post('upload-from-url')
+  async uploadFromUrl(
+    @Request() req: { user: { userId: string } },
+    @Body() dto: UploadFromUrlDto,
+  ) {
+    const userId = req.user.userId;
+    return this.mediaService.uploadFromUrl(dto.url, userId, dto.productId);
   }
 }
