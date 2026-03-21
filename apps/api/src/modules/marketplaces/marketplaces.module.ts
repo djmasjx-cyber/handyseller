@@ -5,6 +5,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { CryptoModule } from '../../common/crypto/crypto.module';
 import { ProductsModule } from '../products/products.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
+import { MediaModule } from '../media/media.module';
 import { MarketplacesService } from './marketplaces.service';
 import { MarketplacesController } from './marketplaces.controller';
 import { MarketplaceAdapterFactory } from './adapters/marketplace-adapter.factory';
@@ -23,6 +24,7 @@ import { SYNC_QUEUE_NAME } from './sync-queue/sync-queue.constants';
     CryptoModule,
     ProductsModule,
     SubscriptionsModule,
+    MediaModule,
     BullModule.forRoot({
       connection: {
         host: process.env.REDIS_HOST || 'localhost',
