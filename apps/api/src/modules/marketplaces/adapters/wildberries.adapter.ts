@@ -635,11 +635,15 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       }
 
       const imageUrls = canonical.images?.map((i) => i.url) ?? [];
-      // WB обрабатывает карточку асинхронно — ждём ещё 3 сек перед загрузкой фото
-      if (imageUrls.length > 0) {
+      const videoUrl = canonical.video_url;
+      // WB обрабатывает карточку асинхронно — ждём ещё 3 сек перед загрузкой медиа
+      if (imageUrls.length > 0 || videoUrl) {
         await new Promise((r) => setTimeout(r, 3000));
       }
-      await this.uploadImages(nmId, imageUrls);
+      const mediaResult = await this.uploadMedia(nmId, imageUrls, videoUrl);
+      if (!mediaResult.success && mediaResult.errors.length > 0) {
+        console.warn(`[WildberriesAdapter] Медиа загружены частично: ${mediaResult.errors.join(', ')}`);
+      }
       if (this.config.sellerId) {
         await this.setStock(nmId, canonical.stock_quantity);
       }
@@ -693,20 +697,47 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
   }
 
   /**
-   * Загрузка фото на WB через POST /content/v3/media/save.
+   * Загрузка медиа (фото + видео) на WB через POST /content/v3/media/save.
    * Формат: { nmId, data: ["url1", "url2"] } — data это массив строк URL (не объектов!).
-   * Проверено curl-запросом 09.03.2026.
+   * WB скачивает файлы по URL — они должны быть публично доступны.
+   * @returns Объект с результатом: success, uploadedCount, errors
    */
-  private async uploadImages(nmId: number, images: string[]): Promise<void> {
-    const urls = images.filter((u) => typeof u === 'string' && u.trim().startsWith('http')).map((u) => u.trim());
-    if (urls.length === 0) return;
+  private async uploadMedia(
+    nmId: number,
+    images: string[],
+    videoUrl?: string,
+  ): Promise<{ success: boolean; uploadedCount: number; errors: string[] }> {
+    const errors: string[] = [];
+      
+    // Собираем все медиа URL (фото + видео)
+    const allUrls = images.filter((u) => typeof u === 'string' && u.trim().startsWith('http')).map((u) => u.trim());
+    if (videoUrl?.trim().startsWith('http')) {
+      allUrls.push(videoUrl.trim());
+    }
+      
+    if (allUrls.length === 0) {
+      return { success: true, uploadedCount: 0, errors: [] };
+    }
+  
+    // Предварительная проверка доступности URL
+    const validUrls = await this.validateMediaUrls(allUrls);
+    if (validUrls.length === 0) {
+      const msg = 'Все URL медиафайлов недоступны. Убедитесь, что изображения публично доступны.';
+      console.warn(`[WildberriesAdapter] ${msg}`);
+      return { success: false, uploadedCount: 0, errors: [msg] };
+    }
+      
+    const skipped = allUrls.length - validUrls.length;
+    if (skipped > 0) {
+      errors.push(`${skipped} URL пропущено (недоступны)`);
+      console.warn(`[WildberriesAdapter] ${skipped} медиа URL пропущено (недоступны)`);
+    }
+  
     const maxRetries = 4;
     const retryDelayMs = 3000;
-
-    // Загружаем все фото одним запросом (batch)
-    const body = { nmId, data: urls };
+    const body = { nmId, data: validUrls };
     let lastErr: unknown;
-
+  
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         await firstValueFrom(
@@ -715,8 +746,8 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
             timeout: 30000,
           }),
         );
-        console.log(`[WildberriesAdapter] Фото загружены для nmId=${nmId} (${urls.length} шт.)`);
-        return;
+        console.log(`[WildberriesAdapter] Медиа загружены для nmId=${nmId} (${validUrls.length} шт.)`);
+        return { success: true, uploadedCount: validUrls.length, errors };
       } catch (err) {
         lastErr = err;
         const axErr = err as { response?: { status?: number; data?: unknown } };
@@ -724,13 +755,45 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
         if (attempt < maxRetries) await new Promise((r) => setTimeout(r, retryDelayMs));
       }
     }
-
-    if (lastErr) {
-      const axErr = lastErr as { response?: { data?: unknown } };
-      const wbData = axErr?.response?.data as Record<string, unknown> | undefined;
-      const msg = typeof wbData?.errorText === 'string' ? wbData.errorText : (lastErr instanceof Error ? lastErr.message : String(lastErr));
-      console.warn(`[WildberriesAdapter] Ошибка загрузки фото для nmId=${nmId}: ${msg}. Попробуйте загрузить фото вручную в ЛК WB.`);
+  
+    // Все попытки неудачны
+    const axErr = lastErr as { response?: { data?: unknown } };
+    const wbData = axErr?.response?.data as Record<string, unknown> | undefined;
+    const msg = typeof wbData?.errorText === 'string' 
+      ? wbData.errorText 
+      : (lastErr instanceof Error ? lastErr.message : String(lastErr));
+    errors.push(`Ошибка загрузки медиа: ${msg}`);
+    console.warn(`[WildberriesAdapter] Ошибка загрузки медиа для nmId=${nmId}: ${msg}`);
+      
+    return { success: false, uploadedCount: 0, errors };
+  }
+  
+  /**
+   * Проверка доступности URL медиафайлов.
+   * WB скачивает файлы по URL — недоступные будут отклонены.
+   */
+  private async validateMediaUrls(urls: string[]): Promise<string[]> {
+    const valid: string[] = [];
+    for (const url of urls) {
+      try {
+        const res = await firstValueFrom(
+          this.httpService.head(url, { timeout: 5000, validateStatus: () => true }),
+        );
+        if (res.status >= 200 && res.status < 400) {
+          valid.push(url);
+        } else {
+          console.warn(`[WildberriesAdapter] URL недоступен (HTTP ${res.status}): ${url.slice(0, 100)}`);
+        }
+      } catch (err) {
+        console.warn(`[WildberriesAdapter] URL недоступен (ошибка сети): ${url.slice(0, 100)}`);
+      }
     }
+    return valid;
+  }
+  
+  /** @deprecated Use uploadMedia instead */
+  private async uploadImages(nmId: number, images: string[]): Promise<void> {
+    await this.uploadMedia(nmId, images);
   }
 
   /**
@@ -1373,18 +1436,22 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
         }
       }
 
-      // Загружаем фото при обновлении (для повторных выгрузок и догонки фото)
+      // Загружаем медиа при обновлении (для повторных выгрузок и догонки фото/видео)
       const imageUrls: string[] = [];
       if (Array.isArray(product.images)) {
         imageUrls.push(...product.images.filter((u): u is string => typeof u === 'string' && u.startsWith('http')));
       }
-      if (imageUrls.length > 0) {
+      const videoUrl = (product as { videoUrl?: string }).videoUrl;
+      if (imageUrls.length > 0 || videoUrl) {
         try {
-          console.log(`[WildberriesAdapter] Загружаем ${imageUrls.length} фото для nmId=${nmId}`);
-          await this.uploadImages(nmId, imageUrls);
-        } catch (photoErr) {
-          this.logError(photoErr as Error, 'updateProduct (photos)');
-          // Не падаем — фото опциональны
+          console.log(`[WildberriesAdapter] Загружаем ${imageUrls.length} фото${videoUrl ? ' + видео' : ''} для nmId=${nmId}`);
+          const mediaResult = await this.uploadMedia(nmId, imageUrls, videoUrl);
+          if (!mediaResult.success) {
+            console.warn(`[WildberriesAdapter] Ошибка загрузки медиа: ${mediaResult.errors.join(', ')}`);
+          }
+        } catch (mediaErr) {
+          this.logError(mediaErr as Error, 'updateProduct (media)');
+          // Не падаем — медиа опциональны
         }
       }
 

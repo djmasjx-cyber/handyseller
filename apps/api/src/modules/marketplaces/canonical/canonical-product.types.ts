@@ -59,6 +59,9 @@ export interface CanonicalProduct {
   /** Изображения */
   images?: CanonicalImage[];
 
+  /** Видео URL (для WB/Ozon) */
+  video_url?: string;
+
   /** Цена продажи */
   price: number;
 

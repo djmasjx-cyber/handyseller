@@ -47,6 +47,7 @@ export function productToCanonical(product: ProductWithRelations): CanonicalProd
     countryOfOrigin?: string | null;
     packageContents?: string | null;
     richContent?: string | null;
+    videoUrl?: string | null;
     ozonCategoryId?: number | null;
     ozonTypeId?: number | null;
     wbSubjectId?: number | null;
@@ -85,6 +86,7 @@ export function productToCanonical(product: ProductWithRelations): CanonicalProd
     long_description_html: p.richContent ?? undefined,
     attributes: attributes.length > 0 ? attributes : undefined,
     images: images.length > 0 ? images : undefined,
+    video_url: (product as { videoUrl?: string | null }).videoUrl ?? undefined,
     price: p.price ?? 1,
     old_price: p.oldPrice ?? undefined,
     stock_quantity: product.stock ?? 0,

@@ -111,6 +111,7 @@ model Product {
   oldPrice         Decimal?  @map("old_price") @db.Decimal(10, 2) // Цена до скидки для Ozon
   imageUrl         String?   @map("image_url") // Основное фото (URL)
   imageUrls        Json?     @map("image_urls") // Доп. фото: массив URL для WB (JSON string[])
+  videoUrl         String?   @map("video_url") // Видео для WB/Ozon (URL)
   sku              String?   @unique // Legacy: WB-xxx-nmId. Связка через ProductMarketplaceMapping.
   article          String? // Артикул продавца (только отображение, редактируемый)
   stock            Int       @default(0)
