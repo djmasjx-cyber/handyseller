@@ -585,6 +585,19 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
           // Ждём 5 секунд для завершения генерации на стороне Ozon
           this.logger.log(`Озон: импорт успешен, product_id=${productId} — штрих-код генерируется автоматически`);
           await new Promise((r) => setTimeout(r, 5000));
+
+          // Дополнительная загрузка изображений через /v1/product/pictures/import
+          // v3/product/import может не загрузить все фото — используем dedicated endpoint
+          const validImages = this.normalizeImageUrls(product.images);
+          if (validImages.length > 0) {
+            try {
+              await this.uploadProductPictures(productId, validImages);
+            } catch (picErr) {
+              this.logger.warn(`[uploadProduct] Ошибка загрузки изображений для product_id=${productId}:`, picErr);
+              // Не падаем — товар уже создан
+            }
+          }
+
           return String(productId);
         }
       }
@@ -976,6 +989,54 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
   }
 
   /**
+   * Загрузить/обновить изображения товара на Ozon.
+   * Использует dedicated endpoint /v1/product/pictures/import.
+   * Это ЕДИНСТВЕННЫЙ надёжный способ обновить фото существующего товара.
+   *
+   * @param productId - Ozon product_id
+   * @param imageUrls - Массив URL изображений (https только)
+   * @returns true если загрузка успешна
+   */
+  async uploadProductPictures(productId: number, imageUrls: string[]): Promise<boolean> {
+    const validImages = this.normalizeImageUrls(imageUrls);
+    if (validImages.length === 0) {
+      this.logger.warn(`[uploadProductPictures] Нет валидных изображений для product_id=${productId}`);
+      return false;
+    }
+
+    this.logger.log(`[uploadProductPictures] product_id=${productId}, images=${validImages.length}: ${validImages.map(u => u.slice(0, 50)).join(', ')}`);
+
+    try {
+      const { status, data } = await firstValueFrom(
+        this.httpService.post(
+          `${this.API_BASE}/v1/product/pictures/import`,
+          {
+            product_id: productId,
+            images: validImages,
+          },
+          {
+            headers: this.ozonHeaders(),
+            timeout: 30000,
+            validateStatus: () => true,
+          },
+        ),
+      );
+
+      if (status >= 200 && status < 300) {
+        this.logger.log(`[uploadProductPictures] Успешно загружено ${validImages.length} изображений для product_id=${productId}`);
+        return true;
+      }
+
+      const errMsg = this.extractOzonErrorFromResponse(status, data);
+      this.logger.warn(`[uploadProductPictures] Ошибка HTTP ${status} для product_id=${productId}: ${errMsg}`);
+      return false;
+    } catch (err) {
+      this.logger.error(`[uploadProductPictures] Исключение для product_id=${productId}:`, err);
+      return false;
+    }
+  }
+
+  /**
    * Обновить цену товара на Ozon через /v1/product/import/prices.
    * Вызывается отдельно от v3/product/import, т.к. Ozon обновляет цены независимо от контента.
    */
@@ -1130,6 +1191,17 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
             this.logger.warn(`Ozon v3/import (update) HTTP ${httpStatus}: ${JSON.stringify(data)}`);
           } else {
             this.logger.log(`Ozon content updated for product_id=${marketplaceProductId}, offer_id=${product.vendorCode}`);
+          }
+
+          // 4. Загрузка изображений через отдельный endpoint /v1/product/pictures/import
+          //    v3/product/import не всегда обновляет изображения для существующих товаров.
+          if (validImages.length > 0) {
+            try {
+              await this.uploadProductPictures(productIdNum, validImages);
+            } catch (picErr) {
+              this.logger.warn(`[updateProduct] Ошибка загрузки изображений для product_id=${marketplaceProductId}:`, picErr);
+              // Не падаем — основной контент уже обновлён
+            }
           }
         } catch (contentErr) {
           this.logger.warn('Ozon v3/import (content update) failed:', contentErr);
