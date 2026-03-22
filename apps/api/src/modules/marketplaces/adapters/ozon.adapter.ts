@@ -1083,6 +1083,15 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
         throw new Error('Некорректный product_id Ozon');
       }
 
+      // DIAGNOSTIC: Log incoming product data for debugging
+      this.logger.log(
+        `[updateProduct] ENTRY product_id=${marketplaceProductId} ` +
+        `vendorCode=${product.vendorCode ?? 'MISSING'} ` +
+        `name=${product.name ? product.name.slice(0, 30) : 'MISSING'} ` +
+        `images.raw=${product.images?.length ?? 0} ` +
+        `firstImage=${product.images?.[0]?.slice(0, 60) ?? 'NONE'}`
+      );
+
       const headers = {
         'Client-Id': this.config.sellerId ?? '',
         'Api-Key': this.config.apiKey,
@@ -1136,6 +1145,13 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
         product.packageContents != null ||
         product.richContent != null ||
         product.itemsPerPack != null;
+
+      // DIAGNOSTIC: Log content update conditions
+      this.logger.log(
+        `[updateProduct] CONDITIONS hasContentUpdate=${hasContentUpdate} ` +
+        `vendorCode=${!!product.vendorCode} name=${!!product.name} ` +
+        `willUpdateContent=${hasContentUpdate && !!product.vendorCode && !!product.name}`
+      );
 
       if (hasContentUpdate && product.vendorCode && product.name) {
         const validImages = this.normalizeImageUrls(product.images);

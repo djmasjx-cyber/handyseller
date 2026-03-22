@@ -23,6 +23,14 @@ export function productToCanonical(product: ProductWithRelations): CanonicalProd
     }
   }
 
+  // DIAGNOSTIC: Log image extraction for debugging Ozon photo issues
+  console.log(
+    `[productToCanonical] id=${product.id} ` +
+    `imageUrl=${product.imageUrl?.slice(0, 50) ?? 'NONE'} ` +
+    `imageUrls.length=${imageUrls?.length ?? 0} ` +
+    `extracted=${images.length}`
+  );
+
   const attributes: CanonicalAttribute[] = [];
   if (product.article) {
     attributes.push({ name: 'Артикул', value: product.article });
