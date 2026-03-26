@@ -510,10 +510,15 @@ export class OrdersService {
         // 1. Резервируем остаток только для FBS (не FBO). FBO — товар со склада маркета, «Мой склад» не трогаем.
         // Резерв один раз: проверяем, не резервировали ли уже (идемпотентность).
         const alreadyReserved = await orderHasReservedStock(this.prisma, order.id, externalId);
+        console.log(`[processHoldExpiredOrders] order=${externalId} isFbo=${isFboOrder(order)} alreadyReserved=${alreadyReserved} willReserve=${!isFboOrder(order) && !alreadyReserved}`);
         if (!isFboOrder(order) && !alreadyReserved) {
           const reservedItems: Array<{ productId: string; userId: string; quantity: number }> = [];
           for (const item of order.items) {
-            if (!item.product) continue;
+            if (!item.product) {
+              console.log(`[processHoldExpiredOrders] order=${externalId} SKIP: no product for item`);
+              continue;
+            }
+            console.log(`[processHoldExpiredOrders] order=${externalId} product=${item.productId} stock=${item.product?.stock} qty=${item.quantity}`);
             await this.stockService.reserve(item.productId, item.product.userId, item.quantity, {
               source: 'SALE' as const,
               note: `Заказ ${externalId} (${order.marketplace}) — авто после холда`,
@@ -524,6 +529,7 @@ export class OrdersService {
               userId: item.product.userId,
               quantity: item.quantity,
             });
+            console.log(`[processHoldExpiredOrders] order=${externalId} RESERVED qty=${item.quantity}`);
           }
           // 2. Отправляем статус на маркетплейс (MANUAL — не пушим)
           if (order.marketplace !== 'MANUAL') {
@@ -813,12 +819,14 @@ export class OrdersService {
         });
 
         // Резерв при создании — только для FBS (не FBO) и не в холде. FBO — товар со склада маркета.
+        console.log(`[syncFromMarketplaces] order=${externalId} status=${status} odIsFbo=${odIsFbo} willReserve=${status !== OrderStatus.NEW && !odIsFbo}`);
         if (status !== OrderStatus.NEW && !odIsFbo) {
           await this.stockService.reserve(product.id, product.userId, quantity, {
             source: 'SALE' as const,
             note: `Заказ ${externalId} (${marketplace})`,
             allowNegative: true,
           });
+          console.log(`[syncFromMarketplaces] order=${externalId} RESERVED at creation`);
         }
         processedThisRun.add(externalId);
         synced++;
