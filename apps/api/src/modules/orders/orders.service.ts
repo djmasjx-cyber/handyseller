@@ -632,8 +632,9 @@ export class OrdersService {
         if (od.createdAt) updateData.createdAt = od.createdAt;
         if (existing.status !== OrderStatus.CANCELLED && isCancelled) {
           try {
-            // Release только если заказ был на сборке и мы резервировали (не FBO).
-            if (existing.status === OrderStatus.IN_PROGRESS && !isFboOrder(existing)) {
+            // Release для FBS (не FBO) — независимо от статуса (NEW или IN_PROGRESS)
+            // Теперь резерв создаётся сразу при получении заказа, даже в холде
+            if (!isFboOrder(existing)) {
               for (const item of existing.items) {
                 await this.stockService.release(item.productId, userId, item.quantity, {
                   source: 'SALE' as const,
@@ -818,9 +819,10 @@ export class OrdersService {
           return o;
         });
 
-        // Резерв при создании — только для FBS (не FBO) и не в холде. FBO — товар со склада маркета.
-        console.log(`[syncFromMarketplaces] order=${externalId} status=${status} odIsFbo=${odIsFbo} willReserve=${status !== OrderStatus.NEW && !odIsFbo}`);
-        if (status !== OrderStatus.NEW && !odIsFbo) {
+        // Резерв при создании — для FBS (не FBO) ВСЕГДА, даже в холде. FBO — товар со склада маркета.
+        // Логика: остаток уменьшается сразу, но заказ нельзя обработать до истечения холда.
+        console.log(`[syncFromMarketplaces] order=${externalId} status=${status} odIsFbo=${odIsFbo} willReserve=${!odIsFbo}`);
+        if (!odIsFbo) {
           await this.stockService.reserve(product.id, product.userId, quantity, {
             source: 'SALE' as const,
             note: `Заказ ${externalId} (${marketplace})`,
