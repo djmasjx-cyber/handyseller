@@ -137,4 +137,76 @@ export class EmailService {
     this.logger.info(`[DEV] Код для ${email}: ${code}`);
     return false;
   }
+
+  async sendPasswordResetLink(email: string, resetUrl: string): Promise<boolean> {
+    const subject = 'Восстановление пароля HandySeller';
+    const html = `
+      <p>Вы запросили восстановление пароля.</p>
+      <p><a href="${resetUrl}">Сбросить пароль</a></p>
+      <p>Ссылка действует 30 минут и может быть использована только один раз.</p>
+      <p>Если вы не запрашивали восстановление, просто проигнорируйте письмо.</p>
+    `;
+
+    if (this.resend) {
+      try {
+        const { error } = await this.resend.emails.send({
+          from: this.from,
+          to: email,
+          subject,
+          html,
+        });
+        if (error) throw new Error(error.message);
+        this.logger.info('Password reset email sent (Resend)', { email: `${email.substring(0, 3)}***` });
+        return true;
+      } catch (err) {
+        this.logger.error('Resend password reset send failed', {
+          email: `${email.substring(0, 3)}***`,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return false;
+      }
+    }
+
+    if (this.transporter) {
+      try {
+        await this.transporter.sendMail({
+          from: this.from,
+          to: email,
+          subject,
+          html,
+        });
+        this.logger.info('Password reset email sent (SMTP)', { email: `${email.substring(0, 3)}***` });
+        return true;
+      } catch (err) {
+        this.logger.error('SMTP password reset send failed', {
+          email: `${email.substring(0, 3)}***`,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return false;
+      }
+    }
+
+    if (process.env.NODE_ENV !== 'production') {
+      const transport = await this.ensureEthereal();
+      try {
+        const info = await transport.sendMail({
+          from: this.from,
+          to: email,
+          subject,
+          html,
+        });
+        this.logger.info(`[DEV] Password reset email in Ethereal: ${nodemailer.getTestMessageUrl(info) ?? ''}`);
+        return true;
+      } catch (err) {
+        this.logger.error('Ethereal password reset send failed', {
+          email: `${email.substring(0, 3)}***`,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return false;
+      }
+    }
+
+    this.logger.warn('Password reset email provider is not configured');
+    return false;
+  }
 }

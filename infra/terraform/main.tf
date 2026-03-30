@@ -239,17 +239,59 @@ resource "yandex_iam_service_account" "serverless" {
   description = "Service account for HandySeller serverless functions"
 }
 
-resource "yandex_iam_service_account_iam_binding" "serverless_editor" {
-  service_account_id = yandex_iam_service_account.serverless.id
-  role               = "editor"
-  members = [
-    "serviceAccount:${yandex_iam_service_account.serverless.id}",
-  ]
+resource "yandex_resourcemanager_folder_iam_member" "serverless_logging_writer" {
+  folder_id = var.yandex_folder_id
+  role      = "logging.writer"
+  member    = "serviceAccount:${yandex_iam_service_account.serverless.id}"
 }
 
-resource "yandex_iam_service_account_iam_binding" "serverless_storage_viewer" {
+resource "yandex_resourcemanager_folder_iam_member" "serverless_lockbox_payload_viewer" {
+  count     = var.lockbox_secret_id != "" ? 1 : 0
+  folder_id = var.yandex_folder_id
+  role      = "lockbox.payloadViewer"
+  member    = "serviceAccount:${yandex_iam_service_account.serverless.id}"
+}
+
+resource "yandex_resourcemanager_folder_iam_member" "serverless_kms_crypto" {
+  folder_id = var.yandex_folder_id
+  role      = "kms.keys.encrypterDecrypter"
+  member    = "serviceAccount:${yandex_iam_service_account.serverless.id}"
+}
+
+resource "yandex_resourcemanager_folder_iam_member" "serverless_storage_viewer" {
+  folder_id = var.yandex_folder_id
+  role      = "storage.viewer"
+  member    = "serviceAccount:${yandex_iam_service_account.serverless.id}"
+}
+
+resource "yandex_resourcemanager_folder_iam_member" "serverless_mdb_viewer" {
+  folder_id = var.yandex_folder_id
+  role      = "mdb.viewer"
+  member    = "serviceAccount:${yandex_iam_service_account.serverless.id}"
+}
+
+resource "yandex_resourcemanager_folder_iam_member" "serverless_vpc_user" {
+  folder_id = var.yandex_folder_id
+  role      = "vpc.user"
+  member    = "serviceAccount:${yandex_iam_service_account.serverless.id}"
+}
+
+resource "yandex_lockbox_secret_iam_member" "serverless_secret_access" {
+  count     = var.lockbox_secret_id != "" ? 1 : 0
+  secret_id = var.lockbox_secret_id
+  role      = "lockbox.payloadViewer"
+  member    = "serviceAccount:${yandex_iam_service_account.serverless.id}"
+}
+
+resource "yandex_kms_symmetric_key_iam_member" "serverless_db_encryption_usage" {
+  symmetric_key_id = yandex_kms_symmetric_key.db_encryption.id
+  role             = "kms.keys.encrypterDecrypter"
+  member           = "serviceAccount:${yandex_iam_service_account.serverless.id}"
+}
+
+resource "yandex_iam_service_account_iam_binding" "serverless_token_creator" {
   service_account_id = yandex_iam_service_account.serverless.id
-  role               = "storage.viewer"
+  role               = "iam.serviceAccounts.user"
   members = [
     "serviceAccount:${yandex_iam_service_account.serverless.id}",
   ]
@@ -277,10 +319,11 @@ resource "yandex_function" "auth" {
   }
 
   environment = {
-    DB_HOST     = yandex_mdb_postgresql_cluster.handyseller_db.host[0].fqdn
-    DB_NAME     = "handyseller"
-    DB_USER     = "handyseller_user"
-    DB_PASSWORD = var.db_password
+    DB_HOST           = yandex_mdb_postgresql_cluster.handyseller_db.host[0].fqdn
+    DB_NAME           = "handyseller"
+    DB_USER           = "handyseller_user"
+    LOCKBOX_SECRET_ID = var.lockbox_secret_id
+    KMS_KEY_ID        = yandex_kms_symmetric_key.db_encryption.id
   }
 }
 

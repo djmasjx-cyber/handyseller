@@ -19,3 +19,9 @@ variable "db_password" {
   type        = string
   sensitive   = true
 }
+
+variable "lockbox_secret_id" {
+  description = "ID секрета в Yandex Lockbox для runtime-секретов приложения"
+  type        = string
+  default     = ""
+}

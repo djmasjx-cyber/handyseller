@@ -40,6 +40,7 @@ scp -i "$SSH_KEY" -o StrictHostKeyChecking=no \
   "$ROOT/docker-compose.ci.yml" \
   "$ROOT/scripts/vm-watchdog.sh" \
   "$ROOT/scripts/handyseller-start.sh" \
+  "$ROOT/scripts/load-lockbox-secrets.sh" \
   ${VM_USER}@${VM_HOST}:/opt/handyseller/
 scp -i "$SSH_KEY" -o StrictHostKeyChecking=no -r \
   "$ROOT/nginx/"* \

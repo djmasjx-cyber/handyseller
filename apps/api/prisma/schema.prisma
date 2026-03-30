@@ -32,6 +32,7 @@ model User {
   wbSupplies        WbSupply[]
   subscription      Subscription?
   refreshTokens     RefreshToken[]
+  passwordResetTokens PasswordResetToken[]
   authAuditLogs     AuthAuditLog[]
   stockLogs         StockLog[]
   productFieldLogs  ProductFieldLog[]
@@ -42,13 +43,17 @@ model User {
 model RefreshToken {
   id        String   @id @default(uuid())
   userId    String   @map("user_id")
-  token     String   @unique
+  tokenHash String   @unique @map("token_hash")
+  familyId  String   @map("family_id")
   expiresAt DateTime @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  replacedByTokenHash String? @map("replaced_by_token_hash")
   createdAt DateTime @default(now()) @map("created_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([token])
+  @@index([tokenHash])
+  @@index([familyId])
   @@index([userId])
 }
 
@@ -72,12 +77,28 @@ model LoginAttempt {
   id             String   @id @default(uuid())
   ip             String
   email          String? // переходный период
+  emailHash      String?  @map("email_hash")
   emailEncrypted String?  @map("email_encrypted") // зашифрованный email
   success        Boolean
   createdAt      DateTime @default(now()) @map("created_at")
 
   @@index([ip])
+  @@index([emailHash])
   @@index([createdAt])
+}
+
+model PasswordResetToken {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  tokenHash String   @unique @map("token_hash")
+  expiresAt DateTime @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 /// Коды подтверждения email при регистрации. TTL 15 минут.

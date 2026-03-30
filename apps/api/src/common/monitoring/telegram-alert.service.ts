@@ -1,5 +1,22 @@
 import { Injectable } from '@nestjs/common';
 
+const REDACT_KEYS = ['token', 'secret', 'password', 'authorization', 'apiKey', 'cookie'];
+
+function sanitizeContext(value: unknown): unknown {
+  if (value == null) return value;
+  if (Array.isArray(value)) return value.map((item) => sanitizeContext(item));
+  if (typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+      const lower = key.toLowerCase();
+      if (REDACT_KEYS.some((k) => lower.includes(k.toLowerCase()))) out[key] = '[REDACTED]';
+      else out[key] = sanitizeContext(item);
+    }
+    return out;
+  }
+  return value;
+}
+
 @Injectable()
 export class TelegramAlertService {
   private readonly botToken: string | undefined;
@@ -13,12 +30,13 @@ export class TelegramAlertService {
   async sendAlert(message: string, context?: Record<string, unknown>): Promise<void> {
     if (!this.botToken || !this.chatId) return;
 
+    const safeContext = context ? sanitizeContext(context) : undefined;
     const text = [
       '🚨 *HandySeller API Error*',
       '',
       message,
       '',
-      context ? '```' + JSON.stringify(context, null, 2) + '```' : '',
+      safeContext ? '```' + JSON.stringify(safeContext, null, 2) + '```' : '',
     ]
       .filter(Boolean)
       .join('\n');

@@ -4,6 +4,8 @@ import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { LoggerService } from '../../common/logger/logger.service';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 
 const REFRESH_COOKIE_NAME = 'refresh_token';
 const REFRESH_MAX_AGE_DAYS = 7 * 24 * 60 * 60 * 1000; // 7 дней в мс
@@ -47,7 +49,7 @@ export class AuthController {
     } catch (err) {
       this.logger.error('Register failed', {
         ip,
-        email: dto.email,
+        email: dto.email ? `${dto.email.slice(0, 3)}***` : undefined,
         error: err instanceof Error ? err.message : String(err),
         stack: err instanceof Error ? err.stack : undefined,
       });
@@ -99,6 +101,22 @@ export class AuthController {
 
     await this.authService.logout(token, undefined, ip, userAgent);
     res.clearCookie(REFRESH_COOKIE_NAME, { path: '/', httpOnly: true });
+    return { success: true };
+  }
+
+  @Post('forgot-password')
+  async forgotPassword(@Body() dto: ForgotPasswordDto, @Req() req: Request) {
+    const ip = getClientIp(req);
+    const userAgent = req.headers['user-agent'];
+    await this.authService.requestPasswordReset(dto.email, ip, userAgent);
+    return { success: true };
+  }
+
+  @Post('reset-password')
+  async resetPassword(@Body() dto: ResetPasswordDto, @Req() req: Request) {
+    const ip = getClientIp(req);
+    const userAgent = req.headers['user-agent'];
+    await this.authService.resetPassword(dto.token, dto.password, ip, userAgent);
     return { success: true };
   }
 }

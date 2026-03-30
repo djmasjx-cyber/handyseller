@@ -1,0 +1,23 @@
+version: 1
+name: secret_exposure_incident
+severity_levels:
+  - SEV1
+  - SEV2
+steps:
+  - id: detect
+    action: "Подтвердить факт утечки (лог, git, алерт gitleaks)."
+  - id: contain
+    action: "Немедленно отозвать/отключить утекшие ключи и токены."
+  - id: rotate
+    action: "Выполнить ротацию в Lockbox, обновить runtime и перезапустить сервисы."
+  - id: eradicate
+    action: "Удалить секреты из git history, закрыть источник утечки, добавить тест/контроль."
+  - id: recover
+    action: "Проверить login, refresh, marketplace sync, payment webhook."
+  - id: postmortem
+    action: "Зафиксировать RCA, owner, дедлайны коррекции и контрольные точки."
+evidence:
+  - "Ссылки на алерты"
+  - "Логи ротации"
+  - "PR с remediation"
+  - "Постмортем документ"

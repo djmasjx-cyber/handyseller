@@ -16,6 +16,7 @@ import { WbColorService } from './wb-color.service';
 import { SyncQueueService } from './sync-queue/sync-queue.service';
 import { SyncQueueProcessor } from './sync-queue/sync-queue.processor';
 import { SYNC_QUEUE_NAME } from './sync-queue/sync-queue.constants';
+import { MarketplaceTokenRotationCron } from './marketplace-token-rotation.cron';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { SYNC_QUEUE_NAME } from './sync-queue/sync-queue.constants';
     StockSyncListener,
     SyncQueueService,
     SyncQueueProcessor,
+    MarketplaceTokenRotationCron,
   ],
   exports: [MarketplacesService, MarketplaceAdapterFactory, ProductMappingService, WbColorService, SyncQueueService],
 })

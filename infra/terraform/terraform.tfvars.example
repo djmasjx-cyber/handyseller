@@ -7,3 +7,6 @@ environment      = "prod"
 
 # Сгенерировать пароль: openssl rand -base64 24
 db_password = "your-secure-postgres-password"
+
+# Yandex Lockbox secret ID с runtime секретами (JWT, ENCRYPTION_KEY, API keys и т.д.)
+lockbox_secret_id = "your-lockbox-secret-id"

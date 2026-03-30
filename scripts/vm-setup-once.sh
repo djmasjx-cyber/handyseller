@@ -16,8 +16,14 @@ cp "$ROOT/docker-compose.ci.yml" /opt/handyseller/
 cp "$ROOT/docker-compose.prod.yml" /opt/handyseller/
 cp "$ROOT/scripts/vm-watchdog.sh" /opt/handyseller/
 cp "$ROOT/scripts/handyseller-start.sh" /opt/handyseller/
+cp "$ROOT/scripts/load-lockbox-secrets.sh" /opt/handyseller/
+if [ -f "$ROOT/scripts/vm-diagnose-api.sh" ]; then
+  cp "$ROOT/scripts/vm-diagnose-api.sh" /opt/handyseller/
+  chmod +x /opt/handyseller/vm-diagnose-api.sh
+fi
 cp -r "$ROOT/nginx/"* /opt/handyseller/nginx/
 chmod +x /opt/handyseller/vm-watchdog.sh
+chmod +x /opt/handyseller/load-lockbox-secrets.sh
 
 echo "==> 3. .env.production — проверка..."
 if [ ! -f /opt/handyseller/.env.production ]; then
@@ -32,25 +38,8 @@ grep -q "IMAGE_API=" /opt/handyseller/.env.production 2>/dev/null || echo 'IMAGE
 grep -q "IMAGE_WEB=" /opt/handyseller/.env.production 2>/dev/null || echo 'IMAGE_WEB=ghcr.io/djmasjx-cyber/handyseller-web:latest' >> /opt/handyseller/.env.production
 
 echo "==> 5. Systemd — автозапуск при перезагрузке..."
-sudo cp /opt/handyseller/handyseller-start.sh /opt/handyseller/
 chmod +x /opt/handyseller/handyseller-start.sh
-cat > /tmp/handyseller-compose-ci.service << 'SVCEOF'
-[Unit]
-Description=HandySeller Docker Compose (CI images)
-After=docker.service
-Requires=docker.service
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-WorkingDirectory=/opt/handyseller
-ExecStart=/opt/handyseller/handyseller-start.sh
-ExecStop=/usr/bin/docker compose -f /opt/handyseller/docker-compose.ci.yml down
-
-[Install]
-WantedBy=multi-user.target
-SVCEOF
-sudo mv /tmp/handyseller-compose-ci.service /etc/systemd/system/handyseller-compose.service
+sudo cp "$ROOT/scripts/handyseller-compose.service" /etc/systemd/system/handyseller-compose.service
 sudo systemctl daemon-reload
 sudo systemctl enable handyseller-compose
 

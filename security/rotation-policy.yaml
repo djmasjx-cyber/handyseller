@@ -1,0 +1,26 @@
+version: 1
+owner: security-team
+updated_at: 2026-03-27
+rotation:
+  jwt_secret:
+    interval_days: 90
+    owner: backend
+  encryption_key:
+    interval_days: 90
+    owner: backend
+  database_password:
+    interval_days: 90
+    owner: platform
+  marketplace_tokens:
+    interval_days: 60
+    owner: operations
+  telegram_bot_token:
+    interval_days: 90
+    owner: platform
+  yandex_gpt_api_key:
+    interval_days: 90
+    owner: platform
+requirements:
+  - "Все секреты хранятся в Yandex Lockbox."
+  - "Запрещено хранить секреты в git и CI логах."
+  - "После ротации выполняется smoke-check auth + integrations."
