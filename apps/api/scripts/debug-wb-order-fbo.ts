@@ -12,13 +12,12 @@ import * as dotenv from 'dotenv';
 import * as path from 'path';
 import axios from 'axios';
 import { PrismaClient } from '@prisma/client';
-import { CryptoService } from '../src/common/crypto/crypto.service';
+import { createCryptoServiceForCli } from '../src/common/crypto/bootstrap-for-cli';
 
 dotenv.config({ path: path.join(__dirname, '../.env') });
 dotenv.config({ path: path.resolve(__dirname, '../../../.env.secrets'), override: true });
 
 const prisma = new PrismaClient();
-const crypto = new CryptoService();
 
 const MARKETPLACE_API = 'https://marketplace-api.wildberries.ru';
 const ORDER_IDS_STR = process.env.ORDER_IDS || process.env.ORDER_ID || '';
@@ -143,6 +142,7 @@ async function fetchOrderDetails(
 }
 
 async function main() {
+  const crypto = await createCryptoServiceForCli();
   const ids = ORDER_IDS.length > 0 ? ORDER_IDS : ['4680400358', '4510843907'];
   console.log('=== Диагностика FBO-заказов WB ===\n');
   console.log('Сценарий: товар на СЦ WB (возврат/отказ) → новый заказ → WB отгружает со своего склада.');

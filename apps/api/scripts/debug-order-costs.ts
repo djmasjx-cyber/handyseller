@@ -8,13 +8,12 @@ import * as dotenv from 'dotenv';
 import * as path from 'path';
 import axios from 'axios';
 import { PrismaClient } from '@prisma/client';
-import { CryptoService } from '../src/common/crypto/crypto.service';
+import { createCryptoServiceForCli } from '../src/common/crypto/bootstrap-for-cli';
 
 dotenv.config({ path: path.join(__dirname, '../.env') });
 dotenv.config({ path: path.resolve(__dirname, '../../../.env.secrets'), override: true });
 
 const prisma = new PrismaClient();
-const crypto = new CryptoService();
 
 const ORDER_ID = process.env.ORDER_ID || '4501750166';
 const EMAIL = process.env.EMAIL;
@@ -22,6 +21,7 @@ const EMAIL = process.env.EMAIL;
 const STATISTICS_API = 'https://statistics-api.wildberries.ru';
 
 async function main() {
+  const crypto = await createCryptoServiceForCli();
   console.log('=== Логистика и комиссия по заказу WB ===\n');
   console.log(`Заказ: ${ORDER_ID}\n`);
 

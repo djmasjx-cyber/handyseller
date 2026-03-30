@@ -14,10 +14,9 @@ import { PrismaClient } from '@prisma/client';
 dotenv.config({ path: path.join(__dirname, '../.env') });
 dotenv.config({ path: path.resolve(__dirname, '../../../.env.secrets'), override: true });
 
-import { CryptoService } from '../src/common/crypto/crypto.service';
+import { createCryptoServiceForCli } from '../src/common/crypto/bootstrap-for-cli';
 
 const prisma = new PrismaClient();
-const crypto = new CryptoService();
 
 const API_BASE = 'https://api-seller.ozon.ru';
 const USER_ID = process.env.USER_ID || 'c127f2df-02da-4be8-b108-d6de8d31c83c';
@@ -61,6 +60,7 @@ async function testEndpoint(
 }
 
 async function main() {
+  const crypto = await createCryptoServiceForCli();
   console.log('=== Отладка Ozon API для Манойло Николая ===\n');
   console.log(`User ID: ${USER_ID}\n`);
 

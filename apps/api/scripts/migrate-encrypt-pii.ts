@@ -1,14 +1,14 @@
 /**
  * Миграция PII: шифрование email пользователей и backfill email_hash/email_encrypted.
  * Запуск: npx ts-node -r tsconfig-paths/register scripts/migrate-encrypt-pii.ts
- * Требует: DATABASE_URL, ENCRYPTION_KEY в .env
+ * Требует: DATABASE_URL, ENCRYPTION_KEY или ENCRYPTION_DEK_WRAPPED (как у API)
  */
 import { PrismaClient } from '@prisma/client';
-import { CryptoService } from '../src/common/crypto/crypto.service';
+import { createCryptoServiceForCli } from '../src/common/crypto/bootstrap-for-cli';
 
 async function main() {
   const prisma = new PrismaClient();
-  const crypto = new CryptoService();
+  const crypto = await createCryptoServiceForCli();
 
   const users = await prisma.user.findMany({
     select: { id: true, email: true, emailHash: true, emailEncrypted: true },

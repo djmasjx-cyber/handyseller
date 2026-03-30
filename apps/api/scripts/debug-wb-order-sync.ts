@@ -13,13 +13,12 @@ import * as dotenv from 'dotenv';
 import * as path from 'path';
 import axios from 'axios';
 import { PrismaClient } from '@prisma/client';
-import { CryptoService } from '../src/common/crypto/crypto.service';
+import { createCryptoServiceForCli } from '../src/common/crypto/bootstrap-for-cli';
 
 dotenv.config({ path: path.join(__dirname, '../.env') });
 dotenv.config({ path: path.resolve(__dirname, '../../../.env.secrets'), override: true });
 
 const prisma = new PrismaClient();
-const crypto = new CryptoService();
 
 const MARKETPLACE_API = 'https://marketplace-api.wildberries.ru';
 const ORDER_ID = process.env.ORDER_ID || '4645532575';
@@ -76,6 +75,7 @@ async function fetchWbOrderStatus(
 }
 
 async function main() {
+  const crypto = await createCryptoServiceForCli();
   console.log('=== Отладка WB синхронизации заказов ===\n');
   console.log(`Заказ: ${ORDER_ID}\n`);
 

@@ -2,15 +2,15 @@ import * as dotenv from 'dotenv';
 import * as path from 'path';
 import { PrismaClient } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
-import { CryptoService } from '../src/common/crypto/crypto.service';
+import { createCryptoServiceForCli } from '../src/common/crypto/bootstrap-for-cli';
 
 dotenv.config({ path: path.join(__dirname, '../.env') });
 dotenv.config({ path: path.resolve(__dirname, '../../../.env.secrets'), override: true });
 
 const prisma = new PrismaClient();
-const crypto = new CryptoService();
 
 async function main() {
+  const crypto = await createCryptoServiceForCli();
   const email = process.env.ADMIN_EMAIL?.trim();
   const password = process.env.ADMIN_PASSWORD;
   if (!email || !password) {

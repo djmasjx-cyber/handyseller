@@ -1,14 +1,28 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { randomBytes } from 'crypto';
 import { CryptoService } from './crypto.service';
+import { KmsService } from './kms.service';
 
 describe('CryptoService', () => {
   let service: CryptoService;
 
-  beforeEach(async () => {
+  const setupModule = async (kmsMock: Partial<KmsService>) => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [CryptoService],
+      providers: [
+        CryptoService,
+        { provide: KmsService, useValue: kmsMock },
+      ],
     }).compile();
-    service = module.get<CryptoService>(CryptoService);
+    await module.init();
+    return module.get<CryptoService>(CryptoService);
+  };
+
+  beforeEach(async () => {
+    delete process.env.ENCRYPTION_DEK_WRAPPED;
+    process.env.ENCRYPTION_KEY = 'dev-only-change-in-production-32chars!!';
+    service = await setupModule({
+      decryptDataKey: jest.fn(),
+    });
   });
 
   it('should be defined', () => {
@@ -51,6 +65,22 @@ describe('CryptoService', () => {
       expect(service.decryptOptional(null)).toBeNull();
       expect(service.decryptOptional(undefined)).toBeNull();
       expect(service.decryptOptional('')).toBeNull();
+    });
+  });
+
+  describe('ENCRYPTION_DEK_WRAPPED', () => {
+    it('should use KMS unwrap when ENCRYPTION_DEK_WRAPPED is set', async () => {
+      const dek = randomBytes(32);
+      const kmsMock = {
+        decryptDataKey: jest.fn().mockResolvedValue(dek),
+      };
+      process.env.ENCRYPTION_DEK_WRAPPED = 'kms:w:1:dummy';
+      const svc = await setupModule(kmsMock);
+      const plain = 'x';
+      const enc = svc.encrypt(plain);
+      expect(kmsMock.decryptDataKey).toHaveBeenCalledWith('kms:w:1:dummy');
+      expect(svc.decrypt(enc)).toBe(plain);
+      delete process.env.ENCRYPTION_DEK_WRAPPED;
     });
   });
 });

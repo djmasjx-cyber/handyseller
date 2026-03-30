@@ -7,15 +7,15 @@ require('dotenv').config({ path: path.join(__dirname, '../.env') });
 require('dotenv').config({ path: path.resolve(__dirname, '../../../.env.production'), override: true });
 
 const { PrismaClient } = require('@prisma/client');
-const { CryptoService } = require('../dist/src/common/crypto/crypto.service.js');
+const { createCryptoServiceForCli } = require('../dist/common/crypto/bootstrap-for-cli.js');
 const axios = require('axios');
 
 const prisma = new PrismaClient();
-const crypto = new CryptoService();
 const USER_ID = process.env.USER_ID || 'c127f2df-02da-4be8-b108-d6de8d31c83c';
 const API_BASE = 'https://api-seller.ozon.ru';
 
 async function main() {
+  const crypto = await createCryptoServiceForCli();
   console.log('=== Ozon API Debug ===\nUser ID:', USER_ID, '\n');
 
   const ozonAll = await prisma.marketplaceConnection.findMany({
