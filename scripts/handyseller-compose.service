@@ -1,19 +1,22 @@
-# Systemd unit: автозапуск HandySeller после перезагрузки.
+# Systemd: автозапуск стека HandySeller после перезагрузки (те же образы, что в CI — GHCR).
 # Установка на VM: sudo cp /opt/handyseller/scripts/handyseller-compose.service /etc/systemd/system/
 #                 sudo systemctl daemon-reload && sudo systemctl enable handyseller-compose
-# Контейнеры имеют restart: unless-stopped — Docker поднимет их сам. Этот unit — запасной вариант.
+#
+# Важно: прод деплоится через docker-compose.ci.yml + .env.production (IMAGE_API / IMAGE_WEB).
+# Старый вариант с docker-compose.prod.yml ломал автозапуск, если на VM используются образы из ghcr.io.
 
 [Unit]
-Description=HandySeller Docker Compose
-After=docker.service
+Description=HandySeller Docker Compose (CI images)
+After=docker.service network-online.target
+Wants=network-online.target
 Requires=docker.service
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=/opt/handyseller
-ExecStart=/usr/bin/docker compose -f docker-compose.prod.yml --env-file .env.production up -d
-ExecStop=/usr/bin/docker compose -f docker-compose.prod.yml down
+ExecStart=/opt/handyseller/handyseller-start.sh
+ExecStop=/usr/bin/docker compose -f /opt/handyseller/docker-compose.ci.yml --env-file /opt/handyseller/.env.production down
 
 [Install]
 WantedBy=multi-user.target
