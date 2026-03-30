@@ -1,4 +1,5 @@
 import { Body, Controller, Post, Req, Res, UnauthorizedException } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
@@ -27,6 +28,8 @@ function getCookieOptions(isProduction: boolean) {
   };
 }
 
+/** Узкие лимиты на эндпоинты аутентификации (отдельно от глобального throttler). */
+@Throttle({ default: { limit: 30, ttl: 60000 } })
 @Controller('auth')
 export class AuthController {
   constructor(

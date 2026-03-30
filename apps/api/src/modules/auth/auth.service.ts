@@ -104,21 +104,42 @@ export class AuthService {
     };
   }
 
-  async refresh(refreshToken: string, ip?: string, userAgent?: string) {
+  async refresh(refreshToken: string | undefined, ip?: string, userAgent?: string) {
+    if (!refreshToken) {
+      await this.auditLog(null, 'REFRESH', ip, userAgent, false);
+      return null;
+    }
+
     const tokenHash = this.hashToken(refreshToken);
     const stored = await this.prisma.refreshToken.findUnique({
       where: { tokenHash },
       include: { user: true },
     });
 
-    if (!stored || stored.expiresAt < new Date() || stored.revokedAt) {
-      if (stored && !stored.revokedAt) {
-        await this.prisma.refreshToken.update({
-          where: { id: stored.id },
-          data: { revokedAt: new Date() },
-        }).catch(() => {});
+    if (!stored) {
+      await this.auditLog(null, 'REFRESH', ip, userAgent, false);
+      return null;
+    }
+
+    const now = new Date();
+    if (stored.expiresAt < now) {
+      if (!stored.revokedAt) {
+        await this.prisma.refreshToken
+          .update({
+            where: { id: stored.id },
+            data: { revokedAt: now },
+          })
+          .catch(() => {});
       }
-      await this.auditLog(stored?.userId ?? null, 'REFRESH', ip, userAgent, false);
+      await this.auditLog(stored.userId, 'REFRESH', ip, userAgent, false);
+      return null;
+    }
+
+    if (stored.revokedAt) {
+      await this.revokeRefreshTokenFamily(stored.familyId);
+      await this.auditLog(stored.userId, 'REFRESH_REUSE', ip, userAgent, false, {
+        familyId: stored.familyId,
+      });
       return null;
     }
 
@@ -276,6 +297,14 @@ export class AuthService {
     if (!stored || stored.revokedAt) return;
     await this.prisma.refreshToken.update({
       where: { id: stored.id },
+      data: { revokedAt: new Date() },
+    });
+  }
+
+  /** При reuse уже отозванного refresh (OAuth BCP): отзываем все активные токены семейства. */
+  private async revokeRefreshTokenFamily(familyId: string) {
+    await this.prisma.refreshToken.updateMany({
+      where: { familyId, revokedAt: null },
       data: { revokedAt: new Date() },
     });
   }
