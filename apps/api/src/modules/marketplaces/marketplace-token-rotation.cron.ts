@@ -2,8 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../common/database/prisma.service';
 import { TelegramAlertService } from '../../common/monitoring/telegram-alert.service';
+import { MARKETPLACE_TOKEN_EXPIRING_SOON_DAYS } from './marketplace-token-expiry.util';
 
-const EXPIRING_IN_DAYS = 7;
+const EXPIRING_IN_DAYS = MARKETPLACE_TOKEN_EXPIRING_SOON_DAYS;
 
 @Injectable()
 export class MarketplaceTokenRotationCron {

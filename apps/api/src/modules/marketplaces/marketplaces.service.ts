@@ -47,7 +47,7 @@ async function withRetry<T>(fn: () => Promise<T>, label: string): Promise<T> {
   throw lastError;
 }
 import { PrismaService } from '../../common/database/prisma.service';
-import { Prisma } from '@prisma/client';
+import { Prisma, type MarketplaceConnection } from '@prisma/client';
 import { CryptoService } from '../../common/crypto/crypto.service';
 import { ProductsService } from '../products/products.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
@@ -61,6 +61,7 @@ import { WildberriesAdapter } from './adapters/wildberries.adapter';
 import { OzonAdapter, type OzonCategoryNode, type OzonAttributeInfo } from './adapters/ozon.adapter';
 import { ProductMappingService } from './product-mapping.service';
 import { WbSupplyService } from './wb-supply.service';
+import { classifyMarketplaceTokenExpiry } from './marketplace-token-expiry.util';
 
 @Injectable()
 export class MarketplacesService {
@@ -105,6 +106,24 @@ export class MarketplacesService {
     return null;
   }
 
+  /** Ответ API без секретов + вычисляемый срок токена (для UI). */
+  toPublicMarketplaceSnapshot(conn: MarketplaceConnection) {
+    return {
+      id: conn.id,
+      userId: conn.userId,
+      marketplace: conn.marketplace,
+      sellerId: conn.sellerId,
+      warehouseId: conn.warehouseId,
+      expiresAt: conn.expiresAt,
+      lastSyncAt: conn.lastSyncAt,
+      lastError: conn.lastError,
+      createdAt: conn.createdAt,
+      updatedAt: conn.updatedAt,
+      hasStatsToken: !!conn.statsToken,
+      tokenExpiry: classifyMarketplaceTokenExpiry(conn.expiresAt),
+    };
+  }
+
   async findAll(userId: string) {
     const ids = await this.getEffectiveUserIds(userId);
     const list = await this.prisma.marketplaceConnection.findMany({
@@ -119,13 +138,7 @@ export class MarketplacesService {
       }
     }
     const merged = Array.from(byMarketplace.values());
-    return merged.map((conn) => ({
-      ...conn,
-      token: undefined,
-      refreshToken: undefined,
-      statsToken: undefined,
-      hasStatsToken: !!conn.statsToken,
-    }));
+    return merged.map((conn) => this.toPublicMarketplaceSnapshot(conn));
   }
 
   async connect(

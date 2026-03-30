@@ -76,8 +76,7 @@ export class MarketplacesController {
       dto.warehouseId,
       dto.statsToken,
     );
-    const { token, refreshToken, ...safe } = conn;
-    return safe;
+    return this.marketplacesService.toPublicMarketplaceSnapshot(conn);
   }
 
   @Patch(':marketplace/warehouse')
@@ -88,8 +87,7 @@ export class MarketplacesController {
   ) {
     const api = marketplace.toUpperCase() as 'WILDBERRIES' | 'OZON' | 'YANDEX' | 'AVITO';
     const conn = await this.marketplacesService.updateWarehouse(userId, api, dto.warehouseId ?? null);
-    const { token, refreshToken, statsToken, ...safe } = conn;
-    return safe;
+    return this.marketplacesService.toPublicMarketplaceSnapshot(conn);
   }
 
   @Patch(':marketplace/stats-token')
@@ -100,8 +98,7 @@ export class MarketplacesController {
   ) {
     const api = marketplace.toUpperCase() as 'WILDBERRIES' | 'OZON' | 'YANDEX' | 'AVITO';
     const conn = await this.marketplacesService.updateStatsToken(userId, api, dto.statsToken);
-    const { token, refreshToken, statsToken, ...safe } = conn;
-    return safe;
+    return this.marketplacesService.toPublicMarketplaceSnapshot(conn);
   }
 
   @Delete(':marketplace')

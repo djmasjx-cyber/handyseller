@@ -13,6 +13,7 @@ import {
   Zap,
   TrendingUp,
   CreditCard,
+  AlertTriangle,
 } from "lucide-react"
 import Link from "next/link"
 import { ConnectMarketplaceModal } from "@/components/connect-marketplace-modal"
@@ -40,12 +41,26 @@ interface MarketplaceMeta {
   apiKeyPlaceholder?: string
 }
 
+type TokenExpiryInfo = {
+  status: "ok" | "expiring" | "expired" | "unknown"
+  expiresAtIso: string | null
+  daysRemaining: number | null
+}
+
 interface Connection {
   id: string
   marketplace: string
   createdAt: string
   updatedAt: string
   warehouseId?: string | null
+  tokenExpiry?: TokenExpiryInfo
+}
+
+const API_MARKETPLACE_LABEL: Record<string, string> = {
+  WILDBERRIES: "Wildberries",
+  OZON: "Ozon",
+  YANDEX: "Яндекс Маркет",
+  AVITO: "Avito",
 }
 
 const MARKETPLACES: MarketplaceMeta[] = [
@@ -345,7 +360,16 @@ export default function MarketplacesPage() {
     }
     setConnections((prev) => {
       const filtered = prev.filter((c) => c.marketplace !== apiSlug)
-      return [...filtered, { id: data.id, marketplace: apiSlug, createdAt: data.createdAt, updatedAt: data.updatedAt }]
+      return [
+        ...filtered,
+        {
+          id: data.id,
+          marketplace: apiSlug,
+          createdAt: data.createdAt,
+          updatedAt: data.updatedAt,
+          tokenExpiry: data.tokenExpiry as TokenExpiryInfo | undefined,
+        },
+      ]
     })
   }
 
@@ -388,6 +412,9 @@ export default function MarketplacesPage() {
   }
 
   const connectedList = MARKETPLACES.filter((m) => isConnected(m.slug))
+
+  const expiredConnections = connections.filter((c) => c.tokenExpiry?.status === "expired")
+  const expiringConnections = connections.filter((c) => c.tokenExpiry?.status === "expiring")
 
   if (loading) {
     return (
@@ -432,6 +459,47 @@ export default function MarketplacesPage() {
           <Link href="/dashboard/subscription" className="text-primary font-medium hover:underline">
             Перейти на другой план
           </Link>
+        </div>
+      )}
+
+      {expiredConnections.length > 0 && (
+        <div className="rounded-lg border border-red-500/50 bg-red-500/10 p-4 text-sm space-y-2">
+          <div className="flex items-center gap-2 font-medium text-red-900 dark:text-red-200">
+            <AlertTriangle className="h-5 w-5 shrink-0" />
+            Срок действия API-токена истёк
+          </div>
+          <ul className="list-disc pl-5 space-y-1 text-muted-foreground">
+            {expiredConnections.map((c) => (
+              <li key={c.id}>
+                <span className="font-medium text-foreground">{API_MARKETPLACE_LABEL[c.marketplace] ?? c.marketplace}</span>
+                {" — "}
+                создайте новый ключ в личном кабинете маркетплейса и переподключите площадку здесь (кнопка «Отключить», затем «Подключить»).
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {expiringConnections.length > 0 && (
+        <div className="rounded-lg border border-amber-500/50 bg-amber-500/10 p-4 text-sm space-y-2">
+          <div className="flex items-center gap-2 font-medium text-amber-900 dark:text-amber-200">
+            <AlertTriangle className="h-5 w-5 shrink-0" />
+            Токен скоро истечёт (в течение 7 дней)
+          </div>
+          <ul className="list-disc pl-5 space-y-1 text-muted-foreground">
+            {expiringConnections.map((c) => (
+              <li key={c.id}>
+                <span className="font-medium text-foreground">{API_MARKETPLACE_LABEL[c.marketplace] ?? c.marketplace}</span>
+                {c.tokenExpiry?.daysRemaining != null && (
+                  <span>
+                    {" — осталось дней: "}
+                    <span className="tabular-nums font-medium text-foreground">{c.tokenExpiry.daysRemaining}</span>
+                  </span>
+                )}
+                . Обновите ключ в кабинете маркетплейса и при необходимости переподключите интеграцию.
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 
@@ -493,6 +561,20 @@ export default function MarketplacesPage() {
                             <span className="font-medium">{formatDate(conn.updatedAt)}</span>
                           </div>
                         )}
+                        {conn?.tokenExpiry?.status === "expired" && (
+                          <p className="text-sm text-red-600 dark:text-red-400">
+                            API-токен истёк — обновите ключ в кабинете маркетплейса и переподключите площадку.
+                          </p>
+                        )}
+                        {conn?.tokenExpiry?.status === "expiring" && (
+                          <p className="text-sm text-amber-800 dark:text-amber-300">
+                            Токен истекает в течение 7 дней
+                            {conn.tokenExpiry.daysRemaining != null
+                              ? ` (осталось ${conn.tokenExpiry.daysRemaining} дн.)`
+                              : ""}
+                            . Обновите доступ в личном кабинете.
+                          </p>
+                        )}
                         <Button
                           variant="outline"
                           className="w-full"
@@ -545,11 +627,29 @@ export default function MarketplacesPage() {
                       </div>
                       <div>
                         <CardTitle className="text-xl">{marketplace.name}</CardTitle>
-                        <div className="flex items-center gap-2 mt-1">
-                          <Badge variant="secondary">
-                            <CheckCircle className="mr-1 h-3 w-3 text-green-500" />
-                            Активен
-                          </Badge>
+                        <div className="flex flex-wrap items-center gap-2 mt-1">
+                          {conn?.tokenExpiry?.status === "expired" ? (
+                            <Badge variant="destructive">
+                              <AlertTriangle className="mr-1 h-3 w-3" />
+                              Токен истёк
+                            </Badge>
+                          ) : conn?.tokenExpiry?.status === "expiring" ? (
+                            <Badge
+                              variant="outline"
+                              className="border-amber-600 text-amber-800 dark:text-amber-300"
+                            >
+                              <AlertTriangle className="mr-1 h-3 w-3" />
+                              Истекает
+                              {conn.tokenExpiry.daysRemaining != null
+                                ? ` · ${conn.tokenExpiry.daysRemaining} дн.`
+                                : ""}
+                            </Badge>
+                          ) : (
+                            <Badge variant="secondary">
+                              <CheckCircle className="mr-1 h-3 w-3 text-green-500" />
+                              Активен
+                            </Badge>
+                          )}
                           {conn?.updatedAt && (
                             <span className="text-xs text-muted-foreground">
                               Обновлено: {formatDate(conn.updatedAt)}

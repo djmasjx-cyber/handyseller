@@ -9,6 +9,9 @@ import {
   ArrowRight,
   Zap,
   Shield,
+  Lock,
+  User,
+  Store,
   Smartphone,
   Palette,
   Users,
@@ -89,6 +92,9 @@ export default function Home() {
             <span className="text-xl font-bold">HandySeller</span>
           </HomeLogoLink>
           <nav className="hidden md:flex items-center space-x-5">
+            <a href="#security" className="text-sm font-medium hover:text-primary">
+              Безопасность
+            </a>
             <a href="#features" className="text-sm font-medium hover:text-primary">
               Возможности
             </a>
@@ -212,6 +218,108 @@ export default function Home() {
                   <Badge variant="secondary">Активно</Badge>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="security" className="container py-12 md:py-16 scroll-mt-20 border-y border-border/60 bg-muted/20">
+        <div className="text-center mb-8 max-w-2xl mx-auto">
+          <Badge variant="secondary" className="mb-4">
+            <Shield className="mr-1 h-3 w-3" />
+            Безопасность
+          </Badge>
+          <h2 className="text-2xl md:text-3xl font-bold mb-2">
+            Безопасность: HTTPS, шифрование токенов и обмен с маркетплейсами
+          </h2>
+          <div className="text-lg text-muted-foreground space-y-3 max-w-3xl mx-auto text-left sm:text-center">
+            <p>
+              Кабинет в браузере открывается по HTTPS. Токены и ключи API маркетплейсов, которые вы вводите при подключении, в нашей базе хранятся в зашифрованном виде: перед запросом к площадке сервер расшифровывает их только у себя и обращается к официальному API маркетплейса.
+            </p>
+            <p>
+              Обмен данными между HandySeller и маркетплейсом при этих запросах идёт по защищённому каналу (HTTPS) — так устроены их официальные API: трафик между сервисами шифруется так же, как при работе с кабинетом в браузере.
+            </p>
+          </div>
+        </div>
+
+        <div className="max-w-4xl mx-auto mb-10">
+          <p className="text-sm text-center text-muted-foreground mb-4">Схема: от входа в кабинет до запроса к площадке</p>
+          <div className="flex flex-col md:flex-row items-stretch md:items-center justify-center gap-3 md:gap-2">
+            <div className="flex-1 rounded-xl border bg-background p-4 text-center shadow-sm">
+              <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+                <User className="h-5 w-5 text-primary" />
+              </div>
+              <p className="font-semibold">Вы</p>
+              <p className="text-xs text-muted-foreground mt-1">Браузер ↔ сервис по HTTPS; вход в аккаунт по паролю</p>
+            </div>
+            <div className="flex justify-center md:flex-col md:py-8 text-muted-foreground">
+              <span className="hidden md:inline text-2xl leading-none">→</span>
+              <span className="md:hidden text-2xl leading-none rotate-90">→</span>
+            </div>
+            <div className="flex-1 rounded-xl border border-primary/25 bg-primary/[0.04] p-4 text-center shadow-sm ring-1 ring-primary/10">
+              <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-lg bg-primary/15">
+                <Lock className="h-5 w-5 text-primary" />
+              </div>
+              <p className="font-semibold">HandySeller</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Токены маркетплейсов в базе — зашифрованы; перед вызовом API площадки расшифровываются на сервере
+              </p>
+            </div>
+            <div className="flex justify-center md:flex-col md:py-8 text-muted-foreground">
+              <span className="hidden md:inline text-2xl leading-none">→</span>
+              <span className="md:hidden text-2xl leading-none rotate-90">→</span>
+            </div>
+            <div className="flex-1 rounded-xl border bg-background p-4 text-center shadow-sm">
+              <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+                <Store className="h-5 w-5 text-primary" />
+              </div>
+              <p className="font-semibold">Маркетплейсы</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Официальный API площадки по HTTPS; в запросе — ваши ключи и токены из подключения
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 max-w-5xl mx-auto text-sm">
+          <div className="rounded-lg border bg-background/80 p-4 flex gap-3">
+            <Shield className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+            <div>
+              <p className="font-medium">Сайт и кабинет</p>
+              <p className="text-muted-foreground mt-1">
+                Страницы загружаются по HTTPS — данные между вашим браузером и HandySeller передаются по защищённому каналу.
+              </p>
+            </div>
+          </div>
+          <div className="rounded-lg border bg-background/80 p-4 flex gap-3">
+            <Lock className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+            <div>
+              <p className="font-medium">Хранение токенов</p>
+              <p className="text-muted-foreground mt-1">
+                В базе токены и ключи API маркетплейсов хранятся в зашифрованном виде, а не как обычный текст.
+              </p>
+            </div>
+          </div>
+          <div className="rounded-lg border bg-background/80 p-4 flex gap-3 sm:col-span-2 lg:col-span-1">
+            <Zap className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+            <div>
+              <p className="font-medium">Запросы к маркетплейсам</p>
+              <p className="text-muted-foreground mt-1">
+                Когда сервис синхронизирует товары или заказы, обмен с площадкой идёт по официальному API по HTTPS — то есть по тому же принципу защищённого соединения, без «открытой» пересылки по сети.
+              </p>
+            </div>
+          </div>
+          <div className="rounded-lg border bg-background/80 p-4 flex gap-3 sm:col-span-2 lg:col-span-3">
+            <MessageCircle className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+            <div>
+              <p className="font-medium">Документы и поддержка</p>
+              <p className="text-muted-foreground mt-1">
+                Юридические формулировки — в{" "}
+                <Link href="/privacy" className="text-primary font-medium hover:underline">
+                  политике конфиденциальности
+                </Link>
+                . Вопросы по работе сервиса — в поддержке.
+              </p>
             </div>
           </div>
         </div>
@@ -612,6 +720,9 @@ export default function Home() {
             <div className="space-y-3">
               <h4 className="font-bold text-sm">Навигация</h4>
               <nav className="space-y-2">
+                <a href="#security" className="text-muted-foreground hover:text-primary block">
+                  Безопасность
+                </a>
                 <a href="#features" className="text-muted-foreground hover:text-primary block">
                   Возможности
                 </a>
