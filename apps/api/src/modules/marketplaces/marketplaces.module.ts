@@ -3,6 +3,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
 import { HttpModule } from '@nestjs/axios';
 import { BullModule } from '@nestjs/bullmq';
 import { CryptoModule } from '../../common/crypto/crypto.module';
+import { MonitoringModule } from '../../common/monitoring/monitoring.module';
 import { ProductsModule } from '../products/products.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { MediaModule } from '../media/media.module';
@@ -23,6 +24,7 @@ import { MarketplaceTokenRotationCron } from './marketplace-token-rotation.cron'
     EventEmitterModule,
     HttpModule,
     CryptoModule,
+    MonitoringModule,
     ProductsModule,
     SubscriptionsModule,
     MediaModule,

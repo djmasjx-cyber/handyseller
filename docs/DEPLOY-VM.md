@@ -47,7 +47,7 @@ npm run deploy
 ## Безопасность и надёжность
 
 - Секреты (JWT_SECRET, ENCRYPTION_KEY, DATABASE_URL) не попадают в репозиторий: подставляются на VM при деплое из .env.secrets и сохранённых файлов.
-- **Yandex KMS + envelope для PII:** задайте `KMS_KEY_ID` и **`ENCRYPTION_DEK_WRAPPED`** — строка из `KmsService.encryptDataKey` (32 байта DEK, зашифрованные KMS). `CryptoService` поднимает AES-256-GCM с расшифрованного DEK. Без простоя при переходе с `ENCRYPTION_KEY`: выполните на машине с доступом к KMS и тем же `ENCRYPTION_KEY`, что в проде (`apps/api/scripts/wrap-encryption-key-for-kms.ts`), вставьте вывод в Lockbox, перезапустите API, затем можно убрать plaintext `ENCRYPTION_KEY` из env. На VM с сервисным аккаунтом IAM для SDK обычно не нужен; иначе `YC_IAM_TOKEN`.
+- **Yandex KMS + envelope для PII:** задайте `KMS_KEY_ID` и **`ENCRYPTION_DEK_WRAPPED`** — строка из `KmsService.encryptDataKey` (32 байта DEK, зашифрованные KMS). `CryptoService` поднимает AES-256-GCM с расшифрованного DEK. Без простоя при переходе с `ENCRYPTION_KEY`: выполните на машине с доступом к KMS и тем же `ENCRYPTION_KEY`, что в проде (`apps/api/scripts/wrap-encryption-key-for-kms.ts`), вставьте вывод в Lockbox, перезапустите API, затем можно убрать plaintext `ENCRYPTION_KEY` из env. На VM с сервисным аккаунтом IAM для SDK обычно не нужен; иначе `YC_IAM_TOKEN`. Полный чеклист: `security/kms-envelope-migration.yaml`; ротация KEK: `security/kms-rewrap-runbook.yaml`.
 - Контейнеры запускаются с `restart: unless-stopped` — автоматический перезапуск при сбоях и после перезагрузки VM.
 - Подключение к БД только по TLS (sslmode=require) на Managed PostgreSQL.
 

@@ -1,0 +1,25 @@
+# Runbook: ротация версии симметричного ключа KMS (KEK) и rewrap DEK
+version: 1
+updated_at: 2026-03-30
+owner: platform
+
+when:
+  - "Квартальная ротация по политике или компрометация ключа в Yandex Cloud."
+  - "Yandex Cloud: новая primary version у symmetric key."
+
+steps:
+  - id: inventory
+    action: "Зафиксировать key_id, активные версии; убедиться, что Audit Trail включён для KMS."
+  - id: new_version
+    action: "Создать/включить новую версию ключа в консоли YC или согласно внутренней процедуре ротации."
+  - id: rewrap_dek
+    action: "Расшифровать текущий DEK (через старую версию KMS), зашифровать той же KEK с новой версией (SymmetricReEncrypt / encrypt нового ciphertext). Обновить значение ENCRYPTION_DEK_WRAPPED в Lockbox."
+  - id: deploy
+    action: "Выкатить новый ENCRYPTION_DEK_WRAPPED, рестарт API; без смены байтов DEK данные в БД не трогаем."
+  - id: disable_old
+    action: "После окна наблюдения отключить старую версию ключа в KMS, если политика YC позволяет."
+  - id: evidence
+    action: "Сохранить ссылки на операции / тикет / время ротации для аудита."
+
+implementation_note:
+  - "Автоматический cron rewrap в приложении может быть добавлен позже; сейчас допустим ручной шаг с yc CLI или скриптом."

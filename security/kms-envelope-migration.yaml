@@ -1,0 +1,22 @@
+# Чеклист: первый переход на envelope DEK (Yandex KMS) без перешифрования БД
+version: 1
+updated_at: 2026-03-30
+owner: platform
+
+steps:
+  - id: wrap
+    action: "На машине с доступом к KMS и тем же ENCRYPTION_KEY, что в проде: `cd apps/api && npx ts-node -r tsconfig-paths/register scripts/wrap-encryption-key-for-kms.ts`"
+  - id: lockbox
+    action: "Сохранить вывод `ENCRYPTION_DEK_WRAPPED=...` в Yandex Lockbox (или в защищённый .env на VM), не в git."
+  - id: iam
+    action: "Убедиться, что у runtime service account есть kms.crypto.encrypt/decrypt на ключ и lockbox.payloadViewer при использовании Lockbox."
+  - id: deploy
+    action: "Выкатить конфиг с KMS_KEY_ID + ENCRYPTION_DEK_WRAPPED; перезапустить API."
+  - id: verify
+    action: "Smoke: логин, расшифровка существующих PII/токенов маркетплейсов, один запрос к интеграции."
+  - id: cleanup
+    action: "После стабилизации убрать plaintext ENCRYPTION_KEY из env (опционально; приоритет у DEK_WRAPPED)."
+
+notes:
+  - "Не подставлять случайный новый DEK без миграции данных — только wrap от текущего scrypt-ключа или осознанная миграция."
+  - "Скрипт wrap кодирует тот же 32-байтный материал, что и ENCRYPTION_KEY, поэтому старый ciphertext в БД остаётся валидным."

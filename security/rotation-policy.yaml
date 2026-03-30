@@ -24,3 +24,8 @@ requirements:
   - "Все секреты хранятся в Yandex Lockbox."
   - "Запрещено хранить секреты в git и CI логах."
   - "После ротации выполняется smoke-check auth + integrations."
+
+# Явный чеклист envelope KMS (первый переход) — детали в security/kms-envelope-migration.yaml
+kms_envelope_migration_reminder:
+  - "Переход с ENCRYPTION_KEY на KMS-обёртку DEK: apps/api/scripts/wrap-encryption-key-for-kms.ts → ENCRYPTION_DEK_WRAPPED в Lockbox."
+  - "Ротация KEK / rewrap DEK без смены данных: security/kms-rewrap-runbook.yaml"
