@@ -62,6 +62,21 @@ const schemaOrg = {
   audience: { "@type": "Audience", audienceType: "Мастера handmade, ремесленники, самозанятые" },
 };
 
+/** Как в кабинете Top.Mail.Ru / VK — посимвольно тот же JS (кроме ведущих/замыкающих пробелов в шаблоне). */
+const TOP_MAIL_RU_COUNTER_SCRIPT = `var _tmr = window._tmr || (window._tmr = []);
+_tmr.push({id: "3751305", type: "pageView", start: (new Date()).getTime()});
+(function (d, w, id) {
+  if (d.getElementById(id)) return;
+  var ts = d.createElement("script"); ts.type = "text/javascript"; ts.async = true; ts.id = id;
+  ts.src = "https://top-fwz1.mail.ru/js/code.js";
+  var f = function () {var s = d.getElementsByTagName("script")[0]; s.parentNode.insertBefore(ts, s);};
+  if (w.opera == "[object Opera]") { d.addEventListener("DOMContentLoaded", f, false); } else { f(); }
+})(document, window, "tmr-code");`;
+
+/** Как в кабинете: один вложенный div + img с inline style */
+const TOP_MAIL_RU_COUNTER_NOSCRIPT_HTML =
+  '<div><img src="https://top-fwz1.mail.ru/counter?id=3751305;js=na" style="position:absolute;left:-9999px;" alt="Top.Mail.Ru" /></div>';
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -69,9 +84,19 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ru">
+      <head>
+        {/* Top.Mail.Ru counter */}
+        <script
+          type="text/javascript"
+          dangerouslySetInnerHTML={{ __html: TOP_MAIL_RU_COUNTER_SCRIPT }}
+        />
+        {/* /Top.Mail.Ru counter */}
+      </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased overflow-x-hidden`}
       >
+        {/* Top.Mail.Ru counter — noscript сразу после <body> (как в инструкции, валидно); img с тем же style=, что в кабинете */}
+        <noscript dangerouslySetInnerHTML={{ __html: TOP_MAIL_RU_COUNTER_NOSCRIPT_HTML }} />
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(schemaOrg) }}
@@ -102,29 +127,6 @@ export default function RootLayout({
         <noscript>
           <div>
             <img src="https://mc.yandex.ru/watch/107695847" style={{position:"absolute",left:"-9999px"}} alt="" />
-          </div>
-        </noscript>
-        {/* Top.Mail.Ru (VK Pixel) — для рекламы */}
-        <Script
-          id="top-mail-ru"
-          strategy="afterInteractive"
-          dangerouslySetInnerHTML={{
-            __html: `
-              var _tmr = window._tmr || (window._tmr = []);
-              _tmr.push({id: "3751305", type: "pageView", start: (new Date()).getTime()});
-              (function (d, w, id) {
-                if (d.getElementById(id)) return;
-                var ts = d.createElement("script"); ts.type = "text/javascript"; ts.async = true; ts.id = id;
-                ts.src = "https://top-fwz1.mail.ru/js/code.js";
-                var f = function () {var s = d.getElementsByTagName("script")[0]; s.parentNode.insertBefore(ts, s);};
-                if (w.opera == "[object Opera]") { d.addEventListener("DOMContentLoaded", f, false); } else { f(); }
-              })(document, window, "tmr-code");
-            `,
-          }}
-        />
-        <noscript>
-          <div>
-            <img src="https://top-fwz1.mail.ru/counter?id=3751305;js=na" style={{position:"absolute",left:"-9999px"}} alt="Top.Mail.Ru" />
           </div>
         </noscript>
       </body>
