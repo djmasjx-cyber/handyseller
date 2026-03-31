@@ -152,7 +152,9 @@ export function HomeReviewsSection() {
             <div className="flex flex-col sm:flex-row sm:items-center gap-3">
               <p className="text-sm text-muted-foreground">Чтобы оставить отзыв, войдите в аккаунт.</p>
               <Button variant="outline" asChild>
-                <Link href="/login">Войти</Link>
+                <Link href={"/login?from=" + encodeURIComponent("/#reviews")}>
+                  Войти
+                </Link>
               </Button>
             </div>
           )}

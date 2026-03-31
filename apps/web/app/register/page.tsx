@@ -2,10 +2,13 @@
 
 import { useState } from "react"
 import Link from "next/link"
+import { useSearchParams } from "next/navigation"
 import { Button, Input, Label, Card, CardContent, CardDescription, CardHeader, CardTitle } from "@handyseller/ui"
 import { ArrowLeft, Mail, Lock, User, Smartphone } from "lucide-react"
 
 export default function RegisterPage() {
+  const searchParams = useSearchParams()
+  const from = searchParams.get("from") || "/dashboard"
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
 
@@ -58,7 +61,8 @@ export default function RegisterPage() {
       const data = await res.json().catch(() => ({}))
       if (res.ok && (data.accessToken || data.ok || data.success)) {
         if (data.accessToken) localStorage.setItem("accessToken", data.accessToken)
-        window.location.href = "/dashboard"
+        const target = from.startsWith("/") ? from : "/dashboard"
+        window.location.href = target
         return
       }
       const msg = data.message ?? data.error ?? "Ошибка регистрации"

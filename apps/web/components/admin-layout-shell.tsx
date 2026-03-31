@@ -15,6 +15,7 @@ export function AdminLayoutShell({ children }: { children: ReactNode }) {
   const router = useRouter()
   const pathname = usePathname()
   const [allowed, setAllowed] = useState<boolean | null>(null)
+  const [pendingReviews, setPendingReviews] = useState(0)
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -31,6 +32,10 @@ export function AdminLayoutShell({ children }: { children: ReactNode }) {
         if (user?.role === "ADMIN") {
           setStoredUser({ id: user.id, email: user.email, name: user.name, role: user.role })
           setAllowed(true)
+          fetch("/api/admin/reviews?status=PENDING", { headers: { Authorization: `Bearer ${token}` } })
+            .then((r) => (r.ok ? r.json() : []))
+            .then((data) => setPendingReviews(Array.isArray(data) ? data.length : 0))
+            .catch(() => setPendingReviews(0))
         } else {
           setAllowed(false)
         }
@@ -124,6 +129,11 @@ export function AdminLayoutShell({ children }: { children: ReactNode }) {
                 >
                   <MessageSquare className="h-5 w-5" />
                   <span>Отзывы</span>
+                  {pendingReviews > 0 && (
+                    <span className="ml-auto inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-destructive text-destructive-foreground text-xs font-semibold px-1">
+                      {pendingReviews}
+                    </span>
+                  )}
                 </Link>
                 <div className="border-t my-4" />
                 <Link

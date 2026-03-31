@@ -93,11 +93,11 @@ export default function Home() {
             <span className="text-xl font-bold">HandySeller</span>
           </HomeLogoLink>
           <nav className="hidden md:flex items-center space-x-5">
-            <a href="#security" className="text-sm font-medium hover:text-primary">
-              Безопасность
-            </a>
             <a href="#reviews" className="text-sm font-medium hover:text-primary">
               Отзывы
+            </a>
+            <a href="#security" className="text-sm font-medium hover:text-primary">
+              Безопасность
             </a>
             <a href="#features" className="text-sm font-medium hover:text-primary">
               Возможности
@@ -728,11 +728,11 @@ export default function Home() {
             <div className="space-y-3">
               <h4 className="font-bold text-sm">Навигация</h4>
               <nav className="space-y-2">
-                <a href="#security" className="text-muted-foreground hover:text-primary block">
-                  Безопасность
-                </a>
                 <a href="#reviews" className="text-muted-foreground hover:text-primary block">
                   Отзывы
+                </a>
+                <a href="#security" className="text-muted-foreground hover:text-primary block">
+                  Безопасность
                 </a>
                 <a href="#features" className="text-muted-foreground hover:text-primary block">
                   Возможности

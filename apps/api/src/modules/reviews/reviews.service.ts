@@ -15,14 +15,32 @@ export class ReviewsService {
     const text = dto.text?.trim();
     if (!text) throw new BadRequestException('Введите текст отзыва');
 
-    const review = await this.prisma.review.create({
-      data: {
-        userId,
-        text,
-        rating: dto.rating ?? 5,
-        status: ReviewStatus.PENDING,
-      },
+    const existing = await this.prisma.review.findFirst({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
     });
+
+    const review = existing
+      ? await this.prisma.review.update({
+          where: { id: existing.id },
+          data: {
+            text,
+            rating: dto.rating ?? existing.rating ?? 5,
+            status: ReviewStatus.PENDING,
+            adminNote: null,
+            moderatedBy: null,
+            moderatedAt: null,
+            publishedAt: null,
+          },
+        })
+      : await this.prisma.review.create({
+          data: {
+            userId,
+            text,
+            rating: dto.rating ?? 5,
+            status: ReviewStatus.PENDING,
+          },
+        });
 
     return {
       id: review.id,
