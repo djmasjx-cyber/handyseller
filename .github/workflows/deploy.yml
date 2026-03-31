@@ -119,7 +119,12 @@ jobs:
       - name: Prepare SSH key
         run: |
           echo "${{ secrets.VM_SSH_KEY }}" | base64 -d > deploy_key.pem
-          chmod 644 deploy_key.pem
+          chmod 600 deploy_key.pem
+
+      - name: Add VM host to known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H "${{ secrets.VM_HOST }}" >> ~/.ssh/known_hosts
 
       - name: Prepare VM directory
         uses: appleboy/ssh-action@v1.0.3
@@ -129,22 +134,40 @@ jobs:
           key_path: deploy_key.pem
           script: "sudo mkdir -p /opt/handyseller && sudo chown $(whoami):$(whoami) /opt/handyseller"
 
-      - name: Copy compose and scripts to VM
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.VM_HOST }}
-          username: ${{ secrets.VM_USER || 'ubuntu' }}
-          key_path: deploy_key.pem
-          source: "docker-compose.ci.yml,scripts/vm-watchdog.sh,scripts/handyseller-start.sh,scripts/vm-diagnose.sh"
-          target: "/opt/handyseller/"
-      - name: Copy nginx configs to VM
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.VM_HOST }}
-          username: ${{ secrets.VM_USER || 'ubuntu' }}
-          key_path: deploy_key.pem
-          source: "nginx"
-          target: "/opt/handyseller/"
+      - name: Copy compose and scripts to VM (retry)
+        shell: bash
+        run: |
+          set -euo pipefail
+          HOST="${{ secrets.VM_HOST }}"
+          USER="${{ secrets.VM_USER || 'ubuntu' }}"
+          for i in 1 2 3 4 5; do
+            echo "SCP attempt ${i}/5"
+            if scp -i deploy_key.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+              docker-compose.ci.yml scripts/vm-watchdog.sh scripts/handyseller-start.sh scripts/vm-diagnose.sh \
+              "${USER}@${HOST}:/opt/handyseller/"; then
+              exit 0
+            fi
+            sleep $((i * 2))
+          done
+          echo "::error::SCP failed after 5 attempts"
+          exit 1
+
+      - name: Copy nginx configs to VM (retry)
+        shell: bash
+        run: |
+          set -euo pipefail
+          HOST="${{ secrets.VM_HOST }}"
+          USER="${{ secrets.VM_USER || 'ubuntu' }}"
+          for i in 1 2 3 4 5; do
+            echo "SCP attempt ${i}/5"
+            if scp -i deploy_key.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -r nginx \
+              "${USER}@${HOST}:/opt/handyseller/"; then
+              exit 0
+            fi
+            sleep $((i * 2))
+          done
+          echo "::error::SCP failed after 5 attempts"
+          exit 1
 
       - name: Deploy to VM
         uses: appleboy/ssh-action@v1.0.3
