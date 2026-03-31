@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, ReactNode } from "react"
 import { useRouter, usePathname } from "next/navigation"
 import Link from "next/link"
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from "@handyseller/ui"
-import { LayoutDashboard, Package, BarChart3, Settings, Menu, Palette, LogIn, ShoppingCart, Shield, CreditCard, X, Archive } from "lucide-react"
+import { LayoutDashboard, Package, BarChart3, Settings, Menu, Palette, LogIn, ShoppingCart, Shield, CreditCard, X, Archive, ChevronDown } from "lucide-react"
 import { LogoutButton } from "@/components/logout-button"
 import { AUTH_STORAGE_KEYS, isAdmin } from "@/lib/auth-storage"
 
@@ -18,6 +18,7 @@ export function DashboardAuthGate({ children }: { children: ReactNode }) {
   const pathname = usePathname()
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [productsExpanded, setProductsExpanded] = useState(false)
   const [ordersExpanded, setOrdersExpanded] = useState(false)
 
   const checkAuth = useCallback(() => {
@@ -35,10 +36,13 @@ export function DashboardAuthGate({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("storage", handleStorage)
   }, [checkAuth])
 
-  // Разворачиваем «Заказы» при переходе на страницы заказов
+  // Разворачиваем группы при переходе на их страницы
   useEffect(() => {
     if (pathname?.startsWith("/dashboard/orders")) {
       setOrdersExpanded(true)
+    }
+    if (pathname?.startsWith("/dashboard/products")) {
+      setProductsExpanded(true)
     }
   }, [pathname])
 
@@ -77,8 +81,6 @@ export function DashboardAuthGate({ children }: { children: ReactNode }) {
 
   const navLinks = [
     { href: "/dashboard", icon: LayoutDashboard, label: "Главная" },
-    { href: "/dashboard/products", icon: Package, label: "Товары", excludeChild: "/dashboard/products/archive" },
-    { href: "/dashboard/products/archive", icon: Archive, label: "Архив товаров" },
     { href: "/dashboard/analytics", icon: BarChart3, label: "Аналитика" },
     { href: "/dashboard/marketplaces", icon: Palette, label: "Маркетплейсы" },
     { href: "/dashboard/subscription", icon: CreditCard, label: "Подписка" },
@@ -87,6 +89,8 @@ export function DashboardAuthGate({ children }: { children: ReactNode }) {
 
   const isOnOrders = pathname === "/dashboard/orders"
   const isOnAssembly = pathname === "/dashboard/orders/assembly"
+  const isOnProducts = pathname === "/dashboard/products"
+  const isOnProductsArchive = pathname === "/dashboard/products/archive"
 
   // Загрузка или авторизован — рендерим layout
   return (
@@ -139,37 +143,90 @@ export function DashboardAuthGate({ children }: { children: ReactNode }) {
               </Button>
             </div>
             <nav className="flex-1 overflow-y-auto p-4 space-y-1">
-              {navLinks.slice(0, 3).map((item) => {
-                const excludeChild = "excludeChild" in item ? (item as { excludeChild?: string }).excludeChild : undefined
-                const isActive =
-                  pathname === item.href ||
-                  (item.href !== "/dashboard" &&
-                    pathname.startsWith(item.href) &&
-                    (!excludeChild || !pathname.startsWith(excludeChild)))
-                const Icon = item.icon
-                return (
+              {/* Главная */}
+              <Link
+                href="/dashboard"
+                onClick={() => setMenuOpen(false)}
+                className={`flex items-center space-x-3 px-3 py-3 rounded-md min-h-[44px] touch-manipulation ${pathname === "/dashboard" ? "text-primary bg-primary/10 font-medium" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+              >
+                <LayoutDashboard className="h-5 w-5 flex-shrink-0" />
+                <span>Главная</span>
+              </Link>
+
+              {/* Товары — группа */}
+              <div className="py-1">
+                <div
+                  className={`w-full flex items-center px-3 py-3 rounded-md min-h-[44px] touch-manipulation ${isOnProducts || isOnProductsArchive ? "text-primary bg-primary/10 font-medium" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+                >
                   <Link
-                    key={item.href}
-                    href={item.href}
-                    onClick={() => setMenuOpen(false)}
-                    className={`flex items-center space-x-3 px-3 py-3 rounded-md min-h-[44px] touch-manipulation ${isActive ? "text-primary bg-primary/10 font-medium" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+                    href="/dashboard/products"
+                    onClick={() => {
+                      setProductsExpanded(true)
+                      setMenuOpen(false)
+                    }}
+                    className="flex items-center space-x-3 flex-1"
                   >
-                    <Icon className="h-5 w-5 flex-shrink-0" />
-                    <span>{item.label}</span>
+                    <Package className="h-5 w-5 flex-shrink-0" />
+                    <span>Товары</span>
                   </Link>
-                )
-              })}
+                  <button
+                    type="button"
+                    onClick={() => setProductsExpanded((v) => !v)}
+                    className="ml-2 p-1 rounded hover:bg-muted"
+                    aria-label="Развернуть товары"
+                    aria-expanded={productsExpanded}
+                  >
+                    <ChevronDown className={`h-5 w-5 transition-transform ${productsExpanded ? "rotate-180" : ""}`} />
+                  </button>
+                </div>
+                {productsExpanded && (
+                  <>
+                    <Link
+                      href="/dashboard/products"
+                      onClick={() => setMenuOpen(false)}
+                      className={`flex items-center space-x-3 pl-6 pr-3 py-2.5 rounded-md min-h-[40px] touch-manipulation text-sm ${isOnProducts ? "text-primary bg-primary/10 font-medium" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+                    >
+                      <span className="w-2 h-2 rounded-full bg-muted-foreground/50 shrink-0" />
+                      <span>Все товары</span>
+                    </Link>
+                    <Link
+                      href="/dashboard/products/archive"
+                      onClick={() => setMenuOpen(false)}
+                      className={`flex items-center space-x-3 pl-6 pr-3 py-2.5 rounded-md min-h-[40px] touch-manipulation text-sm ${isOnProductsArchive ? "text-primary bg-primary/10 font-medium" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+                    >
+                      <span className="w-2 h-2 rounded-full bg-muted-foreground/50 shrink-0" />
+                      <span>Архив товаров</span>
+                    </Link>
+                  </>
+                )}
+              </div>
+
               {/* Заказы — раскрываемая группа, клик по кнопке раскрывает */}
               <div className="py-1">
-                <button
-                  type="button"
-                  onClick={() => setOrdersExpanded(!ordersExpanded)}
-                  className={`w-full flex items-center space-x-3 px-3 py-3 rounded-md min-h-[44px] touch-manipulation text-left ${isOnOrders || isOnAssembly ? "text-primary bg-primary/10 font-medium" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
-                  aria-expanded={ordersExpanded}
+                <div
+                  className={`w-full flex items-center px-3 py-3 rounded-md min-h-[44px] touch-manipulation ${isOnOrders || isOnAssembly ? "text-primary bg-primary/10 font-medium" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
                 >
-                  <ShoppingCart className="h-5 w-5 flex-shrink-0" />
-                  <span>Заказы</span>
-                </button>
+                  <Link
+                    href="/dashboard/orders"
+                    onClick={() => {
+                      setOrdersExpanded(true)
+                      setMenuOpen(false)
+                    }}
+                    className="flex items-center space-x-3 flex-1"
+                  >
+                    <ShoppingCart className="h-5 w-5 flex-shrink-0" />
+                    <span>Заказы</span>
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => setOrdersExpanded((v) => !v)}
+                    className="ml-2 p-1 rounded hover:bg-muted"
+                    aria-label="Развернуть заказы"
+                    aria-expanded={ordersExpanded}
+                  >
+                    <ChevronDown className={`h-5 w-5 transition-transform ${ordersExpanded ? "rotate-180" : ""}`} />
+                  </button>
+                </div>
                 {ordersExpanded && (
                   <>
                     <Link
@@ -191,13 +248,9 @@ export function DashboardAuthGate({ children }: { children: ReactNode }) {
                   </>
                 )}
               </div>
-              {navLinks.slice(3).map((item) => {
-                const excludeChild = "excludeChild" in item ? (item as { excludeChild?: string }).excludeChild : undefined
-                const isActive =
-                  pathname === item.href ||
-                  (item.href !== "/dashboard" &&
-                    pathname.startsWith(item.href) &&
-                    (!excludeChild || !pathname.startsWith(excludeChild)))
+              {/* Остальные пункты */}
+              {navLinks.slice(1).map((item) => {
+                const isActive = pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(item.href))
                 const Icon = item.icon
                 return (
                   <Link
@@ -242,31 +295,71 @@ export function DashboardAuthGate({ children }: { children: ReactNode }) {
                   <LayoutDashboard className="h-5 w-5" />
                   <span>Главная</span>
                 </Link>
-                <Link
-                  href="/dashboard/products"
-                  className={`flex items-center space-x-3 px-3 py-2 rounded-md ${pathname.startsWith("/dashboard/products") && !pathname.startsWith("/dashboard/products/archive") ? "text-primary bg-primary/10 font-medium" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
-                >
-                  <Package className="h-5 w-5" />
-                  <span>Товары</span>
-                </Link>
-                <Link
-                  href="/dashboard/products/archive"
-                  className={`flex items-center space-x-3 px-3 py-2 rounded-md ${pathname === "/dashboard/products/archive" ? "text-primary bg-primary/10 font-medium" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
-                >
-                  <Archive className="h-5 w-5" />
-                  <span>Архив товаров</span>
-                </Link>
+                {/* Товары — группа */}
+                <div className="space-y-0.5">
+                  <div
+                    className={`w-full flex items-center px-3 py-2 rounded-md ${isOnProducts || isOnProductsArchive ? "text-primary bg-primary/10 font-medium" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+                  >
+                    <Link
+                      href="/dashboard/products"
+                      onClick={() => setProductsExpanded(true)}
+                      className="flex items-center space-x-3 flex-1 text-left"
+                    >
+                      <Package className="h-5 w-5 flex-shrink-0" />
+                      <span>Товары</span>
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={() => setProductsExpanded((v) => !v)}
+                      className="ml-2 p-1 rounded hover:bg-muted"
+                      aria-label="Развернуть товары"
+                      aria-expanded={productsExpanded}
+                    >
+                      <ChevronDown className={`h-5 w-5 transition-transform ${productsExpanded ? "rotate-180" : ""}`} />
+                    </button>
+                  </div>
+                  {productsExpanded && (
+                    <>
+                      <Link
+                        href="/dashboard/products"
+                        className={`flex items-center space-x-3 pl-6 pr-3 py-2 rounded-md text-sm ${isOnProducts ? "text-primary bg-primary/10 font-medium" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+                      >
+                        <span className="w-2 h-2 rounded-full bg-muted-foreground/50 shrink-0" />
+                        <span>Все товары</span>
+                      </Link>
+                      <Link
+                        href="/dashboard/products/archive"
+                        className={`flex items-center space-x-3 pl-6 pr-3 py-2 rounded-md text-sm ${isOnProductsArchive ? "text-primary bg-primary/10 font-medium" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+                      >
+                        <span className="w-2 h-2 rounded-full bg-muted-foreground/50 shrink-0" />
+                        <span>Архив товаров</span>
+                      </Link>
+                    </>
+                  )}
+                </div>
                 {/* Заказы — раскрываемая группа, клик по кнопке раскрывает */}
                 <div className="space-y-0.5">
-                  <button
-                    type="button"
-                    onClick={() => setOrdersExpanded(!ordersExpanded)}
-                    className={`w-full flex items-center space-x-3 px-3 py-2 rounded-md text-left ${isOnOrders || isOnAssembly ? "text-primary bg-primary/10 font-medium" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
-                    aria-expanded={ordersExpanded}
+                  <div
+                    className={`w-full flex items-center px-3 py-2 rounded-md ${isOnOrders || isOnAssembly ? "text-primary bg-primary/10 font-medium" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
                   >
-                    <ShoppingCart className="h-5 w-5 flex-shrink-0" />
-                    <span>Заказы</span>
-                  </button>
+                    <Link
+                      href="/dashboard/orders"
+                      onClick={() => setOrdersExpanded(true)}
+                      className="flex items-center space-x-3 flex-1 text-left"
+                    >
+                      <ShoppingCart className="h-5 w-5 flex-shrink-0" />
+                      <span>Заказы</span>
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={() => setOrdersExpanded((v) => !v)}
+                      className="ml-2 p-1 rounded hover:bg-muted"
+                      aria-label="Развернуть заказы"
+                      aria-expanded={ordersExpanded}
+                    >
+                      <ChevronDown className={`h-5 w-5 transition-transform ${ordersExpanded ? "rotate-180" : ""}`} />
+                    </button>
+                  </div>
                   {ordersExpanded && (
                     <>
                       <Link
