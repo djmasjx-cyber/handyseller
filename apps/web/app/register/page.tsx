@@ -1,12 +1,12 @@
 "use client"
 
-import { useState } from "react"
+import { Suspense, useState } from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import { Button, Input, Label, Card, CardContent, CardDescription, CardHeader, CardTitle } from "@handyseller/ui"
 import { ArrowLeft, Mail, Lock, User, Smartphone } from "lucide-react"
 
-export default function RegisterPage() {
+function RegisterForm() {
   const searchParams = useSearchParams()
   const from = searchParams.get("from") || "/dashboard"
   const [error, setError] = useState<string | null>(null)
@@ -196,5 +196,25 @@ export default function RegisterPage() {
         </CardContent>
       </Card>
     </div>
+  )
+}
+
+export default function RegisterPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-background flex items-center justify-center p-4">
+          <Card className="w-full max-w-md">
+            <CardContent className="pt-6">
+              <div className="animate-pulse h-8 bg-muted rounded mb-4" />
+              <div className="animate-pulse h-10 bg-muted rounded mb-4" />
+              <div className="animate-pulse h-10 bg-muted rounded" />
+            </CardContent>
+          </Card>
+        </div>
+      }
+    >
+      <RegisterForm />
+    </Suspense>
   )
 }
