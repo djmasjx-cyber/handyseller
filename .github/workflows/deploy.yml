@@ -270,4 +270,4 @@ jobs:
             curl -sf --connect-timeout 5 http://127.0.0.1:3001/ >/dev/null || { echo "Web not responding"; docker logs handyseller-web --tail 30 2>&1; exit 1; }
 
             echo "Deploy complete: https://app.handyseller.ru"
-SSH
+          SSH
