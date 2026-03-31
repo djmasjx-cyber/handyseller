@@ -5,7 +5,7 @@ import Link from "next/link"
 import { authFetch } from "@/lib/auth-fetch"
 import { AUTH_STORAGE_KEYS } from "@/lib/auth-storage"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@handyseller/ui"
-import { Users, DollarSign, BarChart3, ArrowRight, Loader2 } from "lucide-react"
+import { Users, DollarSign, BarChart3, ArrowRight, Loader2, MessageSquare } from "lucide-react"
 
 interface AdminStats {
   revenue: number
@@ -95,6 +95,21 @@ export default function AdminDashboardPage() {
             </CardHeader>
             <CardContent>
               <CardDescription>Платежи ВТБ Эквайринг, список операций</CardDescription>
+              <div className="mt-2 flex items-center gap-1 text-primary text-sm font-medium">
+                Перейти <ArrowRight className="h-4 w-4" />
+              </div>
+            </CardContent>
+          </Card>
+        </Link>
+
+        <Link href="/admin/reviews">
+          <Card className="hover:bg-muted/50 transition-colors cursor-pointer h-full">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Отзывы</CardTitle>
+              <MessageSquare className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <CardDescription>Модерация отзывов перед публикацией на главной</CardDescription>
               <div className="mt-2 flex items-center gap-1 text-primary text-sm font-medium">
                 Перейти <ArrowRight className="h-4 w-4" />
               </div>

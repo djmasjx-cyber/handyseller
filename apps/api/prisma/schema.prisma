@@ -38,6 +38,7 @@ model User {
   productFieldLogs  ProductFieldLog[]
   productChangeLogs ProductChangeLog[]
   payments          Payment[]
+  reviews           Review[]
 }
 
 model RefreshToken {
@@ -119,6 +120,32 @@ model EmailVerification {
 enum Role {
   USER
   ADMIN
+}
+
+enum ReviewStatus {
+  PENDING
+  PUBLISHED
+  REJECTED
+}
+
+model Review {
+  id           String       @id @default(uuid())
+  userId       String       @map("user_id")
+  text         String       @db.Text
+  rating       Int          @default(5)
+  status       ReviewStatus @default(PENDING)
+  adminNote    String?      @map("admin_note") @db.Text
+  moderatedBy  String?      @map("moderated_by")
+  moderatedAt  DateTime?    @map("moderated_at")
+  publishedAt  DateTime?    @map("published_at")
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+  @@index([userId, createdAt])
+  @@map("review")
 }
 
 model Product {

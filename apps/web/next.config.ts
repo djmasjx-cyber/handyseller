@@ -17,6 +17,7 @@ const nextConfig: NextConfig = {
       { source: "/dashboard/admin/users", destination: "/admin/users", permanent: true },
       { source: "/dashboard/admin/payments", destination: "/admin/payments", permanent: true },
       { source: "/dashboard/admin/payments/webhooks", destination: "/admin/payments/webhooks", permanent: true },
+      { source: "/dashboard/admin/reviews", destination: "/admin/reviews", permanent: true },
     ];
   },
   // На деплое: Nginx проксирует /api -> NestJS. Локально: rewrite для dev.

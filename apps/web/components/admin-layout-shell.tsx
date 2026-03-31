@@ -4,7 +4,7 @@ import { useState, useEffect, ReactNode } from "react"
 import { useRouter, usePathname } from "next/navigation"
 import Link from "next/link"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@handyseller/ui"
-import { LayoutDashboard, Users, CreditCard, Webhook, ShieldAlert, Palette } from "lucide-react"
+import { LayoutDashboard, Users, CreditCard, Webhook, ShieldAlert, Palette, MessageSquare } from "lucide-react"
 import { LogoutButton } from "@/components/logout-button"
 import { AUTH_STORAGE_KEYS, setStoredUser } from "@/lib/auth-storage"
 
@@ -117,6 +117,13 @@ export function AdminLayoutShell({ children }: { children: ReactNode }) {
                 >
                   <Webhook className="h-5 w-5" />
                   <span>Вебхуки</span>
+                </Link>
+                <Link
+                  href="/admin/reviews"
+                  className={`flex items-center space-x-3 px-3 py-2 rounded-md ${pathname?.startsWith("/admin/reviews") ? "text-primary bg-primary/10 font-medium" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+                >
+                  <MessageSquare className="h-5 w-5" />
+                  <span>Отзывы</span>
                 </Link>
                 <div className="border-t my-4" />
                 <Link

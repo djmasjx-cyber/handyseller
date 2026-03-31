@@ -24,6 +24,7 @@ import { PaymentsModule } from './modules/payments/payments.module';
 import { SalesSourcesModule } from './modules/sales-sources/sales-sources.module';
 import { AssistantModule } from './modules/assistant/assistant.module';
 import { MediaModule } from './modules/media/media.module';
+import { ReviewsModule } from './modules/reviews/reviews.module';
 
 function getTracker(req: { headers?: Record<string, string | string[] | undefined>; ip?: string; socket?: { remoteAddress?: string } }): string {
   const headers = req.headers ?? {};
@@ -78,6 +79,7 @@ function getTracker(req: { headers?: Record<string, string | string[] | undefine
     SalesSourcesModule,
     AssistantModule,
     MediaModule,
+    ReviewsModule,
   ],
   controllers: [AppController],
   providers: [

@@ -21,6 +21,8 @@ import { OrdersService } from '../orders/orders.service';
 import { PrismaService } from '../../common/database/prisma.service';
 import { RefundPaymentDto } from '../payments/dto/refund-payment.dto';
 import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
+import { ReviewsService } from '../reviews/reviews.service';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
 
 @Controller('admin')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -33,6 +35,7 @@ export class AdminController {
     private readonly marketplacesService: MarketplacesService,
     private readonly ordersService: OrdersService,
     private readonly prisma: PrismaService,
+    private readonly reviewsService: ReviewsService,
   ) {}
 
   @Patch('users/:userId/subscription')
@@ -145,6 +148,28 @@ export class AdminController {
     @Body() dto: RefundPaymentDto,
   ) {
     return this.paymentsService.refund(paymentId, dto.amount);
+  }
+
+  @Get('reviews')
+  async getReviews(@Query('status') status?: 'PENDING' | 'PUBLISHED' | 'REJECTED') {
+    return this.reviewsService.listForAdmin(status);
+  }
+
+  @Patch('reviews/:id/publish')
+  async publishReview(
+    @Param('id') reviewId: string,
+    @CurrentUser('userId') adminUserId: string,
+  ) {
+    return this.reviewsService.publish(reviewId, adminUserId);
+  }
+
+  @Patch('reviews/:id/reject')
+  async rejectReview(
+    @Param('id') reviewId: string,
+    @CurrentUser('userId') adminUserId: string,
+    @Body('note') note?: string,
+  ) {
+    return this.reviewsService.reject(reviewId, adminUserId, note);
   }
 
   /**

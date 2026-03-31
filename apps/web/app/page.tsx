@@ -5,6 +5,7 @@ import { Button, Badge } from "@handyseller/ui"
 import { HomeLogoLink } from "@/components/home-logo-link"
 import { TrackedLink, TrackedAnchor } from "@/components/tracked-link"
 import { TelegramLink } from "@/components/telegram-link"
+import { HomeReviewsSection } from "@/components/home-reviews-section"
 import {
   ArrowRight,
   Zap,
@@ -95,6 +96,9 @@ export default function Home() {
             <a href="#security" className="text-sm font-medium hover:text-primary">
               Безопасность
             </a>
+            <a href="#reviews" className="text-sm font-medium hover:text-primary">
+              Отзывы
+            </a>
             <a href="#features" className="text-sm font-medium hover:text-primary">
               Возможности
             </a>
@@ -168,7 +172,9 @@ export default function Home() {
                 ))}
               </div>
               <p className="text-sm text-muted-foreground">
-                Более 1,000 мастеров уже продают с нами
+                <a href="#reviews" className="hover:text-primary underline-offset-4 hover:underline">
+                  Отзывы
+                </a>
               </p>
             </div>
           </div>
@@ -222,6 +228,8 @@ export default function Home() {
           </div>
         </div>
       </section>
+
+      <HomeReviewsSection />
 
       <section id="security" className="container py-12 md:py-16 scroll-mt-20 border-y border-border/60 bg-muted/20">
         <div className="text-center mb-8 max-w-2xl mx-auto">
@@ -722,6 +730,9 @@ export default function Home() {
               <nav className="space-y-2">
                 <a href="#security" className="text-muted-foreground hover:text-primary block">
                   Безопасность
+                </a>
+                <a href="#reviews" className="text-muted-foreground hover:text-primary block">
+                  Отзывы
                 </a>
                 <a href="#features" className="text-muted-foreground hover:text-primary block">
                   Возможности
