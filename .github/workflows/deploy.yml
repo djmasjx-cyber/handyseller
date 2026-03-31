@@ -127,12 +127,14 @@ jobs:
           ssh-keyscan -H "${{ secrets.VM_HOST }}" >> ~/.ssh/known_hosts
 
       - name: Prepare VM directory
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.VM_HOST }}
-          username: ${{ secrets.VM_USER || 'ubuntu' }}
-          key_path: deploy_key.pem
-          script: "sudo mkdir -p /opt/handyseller && sudo chown $(whoami):$(whoami) /opt/handyseller"
+        shell: bash
+        run: |
+          set -euo pipefail
+          HOST="${{ secrets.VM_HOST }}"
+          USER="${{ secrets.VM_USER || 'ubuntu' }}"
+          ssh -i deploy_key.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "${USER}@${HOST}" \
+            "sudo mkdir -p /opt/handyseller && sudo chown \$(whoami):\$(whoami) /opt/handyseller"
 
       - name: Copy compose and scripts to VM (retry)
         shell: bash
@@ -170,16 +172,15 @@ jobs:
           exit 1
 
       - name: Deploy to VM
-        uses: appleboy/ssh-action@v1.0.3
+        shell: bash
         env:
           CR_PAT: ${{ secrets.CR_PAT }}
-        with:
-          host: ${{ secrets.VM_HOST }}
-          username: ${{ secrets.VM_USER || 'ubuntu' }}
-          key_path: deploy_key.pem
-          command_timeout: 30m
-          envs: CR_PAT
-          script: |
+        run: |
+          set -euo pipefail
+          HOST="${{ secrets.VM_HOST }}"
+          USER="${{ secrets.VM_USER || 'ubuntu' }}"
+          ssh -i deploy_key.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "${USER}@${HOST}" <<'SSH'
             # Деплой: down → prune → pull → up. Watchdog отключаем на время (иначе гонка: он видит down и делает up).
             set -e
             cd /opt/handyseller
@@ -269,3 +270,4 @@ jobs:
             curl -sf --connect-timeout 5 http://127.0.0.1:3001/ >/dev/null || { echo "Web not responding"; docker logs handyseller-web --tail 30 2>&1; exit 1; }
 
             echo "Deploy complete: https://app.handyseller.ru"
+SSH
