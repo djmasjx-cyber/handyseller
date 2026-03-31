@@ -77,7 +77,9 @@ export class DashboardService {
         console.warn('[Dashboard] getOrdersStatsByMarketplace:', e instanceof Error ? e.message : String(e));
         return {} as Record<string, { totalOrders: number; delivered: number; cancelled: number; revenue: number }>;
       }),
-      this.marketplacesService.getOrdersStatsByStatus(userId, monthStart, monthEnd).catch((e) => {
+      // Для статусов важнее "активная реальность", чем календарный месяц: берём окно 30 дней,
+      // иначе заказы на сборке могут исчезать с Главной при переходе месяца.
+      this.marketplacesService.getOrdersStatsByStatus(userId, since, now).catch((e) => {
         console.warn('[Dashboard] getOrdersStatsByStatus:', e instanceof Error ? e.message : String(e));
         return {} as Record<string, { delivered: { count: number; sum: number }; shipped: { count: number; sum: number }; inProgress: { count: number; sum: number }; cancelled: { count: number; sum: number } }>;
       }),
@@ -99,7 +101,7 @@ export class DashboardService {
 
     const totalRevenue = Number(monthlyAgg._sum.totalAmount ?? 0);
     const ordersInPeriodCount = monthlyAgg._count;
-    const { newCount } = await this.ordersService.getOrderStats(userId);
+    const { newCount, inProgressCount } = await this.ordersService.getOrderStats(userId);
 
     const totalProductsOnMarketplaces = linkedStats.totalUnique ?? 0;
     const statistics: Record<
@@ -161,7 +163,7 @@ export class DashboardService {
         totalRevenue,
         totalOrders: ordersInPeriodCount,
         newOrdersCount: newCount,
-        ordersRequireAttention: newCount,
+        ordersRequireAttention: newCount + inProgressCount,
         connectedMarketplaces: mpSet.size,
         marketplaceLabel: mpLabels,
         isAdmin,

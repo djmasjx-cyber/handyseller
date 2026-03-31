@@ -249,17 +249,42 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             {s.ordersRequireAttention > 0 ? (
-              <div className="flex items-start justify-between p-3 bg-muted rounded-lg">
-                <div className="space-y-1">
-                  <p className="font-medium">Новые заказы</p>
-                  <p className="text-sm text-muted-foreground">
-                    {s.ordersRequireAttention} заказ(ов) ожидают обработки
-                  </p>
-                </div>
-                <Button size="sm" variant="outline" onClick={() => fetchDashboard(true)}>
-                  Обновить
-                </Button>
-              </div>
+              <>
+                {s.newOrdersCount > 0 && (
+                  <div className="flex items-start justify-between p-3 bg-muted rounded-lg">
+                    <div className="space-y-1">
+                      <p className="font-medium">Новые заказы</p>
+                      <p className="text-sm text-muted-foreground">
+                        {s.newOrdersCount} заказ(ов) ожидают обработки
+                      </p>
+                    </div>
+                    <Button size="sm" variant="outline" onClick={() => fetchDashboard(true)}>
+                      Обновить
+                    </Button>
+                  </div>
+                )}
+                {(() => {
+                  const stats = data.ordersStatsByStatus ?? {}
+                  const ozon = stats.OZON ?? stats.ozon
+                  const wb = stats.WILDBERRIES ?? stats.wildberries ?? stats.WB ?? stats.wb
+                  const inProgress =
+                    (ozon?.inProgress?.count ?? 0) + (wb?.inProgress?.count ?? 0)
+                  if (inProgress <= 0) return null
+                  return (
+                    <div className="flex items-start justify-between p-3 bg-muted rounded-lg">
+                      <div className="space-y-1">
+                        <p className="font-medium">На сборке</p>
+                        <p className="text-sm text-muted-foreground">
+                          {inProgress} заказ(ов) в сборке
+                        </p>
+                      </div>
+                      <Button size="sm" variant="outline" asChild>
+                        <Link href="/dashboard/orders/assembly">Открыть</Link>
+                      </Button>
+                    </div>
+                  )
+                })()}
+              </>
             ) : (
               <div className="p-3 bg-muted rounded-lg">
                 <p className="font-medium text-green-600">Всё в порядке</p>
