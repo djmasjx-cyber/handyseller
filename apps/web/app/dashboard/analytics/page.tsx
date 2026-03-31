@@ -30,6 +30,7 @@ interface MarketplaceStats {
   delivered: number
   cancelled: number
   revenue: number
+  salesRevenue?: number
   linkedProductsCount?: number
 }
 
@@ -52,6 +53,7 @@ interface MonthlyData {
   year: number
   revenue: number
   orders: number
+  byMarketplace?: Record<string, { revenue: number; orders: number }>
 }
 
 interface ProductMarketplaceStats {
@@ -100,16 +102,6 @@ export default function AnalyticsPage() {
     [stats],
   )
 
-  const perMarketplaceRevenueLabel =
-    perMarketplace.length > 0
-      ? perMarketplace
-          .map(([key, stat]) => {
-            const meta = MARKETPLACE_META[key] ?? { label: key, color: "" }
-            return `${meta.label}: ${(stat.revenue ?? 0).toLocaleString("ru-RU")} ₽`
-          })
-          .join(" · ")
-      : null
-
   const monthsToShow = useMemo(() => {
     const empty = { month: "—", year: 0, revenue: 0, orders: 0 }
     return [
@@ -118,6 +110,18 @@ export default function AnalyticsPage() {
       monthlyData[2] ?? empty,
     ]
   }, [monthlyData])
+
+  const monthlyBreakdownLabel = (m: MonthlyData) => {
+    const by = m.byMarketplace ?? {}
+    const entries = Object.entries(by)
+    if (entries.length === 0) return null
+    return entries
+      .map(([key, v]) => {
+        const meta = MARKETPLACE_META[key] ?? { label: key, color: "" }
+        return `${meta.label}: ${(v.revenue ?? 0).toLocaleString("ru-RU")} ₽`
+      })
+      .join(" · ")
+  }
 
   const perMarketplaceOrdersLabel =
     perMarketplace.length > 0
@@ -203,7 +207,7 @@ export default function AnalyticsPage() {
         </Button>
       </div>
 
-      {/* Блок Выручка — 3 месяца */}
+      {/* Блок Продажи — 3 месяца */}
       <div className="grid gap-4 md:grid-cols-3">
         {monthsToShow.map((m, i) => (
           <Card
@@ -213,7 +217,7 @@ export default function AnalyticsPage() {
             title="Нажмите, чтобы увидеть топ товаров"
           >
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Выручка · {m.month}</CardTitle>
+              <CardTitle className="text-sm font-medium">Продажи · {m.month}</CardTitle>
               <div className="flex items-center gap-1">
                 <TrendingUp className="h-4 w-4 text-muted-foreground" />
                 <ChevronRight className="h-4 w-4 text-muted-foreground/70" />
@@ -224,10 +228,10 @@ export default function AnalyticsPage() {
                 {(m.revenue ?? 0).toLocaleString("ru-RU")} ₽
               </div>
               <p className="text-xs text-muted-foreground mt-1">
-                {m.year ? `${m.month} ${m.year}` : "—"}
+                {m.year ? `${m.month} ${m.year} · сумма заказов` : "—"}
               </p>
-              {i === 0 && perMarketplaceRevenueLabel && (
-                <p className="text-xs text-muted-foreground mt-1">{perMarketplaceRevenueLabel}</p>
+              {m.year && monthlyBreakdownLabel(m) && (
+                <p className="text-xs text-muted-foreground mt-1">{monthlyBreakdownLabel(m)}</p>
               )}
             </CardContent>
           </Card>
@@ -263,7 +267,7 @@ export default function AnalyticsPage() {
             По площадкам
           </CardTitle>
           <CardDescription>
-            Выручка и заказы по каждому подключённому маркетплейсу
+            Выкуп и заказы по каждому подключённому маркетплейсу
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -288,7 +292,12 @@ export default function AnalyticsPage() {
                     <Badge className={meta.color}>{meta.label}</Badge>
                     <div className="grid grid-cols-2 gap-3 text-sm">
                       <div>
-                        <p className="text-muted-foreground">Выручка</p>
+                        <p className="text-muted-foreground">Продажи</p>
+                        <p className="font-semibold">{(stat.salesRevenue ?? 0).toLocaleString("ru-RU")} ₽</p>
+                        <p className="text-xs text-muted-foreground">сумма заказов</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Выкуп</p>
                         <p className="font-semibold">{(stat.revenue ?? 0).toLocaleString("ru-RU")} ₽</p>
                         <p className="text-xs text-muted-foreground">сумма выкупленных</p>
                       </div>
@@ -324,7 +333,7 @@ export default function AnalyticsPage() {
         <CardHeader>
           <CardTitle>Аналитика по товарам</CardTitle>
           <CardDescription>
-            Выручка и заказы по каждому товару за текущий месяц. Сравнение WB и Ozon.
+            Продажи и заказы по каждому товару за текущий месяц. Сравнение WB и Ozon.
           </CardDescription>
         </CardHeader>
         <CardContent>

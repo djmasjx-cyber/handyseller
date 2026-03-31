@@ -106,7 +106,16 @@ export class DashboardService {
     const totalProductsOnMarketplaces = linkedStats.totalUnique ?? 0;
     const statistics: Record<
       string,
-      { totalOrders: number; delivered: number; cancelled: number; revenue: number; linkedProductsCount: number }
+      {
+        totalOrders: number;
+        delivered: number;
+        cancelled: number;
+        /** Выкуп (DELIVERED) */
+        revenue: number;
+        /** Продажи (все, кроме CANCELLED) */
+        salesRevenue?: number;
+        linkedProductsCount: number;
+      }
     > = {};
     for (const [key, orderStat] of Object.entries(ordersStatsByMp ?? {})) {
       statistics[key] = {
@@ -121,6 +130,7 @@ export class DashboardService {
           delivered: 0,
           cancelled: 0,
           revenue: 0,
+          salesRevenue: 0,
           linkedProductsCount: linkedStats.byMarketplace[key] ?? 0,
         };
       }
@@ -134,6 +144,7 @@ export class DashboardService {
           delivered: 0,
           cancelled: 0,
           revenue: 0,
+          salesRevenue: 0,
           linkedProductsCount: linkedStats.byMarketplace?.[key] ?? 0,
         };
       }

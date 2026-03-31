@@ -34,7 +34,13 @@ export class AnalyticsService {
 
   /** Выручка и заказы за последние 3 календарных месяца (текущий, предыдущий, предпредыдущий). */
   async getMonthlyBreakdown(userId: string): Promise<
-    Array<{ month: string; year: number; revenue: number; orders: number }>
+    Array<{
+      month: string;
+      year: number;
+      revenue: number;
+      orders: number;
+      byMarketplace: Record<string, { revenue: number; orders: number }>;
+    }>
   > {
     const now = new Date();
     const months: Array<{ from: Date; to: Date; monthName: string; year: number }> = [];
@@ -52,20 +58,40 @@ export class AnalyticsService {
     }
     const results = await Promise.all(
       months.map(async ({ from, to, monthName, year }) => {
-        const agg = await this.prisma.order.aggregate({
-          where: {
-            userId,
-            createdAt: { gte: from, lte: to },
-            status: { not: OrderStatus.CANCELLED },
-          },
-          _sum: { totalAmount: true },
-          _count: true,
-        });
+        const where = {
+          userId,
+          createdAt: { gte: from, lte: to },
+          status: { not: OrderStatus.CANCELLED },
+        } as const;
+
+        const [agg, byMp] = await Promise.all([
+          this.prisma.order.aggregate({
+            where,
+            _sum: { totalAmount: true },
+            _count: true,
+          }),
+          this.prisma.order.groupBy({
+            by: ['marketplace'],
+            where,
+            _sum: { totalAmount: true },
+            _count: true,
+          }),
+        ]);
+
+        const byMarketplace: Record<string, { revenue: number; orders: number }> = {};
+        for (const r of byMp) {
+          const key = String(r.marketplace).toLowerCase();
+          byMarketplace[key] = {
+            revenue: Math.round(Number(r._sum.totalAmount ?? 0) * 100) / 100,
+            orders: Number(r._count) || 0,
+          };
+        }
         return {
           month: monthName,
           year,
           revenue: Math.round((Number(agg._sum.totalAmount ?? 0)) * 100) / 100,
           orders: agg._count,
+          byMarketplace,
         };
       }),
     );
