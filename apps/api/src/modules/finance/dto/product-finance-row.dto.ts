@@ -1,6 +1,8 @@
 export interface MarketplaceCommissionBlock {
   marketplace: string;
   scheme: string;
+  /** Цена продажи товара на данном маркетплейсе (₽). 0 если не синкалось. */
+  marketplacePrice: number;
   salesCommissionPct: number;
   salesCommissionAmt: number;
   logisticsAmt: number;
@@ -20,6 +22,5 @@ export interface ProductFinanceRow {
   article: string | null;
   imageUrl: string | null;
   cost: number;
-  price: number | null;
   commissions: MarketplaceCommissionBlock[];
 }

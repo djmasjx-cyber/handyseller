@@ -14,6 +14,8 @@ import Image from "next/image"
 interface MarketplaceCommissionBlock {
   marketplace: string
   scheme: string
+  /** Цена на данном маркетплейсе (₽). 0 если не синкалось. */
+  marketplacePrice: number
   salesCommissionPct: number
   salesCommissionAmt: number
   logisticsAmt: number
@@ -33,7 +35,6 @@ interface ProductFinanceRow {
   article: string | null
   imageUrl: string | null
   cost: number
-  price: number | null
   commissions: MarketplaceCommissionBlock[]
 }
 
@@ -75,19 +76,20 @@ const fmtPct = (v: number) =>
 
 function MarketplaceCommissionColumns({
   block,
-  price,
   cost,
   mp,
   storageDays,
 }: {
   block: MarketplaceCommissionBlock
-  price: number | null
   cost: number
   mp: string
   storageDays: number
 }) {
   const col3 = getMpCol3Config(mp, block.scheme)
   const isFBO = block.scheme === "FBO"
+
+  // Цена на этом маркетплейсе (0 = ещё не синкалась)
+  const price = block.marketplacePrice > 0 ? block.marketplacePrice : null
 
   // Хранение — только для FBO: storageCostPerDay × кол-во дней оборачиваемости
   const storageTotal = isFBO ? block.storageCostPerDay * storageDays : 0
@@ -112,8 +114,16 @@ function MarketplaceCommissionColumns({
 
   return (
     <>
+      {/* Цена на этом маркетплейсе */}
+      <td className="px-2 py-2 text-right text-sm tabular-nums font-medium border-l">
+        {price != null ? (
+          <>{fmt(price)} ₽</>
+        ) : (
+          <span className="text-muted-foreground text-xs">нет данных</span>
+        )}
+      </td>
       {/* Комиссия % + ₽ */}
-      <td className="px-2 py-2 text-right text-sm tabular-nums text-muted-foreground border-l">
+      <td className="px-2 py-2 text-right text-sm tabular-nums text-muted-foreground">
         {fmtPct(block.salesCommissionPct)}
         <div className="text-xs">{fmt(block.salesCommissionAmt)} ₽</div>
       </td>
@@ -386,12 +396,22 @@ export function FinanceTable({ scheme }: Props) {
 
       {/* Notice */}
       <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/30 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
-        <Info className="h-4 w-4 mt-0.5 flex-shrink-0" />
-        <span>
-          Данные по Ozon — точные суммы из API. Данные по WB — расчётные по тарифам и габаритам товара (≈ оценка).
-          Нажмите «Обновить тарифы» для актуализации. Маржа рассчитана от цены продажи без учёта налогов.
-          {scheme === "FBO" && " Хранение рассчитывается как стоимость/день × оборачиваемость. «Б/у» — цена безубыточности (маржа = 0)."}
-        </span>
+        <Info className="h-4 w-4 mt-1 flex-shrink-0" />
+        <div className="space-y-1">
+          <p className="font-medium">Данные носят ориентировочный характер</p>
+          <p>
+            Цены берутся из последней синхронизации с маркетплейсом.
+            Комиссии Ozon — точные данные из API. Комиссии и логистика WB — <em>расчётные</em>: усреднены
+            по тарифам всех складов, умножены на объём товара из карточки. Фактические списания в отчёте
+            WB могут отличаться из-за акций, СПП, динамических складских коэффициентов и округлений.
+            {scheme === "FBO" && " Хранение = тариф/день × оборачиваемость (настраивается выше)."}
+            {" "}«Б/у» — цена безубыточности: минимальная цена при нулевой марже.
+          </p>
+          <p className="text-xs opacity-80">
+            Используйте как инструмент для первичного анализа ценообразования, а не для точных финансовых расчётов.
+            Нажмите «Обновить тарифы» чтобы актуализировать данные.
+          </p>
+        </div>
       </div>
 
       {error && (
@@ -424,16 +444,15 @@ export function FinanceTable({ scheme }: Props) {
               {/* Row 1: marketplace group headers */}
               <tr className="border-b bg-muted/50">
                 <th className="text-left font-medium p-3 min-w-[200px]" rowSpan={2}>Товар</th>
-                <th className="text-right font-medium px-2 py-2" rowSpan={2}>Цена ₽</th>
                 <th className="text-right font-medium px-2 py-2" rowSpan={2}>Себест. ₽</th>
                 {marketplaces.map((mp) => {
                   const meta = MP_META[mp] ?? { label: mp, color: "#888", textColor: "#fff" }
-                  // 6 cols: комиссия, логистика, 3-й (приёмка/1-я миля/—), хранение, итого, маржа
+                  // 7 cols: цена на маркете, комиссия, логистика, 3-й (приёмка/1-я миля/—), хранение, итого, маржа
                   // Возврат скрыт (учтён в итого)
                   return (
                     <th
                       key={mp}
-                      colSpan={6}
+                      colSpan={7}
                       className="px-2 py-2 text-center font-semibold text-xs tracking-wide border-l"
                       style={{ backgroundColor: meta.color, color: meta.textColor }}
                     >
@@ -448,7 +467,8 @@ export function FinanceTable({ scheme }: Props) {
                   const col3 = getMpCol3Config(mp, scheme)
                   return (
                     <>
-                      <th key={`${mp}-com`} className="px-2 py-1.5 text-right font-medium border-l">Комиссия</th>
+                      <th key={`${mp}-prc`} className="px-2 py-1.5 text-right font-medium border-l">Цена ₽</th>
+                      <th key={`${mp}-com`} className="px-2 py-1.5 text-right font-medium">Комиссия</th>
                       <th key={`${mp}-log`} className="px-2 py-1.5 text-right font-medium">Логистика</th>
                       <th key={`${mp}-acc`} className="px-2 py-1.5 text-right font-medium">
                         {col3?.label ?? "—"}
@@ -499,10 +519,6 @@ export function FinanceTable({ scheme }: Props) {
                         </div>
                       </Link>
                     </td>
-                    {/* Price */}
-                    <td className="px-2 py-2 text-right text-sm tabular-nums">
-                      {row.price != null ? `${fmt(row.price)} ₽` : <span className="text-muted-foreground text-xs">—</span>}
-                    </td>
                     {/* Cost — editable */}
                     <td className="px-2 py-2 text-right">
                       {token ? (
@@ -522,7 +538,7 @@ export function FinanceTable({ scheme }: Props) {
                       if (!block) {
                         return (
                           <>
-                            {Array.from({ length: 6 }).map((_, i) => (
+                            {Array.from({ length: 7 }).map((_, i) => (
                               <td key={`${mp}-empty-${i}`} className="px-2 py-2 text-center text-xs text-muted-foreground border-l first:border-l">—</td>
                             ))}
                           </>
@@ -532,7 +548,6 @@ export function FinanceTable({ scheme }: Props) {
                         <MarketplaceCommissionColumns
                           key={mp}
                           block={block}
-                          price={row.price}
                           cost={row.cost}
                           mp={mp}
                           storageDays={storageDays}

@@ -181,10 +181,13 @@ export class CommissionSyncService {
           (item.product_id ? byProductId.get(String(item.product_id)) : undefined);
         if (!mapping) continue;
 
-        // Цена из маппинга (лок.), либо из ответа v5
-        const productPrice =
-          Number(mapping.product?.price ?? 0) ||
-          Number(item.price?.price ?? 0);
+        // Цена на Ozon берём приоритетно из ответа v5 (актуальная цена на маркетплейсе),
+        // если в ответе нет — из локального маппинга.
+        const ozonPrice =
+          Number(item.price?.price ?? 0) ||
+          Number(mapping.product?.price ?? 0);
+        // Для расчётов комиссий используем ту же цену
+        const productPrice = ozonPrice;
 
         const fboSalesPct = Number(c.sales_percent_fbo ?? 0);
         const fbsSalesPct = Number(c.sales_percent_fbs ?? 0);
@@ -210,6 +213,7 @@ export class CommissionSyncService {
         const upsertData = [
           {
             scheme: 'FBO',
+            marketplacePrice: ozonPrice,
             salesCommissionPct: fboSalesPct,
             salesCommissionAmt: fboSalesAmt,
             logisticsAmt:       fboLogistics,
@@ -221,6 +225,7 @@ export class CommissionSyncService {
           },
           {
             scheme: 'FBS',
+            marketplacePrice: ozonPrice,
             salesCommissionPct: fbsSalesPct,
             salesCommissionAmt: fbsSalesAmt,
             logisticsAmt:       fbsLogistics,
@@ -245,30 +250,31 @@ export class CommissionSyncService {
               productId: mapping.productId,
               marketplace: 'OZON',
               scheme: d.scheme,
+              marketplacePrice: d.marketplacePrice,
               salesCommissionPct: d.salesCommissionPct,
               salesCommissionAmt: d.salesCommissionAmt,
-                logisticsAmt: d.logisticsAmt,
-                firstMileAmt: d.firstMileAmt,
-                returnAmt: d.returnAmt,
-                acceptanceAmt: d.acceptanceAmt,
-                totalFeeAmt: d.totalFeeAmt,
-                syncedAt: new Date(),
-                rawData: d.rawData,
-              },
-              update: {
-                salesCommissionPct: d.salesCommissionPct,
-                salesCommissionAmt: d.salesCommissionAmt,
-                logisticsAmt: d.logisticsAmt,
-                firstMileAmt: d.firstMileAmt,
-                returnAmt: d.returnAmt,
-                acceptanceAmt: d.acceptanceAmt,
-                totalFeeAmt: d.totalFeeAmt,
-                syncedAt: new Date(),
-                rawData: d.rawData,
-              },
-            });
-            synced++;
-          }
+              logisticsAmt: d.logisticsAmt,
+              firstMileAmt: d.firstMileAmt,
+              returnAmt: d.returnAmt,
+              acceptanceAmt: d.acceptanceAmt,
+              totalFeeAmt: d.totalFeeAmt,
+              syncedAt: new Date(),
+              rawData: d.rawData,
+            },
+            update: {
+              marketplacePrice: d.marketplacePrice,
+              salesCommissionPct: d.salesCommissionPct,
+              salesCommissionAmt: d.salesCommissionAmt,
+              logisticsAmt: d.logisticsAmt,
+              firstMileAmt: d.firstMileAmt,
+              returnAmt: d.returnAmt,
+              acceptanceAmt: d.acceptanceAmt,
+              totalFeeAmt: d.totalFeeAmt,
+              syncedAt: new Date(),
+              rawData: d.rawData,
+            },
+          });
+          synced++;
         }
 
       // Если страница неполная — это последняя страница
@@ -402,6 +408,7 @@ export class CommissionSyncService {
       const schemes = [
         {
           scheme: 'FBO',
+          marketplacePrice: productPrice,
           salesCommissionPct: fboCommissionPct,
           salesCommissionAmt: fboSalesAmt,
           logisticsAmt: deliveryCost,
@@ -413,6 +420,7 @@ export class CommissionSyncService {
         },
         {
           scheme: 'FBS',
+          marketplacePrice: productPrice,
           salesCommissionPct: fbsCommissionPct,
           salesCommissionAmt: fbsSalesAmt,
           logisticsAmt: deliveryCost, // последняя миля WB → клиент
@@ -437,6 +445,7 @@ export class CommissionSyncService {
             productId: mapping.productId,
             marketplace: 'WILDBERRIES',
             scheme: d.scheme,
+            marketplacePrice: d.marketplacePrice,
             salesCommissionPct: d.salesCommissionPct,
             salesCommissionAmt: d.salesCommissionAmt,
             logisticsAmt: d.logisticsAmt,
@@ -456,6 +465,7 @@ export class CommissionSyncService {
             },
           },
           update: {
+            marketplacePrice: d.marketplacePrice,
             salesCommissionPct: d.salesCommissionPct,
             salesCommissionAmt: d.salesCommissionAmt,
             logisticsAmt: d.logisticsAmt,

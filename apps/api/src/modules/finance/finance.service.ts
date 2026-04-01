@@ -21,12 +21,12 @@ export class FinanceService {
         article: true,
         imageUrl: true,
         cost: true,
-        price: true,
         commissions: {
           where: scheme ? { scheme } : undefined,
           select: {
             marketplace: true,
             scheme: true,
+            marketplacePrice: true,
             salesCommissionPct: true,
             salesCommissionAmt: true,
             logisticsAmt: true,
@@ -50,7 +50,6 @@ export class FinanceService {
       article: p.article ?? null,
       imageUrl: p.imageUrl ?? null,
       cost: Number(p.cost ?? 0),
-      price: p.price != null ? Number(p.price) : null,
       commissions: p.commissions.map((c) => {
         const raw = c.rawData as Record<string, unknown> | null;
         const storageCostPerDay =
@@ -58,6 +57,7 @@ export class FinanceService {
         return {
           marketplace: c.marketplace,
           scheme: c.scheme,
+          marketplacePrice: Number(c.marketplacePrice ?? 0),
           salesCommissionPct: Number(c.salesCommissionPct),
           salesCommissionAmt: Number(c.salesCommissionAmt),
           logisticsAmt: Number(c.logisticsAmt),

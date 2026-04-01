@@ -256,6 +256,7 @@ model ProductMarketplaceCommission {
   productId           String   @map("product_id")
   marketplace         String   // 'OZON' | 'WILDBERRIES' | 'YANDEX' | ...
   scheme              String   // 'FBO' | 'FBS'
+  marketplacePrice    Decimal  @default(0) @db.Decimal(10, 2) @map("marketplace_price") // цена на этом маркетплейсе (₽)
   salesCommissionPct  Decimal  @default(0) @db.Decimal(6, 2) @map("sales_commission_pct")
   salesCommissionAmt  Decimal  @default(0) @db.Decimal(10, 2) @map("sales_commission_amt")
   logisticsAmt        Decimal  @default(0) @db.Decimal(10, 2) @map("logistics_amt")
