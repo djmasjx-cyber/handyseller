@@ -33,23 +33,29 @@ interface OzonV5Item {
   commissions?: OzonV5Commissions;
 }
 
-/** Тарифы WB для логистики коробок — кешируются в рамках одной синхронизации. */
+/**
+ * Тарифы WB для логистики коробок (из /api/v1/tariffs/box).
+ * Все поля Base/Liter — базовые рублёвые ставки.
+ * CoefExpr — динамический коэффициент WB в процентах (160 = ×1.60).
+ * Итоговая стоимость = (base + liter × max(vol−1, 0)) × coef / 100.
+ */
 interface WbBoxTariff {
   warehouseName: string;
-  /** Доставка до клиента (последняя миля) — базовая стоимость. */
+  /** FBO и FBS последняя миля: склад/СЦ WB → покупатель. */
   boxDeliveryBase: number;
-  /** Доставка до клиента — стоимость каждого доп. литра. */
   boxDeliveryLiter: number;
+  boxDeliveryCoef: number;   // boxDeliveryCoefExpr / 100
   /**
-   * Обработка/приёмка отправления на складе/СЦ WB (первая миля FBS).
-   * В ответе API поле boxDeliveryMarketplaceBase.
-   * 0 если поле не пришло.
+   * FBS «первая миля»: приёмка/обработка отправления на СЦ WB.
+   * API-поле: boxDeliveryMarketplaceBase / Liter / CoefExpr.
    */
   boxFirstMileBase: number;
-  /** Первая миля FBS — стоимость доп. литра. */
   boxFirstMileLiter: number;
+  boxFirstMileCoef: number;  // boxDeliveryMarketplaceCoefExpr / 100
+  /** Хранение на складе WB (₽ / литр / день). */
   boxStorageBase: number;
   boxStorageLiter: number;
+  boxStorageCoef: number;    // boxStorageCoefExpr / 100
 }
 
 /** Комиссии по категориям WB. */
@@ -358,20 +364,25 @@ export class CommissionSyncService {
 
       const extraVol = Math.max(volumeLiters - 1, 0);
 
-      // Доставка последней мили до клиента (одинакова для FBO и FBS)
+      /**
+       * Формула WB: (base + liter × extraVol) × coef
+       * coef = boxDeliveryCoefExpr / 100  (WB хранит в %, напр. 160 → 1.60)
+       * Коэффициент меняется динамически, обновляется cron-ом ежедневно.
+       */
+      // Доставка последней мили WB → покупатель (одинакова для FBO и FBS)
       const deliveryCost = boxTariff
-        ? round2(boxTariff.boxDeliveryBase + boxTariff.boxDeliveryLiter * extraVol)
+        ? round2((boxTariff.boxDeliveryBase + boxTariff.boxDeliveryLiter * extraVol) * boxTariff.boxDeliveryCoef)
         : 0;
 
-      // Первая миля FBS: обработка/приёмка отправления на СЦ или ПВЗ WB
-      // Поле boxDeliveryMarketplaceBase/Liter из /api/v1/tariffs/box
+      // FBS первая миля: обработка/приёмка отправления на СЦ WB
+      // boxDeliveryMarketplaceBase × MarketplaceCoefExpr
       const fbsFirstMile = boxTariff && boxTariff.boxFirstMileBase > 0
-        ? round2(boxTariff.boxFirstMileBase + boxTariff.boxFirstMileLiter * extraVol)
+        ? round2((boxTariff.boxFirstMileBase + boxTariff.boxFirstMileLiter * extraVol) * boxTariff.boxFirstMileCoef)
         : 0;
 
-      // Стоимость хранения в день
+      // Хранение в день (для справки, сохраняется в rawData)
       const storageCostPerDay = boxTariff
-        ? round2(boxTariff.boxStorageBase + boxTariff.boxStorageLiter * extraVol)
+        ? round2((boxTariff.boxStorageBase + boxTariff.boxStorageLiter * extraVol) * boxTariff.boxStorageCoef)
         : 0;
 
       // Приёмка FBO — коэффициент × базовая стоимость за литр (≈50 ₽/л × коэф)
@@ -476,14 +487,16 @@ export class CommissionSyncService {
           response?: {
             data?: {
               warehouseList?: Array<{
-                warehouseName: string;
-                boxDeliveryBase: string;
-                boxDeliveryLiter: string;
-                // Первая миля FBS: обработка/приёмка отправления на СЦ/ПВЗ WB
+                warehouseName?: string;
+                boxDeliveryBase?: string;
+                boxDeliveryLiter?: string;
+                boxDeliveryCoefExpr?: string;
                 boxDeliveryMarketplaceBase?: string;
                 boxDeliveryMarketplaceLiter?: string;
-                boxStorageBase: string;
-                boxStorageLiter: string;
+                boxDeliveryMarketplaceCoefExpr?: string;
+                boxStorageBase?: string;
+                boxStorageLiter?: string;
+                boxStorageCoefExpr?: string;
               }>;
             };
           };
@@ -495,18 +508,25 @@ export class CommissionSyncService {
       );
       const list = data?.response?.data?.warehouseList;
       if (!list?.length) return null;
-      const p = (s: string | undefined) => parseFloat(String(s ?? '0').replace(',', '.').replace(/\s/g, '')) || 0;
-      // Предпочитаем Коледино/Подольск — самые репрезентативные склады
-      const wh =
-        list.find((w) => /коледино|подольск/i.test(w.warehouseName)) ?? list[0];
+
+      // Парсим строку WB → число: "11,2" → 11.2; "1 039" → 1039
+      const p = (s: string | undefined, fallback = 100) =>
+        parseFloat(String(s ?? fallback).replace(',', '.').replace(/\s/g, '')) || fallback;
+
+      // Предпочитаем Коледино/Подольск как наиболее репрезентативные московские склады
+      const wh = list.find((w) => /коледино|подольск/i.test(w.warehouseName ?? '')) ?? list[0];
+
       return {
-        warehouseName: wh.warehouseName,
-        boxDeliveryBase: p(wh.boxDeliveryBase),
-        boxDeliveryLiter: p(wh.boxDeliveryLiter),
-        boxFirstMileBase: p(wh.boxDeliveryMarketplaceBase),
-        boxFirstMileLiter: p(wh.boxDeliveryMarketplaceLiter),
-        boxStorageBase: p(wh.boxStorageBase),
-        boxStorageLiter: p(wh.boxStorageLiter),
+        warehouseName: wh.warehouseName ?? '—',
+        boxDeliveryBase:     p(wh.boxDeliveryBase, 0),
+        boxDeliveryLiter:    p(wh.boxDeliveryLiter, 0),
+        boxDeliveryCoef:     p(wh.boxDeliveryCoefExpr, 100) / 100,
+        boxFirstMileBase:    p(wh.boxDeliveryMarketplaceBase, 0),
+        boxFirstMileLiter:   p(wh.boxDeliveryMarketplaceLiter, 0),
+        boxFirstMileCoef:    p(wh.boxDeliveryMarketplaceCoefExpr, 100) / 100,
+        boxStorageBase:      p(wh.boxStorageBase, 0),
+        boxStorageLiter:     p(wh.boxStorageLiter, 0),
+        boxStorageCoef:      p(wh.boxStorageCoefExpr, 100) / 100,
       };
     } catch (e) {
       this.logger.warn(`[fetchWbBoxTariff] ${e instanceof Error ? e.message : String(e)}`);
