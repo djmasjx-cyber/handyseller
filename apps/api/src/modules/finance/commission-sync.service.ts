@@ -533,21 +533,37 @@ export class CommissionSyncService {
       const list = data?.response?.data?.warehouseList;
       if (!list?.length) return null;
 
-      // Парсим строку WB → число: "11,2" → 11.2; "1 039" → 1039
-      const p = (s: string | undefined, fallback = 100) =>
+      // Парсим строку WB → число: "11,2" → 11.2; "1 039" → 1039; fallback=0 для тарифных полей
+      const p = (s: string | undefined, fallback = 0) =>
         parseFloat(String(s ?? fallback).replace(',', '.').replace(/\s/g, '')) || fallback;
 
-      // Предпочитаем Коледино/Подольск как наиболее репрезентативные московские склады
-      const wh = list.find((w) => /коледино|подольск/i.test(w.warehouseName ?? '')) ?? list[0];
+      // WB распределяет FBO-товары по всем складам — стоимость доставки зависит от
+      // того, с какого склада идёт конкретный заказ. Используем СРЕДНЕЕ по всем
+      // складам с ненулевой базой доставки — это даёт реалистичную оценку для
+      // юнит-экономики (vs. отдельный склад типа Коледино, у которого ставка выше средней).
+      const avgNum = (values: number[]) =>
+        values.length ? Math.round((values.reduce((a, b) => a + b, 0) / values.length) * 100) / 100 : 0;
+
+      const deliveryBases = list.map((w) => p(w.boxDeliveryBase)).filter((v) => v > 0);
+      const deliveryLiters = list.map((w) => p(w.boxDeliveryLiter)).filter((v) => v > 0);
+      const firstMileBases = list.map((w) => p(w.boxDeliveryMarketplaceBase)).filter((v) => v > 0);
+      const firstMileLiters = list.map((w) => p(w.boxDeliveryMarketplaceLiter)).filter((v) => v > 0);
+      const storageBases = list.map((w) => p(w.boxStorageBase)).filter((v) => v > 0);
+      const storageLiters = list.map((w) => p(w.boxStorageLiter)).filter((v) => v > 0);
+
+      this.logger.log(
+        `[fetchWbBoxTariff] ${list.length} складов, delivery: avg=${avgNum(deliveryBases)}` +
+        ` min=${Math.min(...deliveryBases)} max=${Math.max(...deliveryBases)}`,
+      );
 
       return {
-        warehouseName:    wh.warehouseName ?? '—',
-        boxDeliveryBase:  p(wh.boxDeliveryBase, 0),
-        boxDeliveryLiter: p(wh.boxDeliveryLiter, 0),
-        boxFirstMileBase:  p(wh.boxDeliveryMarketplaceBase, 0),
-        boxFirstMileLiter: p(wh.boxDeliveryMarketplaceLiter, 0),
-        boxStorageBase:   p(wh.boxStorageBase, 0),
-        boxStorageLiter:  p(wh.boxStorageLiter, 0),
+        warehouseName:    `среднее по ${list.length} складам`,
+        boxDeliveryBase:  avgNum(deliveryBases),
+        boxDeliveryLiter: avgNum(deliveryLiters),
+        boxFirstMileBase:  avgNum(firstMileBases),
+        boxFirstMileLiter: avgNum(firstMileLiters),
+        boxStorageBase:   avgNum(storageBases),
+        boxStorageLiter:  avgNum(storageLiters),
       };
     } catch (e) {
       this.logger.warn(`[fetchWbBoxTariff] ${e instanceof Error ? e.message : String(e)}`);
