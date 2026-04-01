@@ -276,6 +276,7 @@ export class CommissionSyncService {
           });
           synced++;
         }
+      } // end for (const item of items)
 
       // Если страница неполная — это последняя страница
       if (items.length < LIMIT || !lastId) break;
