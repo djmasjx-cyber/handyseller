@@ -8,6 +8,8 @@ export interface MarketplaceCommissionBlock {
   returnAmt: number;
   acceptanceAmt: number;
   totalFeeAmt: number;
+  /** FBO only: стоимость хранения на складе в рублях за 1 день (извлекается из rawData) */
+  storageCostPerDay: number;
   syncedAt: string | null;
 }
 

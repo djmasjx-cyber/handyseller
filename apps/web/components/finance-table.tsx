@@ -21,6 +21,8 @@ interface MarketplaceCommissionBlock {
   returnAmt: number
   acceptanceAmt: number
   totalFeeAmt: number
+  /** FBO: стоимость хранения в рублях за 1 день */
+  storageCostPerDay: number
   syncedAt: string | null
 }
 
@@ -74,30 +76,61 @@ const fmtPct = (v: number) =>
 function MarketplaceCommissionColumns({
   block,
   price,
+  cost,
   mp,
+  storageDays,
 }: {
   block: MarketplaceCommissionBlock
   price: number | null
+  cost: number
   mp: string
+  storageDays: number
 }) {
   const col3 = getMpCol3Config(mp, block.scheme)
-  // totalFeeAmt уже включает returnAmt (скрытый столбец «Возвраты» учтён в итоге)
-  const isDeficit = price != null && price > 0 && price - block.totalFeeAmt < 0
-  const margin = price != null && price > 0 ? price - block.totalFeeAmt : null
+  const isFBO = block.scheme === "FBO"
+
+  // Хранение — только для FBO: storageCostPerDay × кол-во дней оборачиваемости
+  const storageTotal = isFBO ? block.storageCostPerDay * storageDays : 0
+
+  // totalFeeAmt из базы НЕ включает хранение (хранение динамическое, зависит от дней)
+  const totalWithStorage = block.totalFeeAmt + storageTotal
+
+  // Цена безубыточности: price = (cost + fixedFees) / (1 - commPct/100)
+  // fixedFees = logistics + acceptance/firstMile + return + storage
+  const commPct = block.salesCommissionPct / 100
+  const fixedFees =
+    block.logisticsAmt +
+    (col3 ? col3.value(block) : 0) +
+    block.returnAmt +
+    storageTotal
+  const breakEven =
+    commPct < 1 ? Math.ceil((cost + fixedFees) / (1 - commPct)) : null
+
+  const isDeficit = price != null && price > 0 && price - totalWithStorage < 0
+  const margin = price != null && price > 0 ? price - totalWithStorage : null
   const marginPct = margin != null && price && price > 0 ? (margin / price) * 100 : null
 
   return (
     <>
       {/* Комиссия % + ₽ */}
-      <td className="px-2 py-2 text-right text-sm tabular-nums text-muted-foreground">
+      <td className="px-2 py-2 text-right text-sm tabular-nums text-muted-foreground border-l">
         {fmtPct(block.salesCommissionPct)}
         <div className="text-xs">{fmt(block.salesCommissionAmt)} ₽</div>
       </td>
       {/* Логистика */}
       <td className="px-2 py-2 text-right text-sm tabular-nums">{fmt(block.logisticsAmt)} ₽</td>
-      {/* 3-й столбец: Фулфилмент / 1-я миля / Приёмка — или пустая ячейка для WB FBS */}
+      {/* 3-й столбец: Фулфилмент / 1-я миля / Приёмка — или пустая ячейка */}
       {col3 ? (
         <td className="px-2 py-2 text-right text-sm tabular-nums">{fmt(col3.value(block))} ₽</td>
+      ) : (
+        <td className="px-2 py-2 text-center text-xs text-muted-foreground">—</td>
+      )}
+      {/* Хранение: только для FBO, для FBS — прочерк */}
+      {isFBO ? (
+        <td className="px-2 py-2 text-right text-sm tabular-nums text-sky-600">
+          {fmt(storageTotal)} ₽
+          <div className="text-xs text-muted-foreground">{fmt(block.storageCostPerDay)}/день</div>
+        </td>
       ) : (
         <td className="px-2 py-2 text-center text-xs text-muted-foreground">—</td>
       )}
@@ -110,9 +143,9 @@ function MarketplaceCommissionColumns({
           isDeficit ? "text-destructive" : "text-foreground"
         }`}
       >
-        {fmt(block.totalFeeAmt)} ₽
+        {fmt(totalWithStorage)} ₽
       </td>
-      {/* Маржа */}
+      {/* Маржа + цена безубыточности */}
       <td
         className={`px-2 py-2 text-right text-sm font-semibold tabular-nums ${
           marginPct == null
@@ -131,6 +164,11 @@ function MarketplaceCommissionColumns({
           </>
         ) : (
           <span className="text-muted-foreground text-xs">нет цены</span>
+        )}
+        {breakEven != null && (
+          <div className="text-xs text-muted-foreground font-normal mt-0.5" title="Минимальная цена при маржа = 0">
+            б/у: {fmt(breakEven)} ₽
+          </div>
         )}
       </td>
     </>
@@ -242,6 +280,8 @@ export function FinanceTable({ scheme }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [syncedAt, setSyncedAt] = useState<string | null>(null)
   const [mounted, setMounted] = useState(false)
+  /** Оборачиваемость для расчёта хранения FBO (дней) */
+  const [storageDays, setStorageDays] = useState(30)
 
   useEffect(() => { setMounted(true) }, [])
 
@@ -322,7 +362,21 @@ export function FinanceTable({ scheme }: Props) {
             )}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3 flex-wrap">
+          {scheme === "FBO" && (
+            <label className="flex items-center gap-2 text-sm text-muted-foreground">
+              <span>Оборачиваемость:</span>
+              <input
+                type="number"
+                min={1}
+                max={365}
+                value={storageDays}
+                onChange={(e) => setStorageDays(Math.max(1, Math.min(365, Number(e.target.value) || 30)))}
+                className="w-16 rounded border border-input px-2 py-0.5 text-sm text-right bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+              <span>дней</span>
+            </label>
+          )}
           <Button variant="outline" size="sm" onClick={handleSync} disabled={syncing}>
             {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
             <span className="ml-1.5">{syncing ? "Синхронизация..." : "Обновить тарифы"}</span>
@@ -336,6 +390,7 @@ export function FinanceTable({ scheme }: Props) {
         <span>
           Данные по Ozon — точные суммы из API. Данные по WB — расчётные по тарифам и габаритам товара (≈ оценка).
           Нажмите «Обновить тарифы» для актуализации. Маржа рассчитана от цены продажи без учёта налогов.
+          {scheme === "FBO" && " Хранение рассчитывается как стоимость/день × оборачиваемость. «Б/у» — цена безубыточности (маржа = 0)."}
         </span>
       </div>
 
@@ -373,12 +428,12 @@ export function FinanceTable({ scheme }: Props) {
                 <th className="text-right font-medium px-2 py-2" rowSpan={2}>Себест. ₽</th>
                 {marketplaces.map((mp) => {
                   const meta = MP_META[mp] ?? { label: mp, color: "#888", textColor: "#fff" }
-                  // 5 cols: комиссия, логистика, 3-й (приёмка/1-я миля/—), итого, маржа
+                  // 6 cols: комиссия, логистика, 3-й (приёмка/1-я миля/—), хранение, итого, маржа
                   // Возврат скрыт (учтён в итого)
                   return (
                     <th
                       key={mp}
-                      colSpan={5}
+                      colSpan={6}
                       className="px-2 py-2 text-center font-semibold text-xs tracking-wide border-l"
                       style={{ backgroundColor: meta.color, color: meta.textColor }}
                     >
@@ -398,11 +453,15 @@ export function FinanceTable({ scheme }: Props) {
                       <th key={`${mp}-acc`} className="px-2 py-1.5 text-right font-medium">
                         {col3?.label ?? "—"}
                       </th>
+                      {/* Хранение: для FBO показываем ×дней, для FBS — «—» */}
+                      <th key={`${mp}-str`} className="px-2 py-1.5 text-right font-medium text-sky-700">
+                        {scheme === "FBO" ? `Хранение ×${storageDays}д` : "Хранение"}
+                      </th>
                       {/* Столбец Возврат скрыт — учтён в «Итого»
                       <th key={`${mp}-ret`} className="px-2 py-1.5 text-right font-medium">Возврат</th>
                       */}
                       <th key={`${mp}-tot`} className="px-2 py-1.5 text-right font-medium">Итого</th>
-                      <th key={`${mp}-mrg`} className="px-2 py-1.5 text-right font-medium">Маржа</th>
+                      <th key={`${mp}-mrg`} className="px-2 py-1.5 text-right font-medium">Маржа / б/у</th>
                     </>
                   )
                 })}
@@ -463,14 +522,21 @@ export function FinanceTable({ scheme }: Props) {
                       if (!block) {
                         return (
                           <>
-                            {Array.from({ length: 5 }).map((_, i) => (
+                            {Array.from({ length: 6 }).map((_, i) => (
                               <td key={`${mp}-empty-${i}`} className="px-2 py-2 text-center text-xs text-muted-foreground border-l first:border-l">—</td>
                             ))}
                           </>
                         )
                       }
                       return (
-                        <MarketplaceCommissionColumns key={mp} block={block} price={row.price} mp={mp} />
+                        <MarketplaceCommissionColumns
+                          key={mp}
+                          block={block}
+                          price={row.price}
+                          cost={row.cost}
+                          mp={mp}
+                          storageDays={storageDays}
+                        />
                       )
                     })}
                   </tr>

@@ -24,6 +24,19 @@ export class FinanceService {
         price: true,
         commissions: {
           where: scheme ? { scheme } : undefined,
+          select: {
+            marketplace: true,
+            scheme: true,
+            salesCommissionPct: true,
+            salesCommissionAmt: true,
+            logisticsAmt: true,
+            firstMileAmt: true,
+            returnAmt: true,
+            acceptanceAmt: true,
+            totalFeeAmt: true,
+            syncedAt: true,
+            rawData: true,
+          },
           orderBy: [{ marketplace: 'asc' }, { scheme: 'asc' }],
         },
       },
@@ -38,18 +51,24 @@ export class FinanceService {
       imageUrl: p.imageUrl ?? null,
       cost: Number(p.cost ?? 0),
       price: p.price != null ? Number(p.price) : null,
-      commissions: p.commissions.map((c) => ({
-        marketplace: c.marketplace,
-        scheme: c.scheme,
-        salesCommissionPct: Number(c.salesCommissionPct),
-        salesCommissionAmt: Number(c.salesCommissionAmt),
-        logisticsAmt: Number(c.logisticsAmt),
-        firstMileAmt: Number(c.firstMileAmt),
-        returnAmt: Number(c.returnAmt),
-        acceptanceAmt: Number(c.acceptanceAmt),
-        totalFeeAmt: Number(c.totalFeeAmt),
-        syncedAt: c.syncedAt?.toISOString() ?? null,
-      })),
+      commissions: p.commissions.map((c) => {
+        const raw = c.rawData as Record<string, unknown> | null;
+        const storageCostPerDay =
+          typeof raw?.storageCostPerDay === 'number' ? raw.storageCostPerDay : 0;
+        return {
+          marketplace: c.marketplace,
+          scheme: c.scheme,
+          salesCommissionPct: Number(c.salesCommissionPct),
+          salesCommissionAmt: Number(c.salesCommissionAmt),
+          logisticsAmt: Number(c.logisticsAmt),
+          firstMileAmt: Number(c.firstMileAmt),
+          returnAmt: Number(c.returnAmt),
+          acceptanceAmt: Number(c.acceptanceAmt),
+          totalFeeAmt: Number(c.totalFeeAmt),
+          storageCostPerDay,
+          syncedAt: c.syncedAt?.toISOString() ?? null,
+        };
+      }),
     }));
   }
 
