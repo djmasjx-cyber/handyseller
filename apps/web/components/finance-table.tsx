@@ -46,6 +46,20 @@ const MP_META: Record<string, { label: string; color: string; textColor: string 
   AVITO: { label: "Avito", color: "#00AAFF", textColor: "#ffffff" },
 }
 
+/**
+ * Конфигурация 3-го столбца блока (после комиссии и логистики) — зависит от маркетплейса и схемы.
+ * У WB нет понятия «первая миля», поэтому для WB FBS 3-й столбец отсутствует.
+ */
+function getMpCol3Config(mp: string, scheme: string): { label: string; value: (b: MarketplaceCommissionBlock) => number } | null {
+  if (mp === "WILDBERRIES") {
+    if (scheme === "FBO") return { label: "Приёмка", value: (b) => b.acceptanceAmt }
+    return null // WB FBS: нет 1-й мили и нет приёмки
+  }
+  // Ozon и другие площадки
+  if (scheme === "FBO") return { label: "Фулфилмент", value: (b) => b.acceptanceAmt }
+  return { label: "1-я миля", value: (b) => b.firstMileAmt }
+}
+
 const fmt = (v: number) =>
   v.toLocaleString("ru-RU", { minimumFractionDigits: 0, maximumFractionDigits: 2 })
 
@@ -56,25 +70,40 @@ const fmtPct = (v: number) =>
 // Sub-components
 // ---------------------------------------------------------------------------
 
-function MarketplaceCommissionColumns({ block, price }: { block: MarketplaceCommissionBlock; price: number | null }) {
+function MarketplaceCommissionColumns({
+  block,
+  price,
+  mp,
+}: {
+  block: MarketplaceCommissionBlock
+  price: number | null
+  mp: string
+}) {
+  const col3 = getMpCol3Config(mp, block.scheme)
+  // totalFeeAmt уже включает returnAmt (скрытый столбец «Возвраты» учтён в итоге)
   const isDeficit = price != null && price > 0 && price - block.totalFeeAmt < 0
   const margin = price != null && price > 0 ? price - block.totalFeeAmt : null
   const marginPct = margin != null && price && price > 0 ? (margin / price) * 100 : null
 
   return (
     <>
+      {/* Комиссия % + ₽ */}
       <td className="px-2 py-2 text-right text-sm tabular-nums text-muted-foreground">
         {fmtPct(block.salesCommissionPct)}
         <div className="text-xs">{fmt(block.salesCommissionAmt)} ₽</div>
       </td>
+      {/* Логистика */}
       <td className="px-2 py-2 text-right text-sm tabular-nums">{fmt(block.logisticsAmt)} ₽</td>
-      {block.scheme === "FBO" && (
-        <td className="px-2 py-2 text-right text-sm tabular-nums">{fmt(block.acceptanceAmt)} ₽</td>
+      {/* 3-й столбец: Фулфилмент / 1-я миля / Приёмка — или пустая ячейка для WB FBS */}
+      {col3 ? (
+        <td className="px-2 py-2 text-right text-sm tabular-nums">{fmt(col3.value(block))} ₽</td>
+      ) : (
+        <td className="px-2 py-2 text-center text-xs text-muted-foreground">—</td>
       )}
-      {block.scheme === "FBS" && (
-        <td className="px-2 py-2 text-right text-sm tabular-nums">{fmt(block.firstMileAmt)} ₽</td>
-      )}
+      {/* Возврат — скрыт, но учтён в totalFeeAmt
       <td className="px-2 py-2 text-right text-sm tabular-nums">{fmt(block.returnAmt)} ₽</td>
+      */}
+      {/* Итого */}
       <td
         className={`px-2 py-2 text-right text-sm font-semibold tabular-nums ${
           isDeficit ? "text-destructive" : "text-foreground"
@@ -82,9 +111,16 @@ function MarketplaceCommissionColumns({ block, price }: { block: MarketplaceComm
       >
         {fmt(block.totalFeeAmt)} ₽
       </td>
+      {/* Маржа */}
       <td
         className={`px-2 py-2 text-right text-sm font-semibold tabular-nums ${
-          marginPct == null ? "text-muted-foreground" : marginPct < 0 ? "text-destructive" : marginPct < 15 ? "text-amber-500" : "text-green-600"
+          marginPct == null
+            ? "text-muted-foreground"
+            : marginPct < 0
+            ? "text-destructive"
+            : marginPct < 15
+            ? "text-amber-500"
+            : "text-green-600"
         }`}
       >
         {marginPct != null ? (
@@ -336,12 +372,12 @@ export function FinanceTable({ scheme }: Props) {
                 <th className="text-right font-medium px-2 py-2" rowSpan={2}>Себест. ₽</th>
                 {marketplaces.map((mp) => {
                   const meta = MP_META[mp] ?? { label: mp, color: "#888", textColor: "#fff" }
-                  // FBO: 6 cols (комиссия, логистика, приёмка, возврат, итого, маржа)
-                  // FBS: 6 cols (комиссия, логистика, first mile, возврат, итого, маржа)
+                  // 5 cols: комиссия, логистика, 3-й (приёмка/1-я миля/—), итого, маржа
+                  // Возврат скрыт (учтён в итого)
                   return (
                     <th
                       key={mp}
-                      colSpan={6}
+                      colSpan={5}
                       className="px-2 py-2 text-center font-semibold text-xs tracking-wide border-l"
                       style={{ backgroundColor: meta.color, color: meta.textColor }}
                     >
@@ -352,18 +388,23 @@ export function FinanceTable({ scheme }: Props) {
               </tr>
               {/* Row 2: sub-column headers */}
               <tr className="border-b bg-muted/30 text-xs text-muted-foreground">
-                {marketplaces.map((mp) => (
-                  <>
-                    <th key={`${mp}-com`} className="px-2 py-1.5 text-right font-medium border-l">Комиссия</th>
-                    <th key={`${mp}-log`} className="px-2 py-1.5 text-right font-medium">Логистика</th>
-                    <th key={`${mp}-acc`} className="px-2 py-1.5 text-right font-medium">
-                      {scheme === "FBO" ? "Приёмка" : "1-я миля"}
-                    </th>
-                    <th key={`${mp}-ret`} className="px-2 py-1.5 text-right font-medium">Возврат</th>
-                    <th key={`${mp}-tot`} className="px-2 py-1.5 text-right font-medium">Итого</th>
-                    <th key={`${mp}-mrg`} className="px-2 py-1.5 text-right font-medium">Маржа</th>
-                  </>
-                ))}
+                {marketplaces.map((mp) => {
+                  const col3 = getMpCol3Config(mp, scheme)
+                  return (
+                    <>
+                      <th key={`${mp}-com`} className="px-2 py-1.5 text-right font-medium border-l">Комиссия</th>
+                      <th key={`${mp}-log`} className="px-2 py-1.5 text-right font-medium">Логистика</th>
+                      <th key={`${mp}-acc`} className="px-2 py-1.5 text-right font-medium">
+                        {col3?.label ?? "—"}
+                      </th>
+                      {/* Столбец Возврат скрыт — учтён в «Итого»
+                      <th key={`${mp}-ret`} className="px-2 py-1.5 text-right font-medium">Возврат</th>
+                      */}
+                      <th key={`${mp}-tot`} className="px-2 py-1.5 text-right font-medium">Итого</th>
+                      <th key={`${mp}-mrg`} className="px-2 py-1.5 text-right font-medium">Маржа</th>
+                    </>
+                  )
+                })}
               </tr>
             </thead>
             <tbody>
@@ -421,14 +462,14 @@ export function FinanceTable({ scheme }: Props) {
                       if (!block) {
                         return (
                           <>
-                            {Array.from({ length: 6 }).map((_, i) => (
+                            {Array.from({ length: 5 }).map((_, i) => (
                               <td key={`${mp}-empty-${i}`} className="px-2 py-2 text-center text-xs text-muted-foreground border-l first:border-l">—</td>
                             ))}
                           </>
                         )
                       }
                       return (
-                        <MarketplaceCommissionColumns key={mp} block={block} price={row.price} />
+                        <MarketplaceCommissionColumns key={mp} block={block} price={row.price} mp={mp} />
                       )
                     })}
                   </tr>
