@@ -1,9 +1,37 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/database/prisma.service';
 import { CryptoService } from '../../common/crypto/crypto.service';
-import { MarketplaceAdapterFactory } from '../marketplaces/adapters/marketplace-adapter.factory';
+
+/** Поля комиссий из ответа Ozon POST /v5/product/info/prices. */
+interface OzonV5Commissions {
+  sales_percent_fbo?: number;
+  sales_percent_fbs?: number;
+  fbo_deliv_to_customer_amount?: number;
+  fbo_direct_flow_trans_min_amount?: number;
+  fbo_direct_flow_trans_max_amount?: number;
+  fbo_return_flow_amount?: number;
+  fbo_return_flow_trans_min_amount?: number;
+  fbo_return_flow_trans_max_amount?: number;
+  fbo_fulfillment_amount?: number;
+  fbs_deliv_to_customer_amount?: number;
+  fbs_first_mile_min_amount?: number;
+  fbs_first_mile_max_amount?: number;
+  fbs_return_flow_amount?: number;
+  fbs_return_flow_trans_min_amount?: number;
+  fbs_return_flow_trans_max_amount?: number;
+  fbs_direct_flow_trans_min_amount?: number;
+  fbs_direct_flow_trans_max_amount?: number;
+}
+
+interface OzonV5Item {
+  offer_id: string;
+  product_id: number;
+  price?: { price?: string };
+  commissions?: OzonV5Commissions;
+}
 
 /** Тарифы WB для логистики коробок — кешируются в рамках одной синхронизации. */
 interface WbBoxTariff {
@@ -30,7 +58,6 @@ export class CommissionSyncService {
     private readonly prisma: PrismaService,
     private readonly crypto: CryptoService,
     private readonly httpService: HttpService,
-    private readonly adapterFactory: MarketplaceAdapterFactory,
   ) {}
 
   /** Синхронизировать комиссии для всех подключённых маркетплейсов пользователя. */
@@ -53,8 +80,20 @@ export class CommissionSyncService {
   // ---------------------------------------------------------------------------
 
   /**
-   * Получает комиссии из Ozon /v1/product/info/commission для всех товаров пользователя,
-   * у которых есть маппинг на Ozon. Делает upsert в product_marketplace_commission.
+   * Получает комиссии из Ozon POST /v5/product/info/prices (актуальный эндпоинт) с пагинацией
+   * через last_id. Для каждого товара с маппингом делает upsert в product_marketplace_commission.
+   *
+   * Маппинг полей v5 → DB:
+   *  FBO: salesCommissionAmt = price × sales_percent_fbo
+   *       logisticsAmt       = fbo_deliv_to_customer_amount   (последняя миля)
+   *       firstMileAmt       = fbo_direct_flow_trans_min_amount (магистраль/транзит)
+   *       acceptanceAmt      = fbo_fulfillment_amount         (фулфилмент/обработка на складе)
+   *       returnAmt          = fbo_return_flow_amount + fbo_return_flow_trans_min_amount
+   *  FBS: salesCommissionAmt = price × sales_percent_fbs
+   *       logisticsAmt       = fbs_deliv_to_customer_amount
+   *       firstMileAmt       = fbs_first_mile_min_amount
+   *       acceptanceAmt      = 0  (нет размещения на складе Ozon)
+   *       returnAmt          = fbs_return_flow_amount + fbs_return_flow_trans_min_amount
    */
   async syncOzonCommissions(userId: string): Promise<number> {
     const conn = await this.prisma.marketplaceConnection.findFirst({
@@ -71,53 +110,36 @@ export class CommissionSyncService {
     }
     const clientId = conn.sellerId ?? '';
 
-    // Получаем товары пользователя с маппингом на Ozon
+    // Строим индекс локальных маппингов по offer_id и product_id для O(1) поиска
     const mappings = await this.prisma.productMarketplaceMapping.findMany({
       where: { userId, marketplace: 'OZON', isActive: true },
       include: { product: { select: { id: true, price: true } } },
     });
     if (mappings.length === 0) return 0;
 
-    // Ozon принимает offer_id или product_id батчами до 1000
-    const BATCH = 100;
+    const byOfferId = new Map<string, (typeof mappings)[0]>();
+    const byProductId = new Map<string, (typeof mappings)[0]>();
+    for (const m of mappings) {
+      if (m.externalArticle) byOfferId.set(m.externalArticle, m);
+      if (m.externalSystemId) byProductId.set(String(m.externalSystemId), m);
+    }
+
+    const LIMIT = 1000;
+    let lastId = '';
     let synced = 0;
 
-    for (let i = 0; i < mappings.length; i += BATCH) {
-      const batch = mappings.slice(i, i + BATCH);
-
-      // Используем externalArticle как offer_id (если есть), иначе externalSystemId как product_id
-      const items = batch.map((m) => ({
-        offer_id: m.externalArticle ?? '',
-        product_id: Number(m.externalSystemId) || 0,
-        mapping: m,
-      }));
-
+    // Пагинируем через last_id пока возвращаются товары
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      let items: OzonV5Item[] = [];
       try {
         const { data } = await firstValueFrom(
-          this.httpService.post<{
-            result?: Array<{
-              offer_id: string;
-              product_id: number;
-              commissions?: {
-                sales_percent_fbo?: number;
-                sales_percent_fbs?: number;
-                fbo_deliv_to_customer_amount?: number;
-                fbo_direct_flow_trans_max_amount?: number;
-                fbo_direct_flow_trans_min_amount?: number;
-                fbo_return_flow_amount?: number;
-                fbs_deliv_to_customer_amount?: number;
-                fbs_direct_flow_trans_max_amount?: number;
-                fbs_direct_flow_trans_min_amount?: number;
-                fbs_first_mile_max_amount?: number;
-                fbs_first_mile_min_amount?: number;
-                fbs_return_flow_amount?: number;
-              };
-            }>;
-          }>(
-            'https://api-seller.ozon.ru/v1/product/info/commission',
+          this.httpService.post<{ items?: OzonV5Item[]; last_id?: string; total?: number }>(
+            'https://api-seller.ozon.ru/v5/product/info/prices',
             {
-              offer_id: items.filter((it) => it.offer_id).map((it) => it.offer_id),
-              product_id: items.filter((it) => it.product_id).map((it) => it.product_id),
+              filter: { visibility: 'ALL' },
+              limit: LIMIT,
+              ...(lastId ? { last_id: lastId } : {}),
             },
             {
               headers: {
@@ -129,74 +151,90 @@ export class CommissionSyncService {
             },
           ),
         );
+        items = data?.items ?? [];
+        lastId = data?.last_id ?? '';
+      } catch (e) {
+        this.logger.warn(
+          `[syncOzonCommissions] HTTP error for ${userId}: ${e instanceof Error ? e.message : String(e)}`,
+        );
+        break;
+      }
 
-        const results = data?.result ?? [];
-        for (const r of results) {
-          const c = r.commissions;
-          if (!c) continue;
+      for (const item of items) {
+        const c = item.commissions;
+        if (!c) continue;
 
-          // Найти маппинг по offer_id или product_id
-          const mapping = batch.find(
-            (m) =>
-              (r.offer_id && m.externalArticle === r.offer_id) ||
-              (r.product_id && String(m.externalSystemId) === String(r.product_id)),
-          );
-          if (!mapping) continue;
+        const mapping =
+          (item.offer_id ? byOfferId.get(item.offer_id) : undefined) ??
+          (item.product_id ? byProductId.get(String(item.product_id)) : undefined);
+        if (!mapping) continue;
 
-          const productPrice = Number(mapping.product?.price ?? 0);
+        // Цена из маппинга (лок.), либо из ответа v5
+        const productPrice =
+          Number(mapping.product?.price ?? 0) ||
+          Number(item.price?.price ?? 0);
 
-          const fboSalesPct = Number(c.sales_percent_fbo ?? 0);
-          const fbsSalesPct = Number(c.sales_percent_fbs ?? 0);
-          const fboLogistics = Number(c.fbo_deliv_to_customer_amount ?? 0);
-          const fboFirstMile = Number(c.fbo_direct_flow_trans_min_amount ?? 0);
-          const fboReturn = Number(c.fbo_return_flow_amount ?? 0);
-          const fbsLogistics = Number(c.fbs_deliv_to_customer_amount ?? 0);
-          const fbsFirstMile = Number(c.fbs_first_mile_min_amount ?? 0);
-          const fbsReturn = Number(c.fbs_return_flow_amount ?? 0);
+        const fboSalesPct = Number(c.sales_percent_fbo ?? 0);
+        const fbsSalesPct = Number(c.sales_percent_fbs ?? 0);
 
-          const fboSalesAmt = productPrice > 0 ? Math.round((productPrice * fboSalesPct) / 100 * 100) / 100 : 0;
-          const fbsSalesAmt = productPrice > 0 ? Math.round((productPrice * fbsSalesPct) / 100 * 100) / 100 : 0;
+        const fboSalesAmt = productPrice > 0 ? Math.round((productPrice * fboSalesPct) / 100 * 100) / 100 : 0;
+        const fbsSalesAmt = productPrice > 0 ? Math.round((productPrice * fbsSalesPct) / 100 * 100) / 100 : 0;
 
-          const upsertData = [
-            {
-              scheme: 'FBO',
-              salesCommissionPct: fboSalesPct,
-              salesCommissionAmt: fboSalesAmt,
-              logisticsAmt: fboLogistics,
-              firstMileAmt: fboFirstMile,
-              returnAmt: fboReturn,
-              acceptanceAmt: 0,
-              totalFeeAmt: Math.round((fboSalesAmt + fboLogistics + fboFirstMile + fboReturn) * 100) / 100,
-              rawData: c as Record<string, unknown>,
-            },
-            {
-              scheme: 'FBS',
-              salesCommissionPct: fbsSalesPct,
-              salesCommissionAmt: fbsSalesAmt,
-              logisticsAmt: fbsLogistics,
-              firstMileAmt: fbsFirstMile,
-              returnAmt: fbsReturn,
-              acceptanceAmt: 0,
-              totalFeeAmt: Math.round((fbsSalesAmt + fbsLogistics + fbsFirstMile + fbsReturn) * 100) / 100,
-              rawData: c as Record<string, unknown>,
-            },
-          ];
+        const fboLogistics    = Number(c.fbo_deliv_to_customer_amount       ?? 0);
+        const fboFirstMile    = Number(c.fbo_direct_flow_trans_min_amount   ?? 0);
+        const fboFulfillment  = Number(c.fbo_fulfillment_amount             ?? 0);
+        const fboReturn       = round2(
+          Number(c.fbo_return_flow_amount               ?? 0) +
+          Number(c.fbo_return_flow_trans_min_amount     ?? 0),
+        );
 
-          for (const d of upsertData) {
-            await this.prisma.productMarketplaceCommission.upsert({
-              where: {
-                productId_marketplace_scheme: {
-                  productId: mapping.productId,
-                  marketplace: 'OZON',
-                  scheme: d.scheme,
-                },
-              },
-              create: {
+        const fbsLogistics    = Number(c.fbs_deliv_to_customer_amount       ?? 0);
+        const fbsFirstMile    = Number(c.fbs_first_mile_min_amount          ?? 0);
+        const fbsReturn       = round2(
+          Number(c.fbs_return_flow_amount               ?? 0) +
+          Number(c.fbs_return_flow_trans_min_amount     ?? 0),
+        );
+
+        const upsertData = [
+          {
+            scheme: 'FBO',
+            salesCommissionPct: fboSalesPct,
+            salesCommissionAmt: fboSalesAmt,
+            logisticsAmt:       fboLogistics,
+            firstMileAmt:       fboFirstMile,
+            acceptanceAmt:      fboFulfillment,
+            returnAmt:          fboReturn,
+            totalFeeAmt: round2(fboSalesAmt + fboLogistics + fboFirstMile + fboFulfillment + fboReturn),
+            rawData: c as unknown as Prisma.InputJsonValue,
+          },
+          {
+            scheme: 'FBS',
+            salesCommissionPct: fbsSalesPct,
+            salesCommissionAmt: fbsSalesAmt,
+            logisticsAmt:       fbsLogistics,
+            firstMileAmt:       fbsFirstMile,
+            acceptanceAmt:      0,
+            returnAmt:          fbsReturn,
+            totalFeeAmt: round2(fbsSalesAmt + fbsLogistics + fbsFirstMile + fbsReturn),
+            rawData: c as unknown as Prisma.InputJsonValue,
+          },
+        ];
+
+        for (const d of upsertData) {
+          await this.prisma.productMarketplaceCommission.upsert({
+            where: {
+              productId_marketplace_scheme: {
                 productId: mapping.productId,
                 marketplace: 'OZON',
                 scheme: d.scheme,
-                salesCommissionPct: d.salesCommissionPct,
-                salesCommissionAmt: d.salesCommissionAmt,
+              },
+            },
+            create: {
+              productId: mapping.productId,
+              marketplace: 'OZON',
+              scheme: d.scheme,
+              salesCommissionPct: d.salesCommissionPct,
+              salesCommissionAmt: d.salesCommissionAmt,
                 logisticsAmt: d.logisticsAmt,
                 firstMileAmt: d.firstMileAmt,
                 returnAmt: d.returnAmt,
@@ -220,12 +258,10 @@ export class CommissionSyncService {
             synced++;
           }
         }
-      } catch (e) {
-        this.logger.warn(
-          `[syncOzonCommissions] Ошибка батча ${i}-${i + BATCH}: ${e instanceof Error ? e.message : String(e)}`,
-        );
-      }
-    }
+
+      // Если страница неполная — это последняя страница
+      if (items.length < LIMIT || !lastId) break;
+    } // end while
 
     this.logger.log(`[syncOzonCommissions] userId=${userId} synced=${synced}`);
     return synced;
@@ -385,7 +421,7 @@ export class CommissionSyncService {
             syncedAt: new Date(),
             rawData: { subjectId: wbSubjectId, volumeLiters, storageCostPerDay: d.storageCostPerDay },
           },
-        }).catch((e) =>
+        }).catch((e: unknown) =>
           this.logger.warn(`[syncWbCommissions] upsert error: ${e instanceof Error ? e.message : String(e)}`),
         );
         synced++;
@@ -499,4 +535,9 @@ export class CommissionSyncService {
       return 1;
     }
   }
+}
+
+/** Округление до 2 знаков. */
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
 }
