@@ -91,26 +91,19 @@ function MarketplaceCommissionColumns({
   // Цена на этом маркетплейсе (0 = ещё не синкалась)
   const price = block.marketplacePrice > 0 ? block.marketplacePrice : null
 
+  // Маржа считается от totalFeeAmt (хранение, б/у и оборачиваемость временно скрыты)
+  const isDeficit = price != null && price > 0 && price - block.totalFeeAmt < 0
+  const margin = price != null && price > 0 ? price - block.totalFeeAmt : null
+  const marginPct = margin != null && price && price > 0 ? (margin / price) * 100 : null
+
+  /* --- Временно скрыто: хранение FBO и цена безубыточности ---
   // Хранение — только для FBO: storageCostPerDay × кол-во дней оборачиваемости
   const storageTotal = isFBO ? block.storageCostPerDay * storageDays : 0
-
-  // totalFeeAmt из базы НЕ включает хранение (хранение динамическое, зависит от дней)
-  const totalWithStorage = block.totalFeeAmt + storageTotal
-
-  // Цена безубыточности: price = (cost + fixedFees) / (1 - commPct/100)
-  // fixedFees = logistics + acceptance/firstMile + return + storage
+  // Цена безубыточности: breakEven = (cost + fixedFees) / (1 - commPct/100)
   const commPct = block.salesCommissionPct / 100
-  const fixedFees =
-    block.logisticsAmt +
-    (col3 ? col3.value(block) : 0) +
-    block.returnAmt +
-    storageTotal
-  const breakEven =
-    commPct < 1 ? Math.ceil((cost + fixedFees) / (1 - commPct)) : null
-
-  const isDeficit = price != null && price > 0 && price - totalWithStorage < 0
-  const margin = price != null && price > 0 ? price - totalWithStorage : null
-  const marginPct = margin != null && price && price > 0 ? (margin / price) * 100 : null
+  const fixedFees = block.logisticsAmt + (col3 ? col3.value(block) : 0) + block.returnAmt + storageTotal
+  const breakEven = commPct < 1 ? Math.ceil((cost + fixedFees) / (1 - commPct)) : null
+  --- *\//
 
   return (
     <>
@@ -135,7 +128,7 @@ function MarketplaceCommissionColumns({
       ) : (
         <td className="px-2 py-2 text-center text-xs text-muted-foreground">—</td>
       )}
-      {/* Хранение: только для FBO, для FBS — прочерк */}
+      {/* Хранение — временно скрыто (будет после подключения синка цен)
       {isFBO ? (
         <td className="px-2 py-2 text-right text-sm tabular-nums text-sky-600">
           {fmt(storageTotal)} ₽
@@ -144,7 +137,8 @@ function MarketplaceCommissionColumns({
       ) : (
         <td className="px-2 py-2 text-center text-xs text-muted-foreground">—</td>
       )}
-      {/* Возврат — скрыт, но учтён в totalFeeAmt
+      */}
+      {/* Возврат — скрыт, учтён в totalFeeAmt
       <td className="px-2 py-2 text-right text-sm tabular-nums">{fmt(block.returnAmt)} ₽</td>
       */}
       {/* Итого */}
@@ -153,9 +147,9 @@ function MarketplaceCommissionColumns({
           isDeficit ? "text-destructive" : "text-foreground"
         }`}
       >
-        {fmt(totalWithStorage)} ₽
+        {fmt(block.totalFeeAmt)} ₽
       </td>
-      {/* Маржа + цена безубыточности */}
+      {/* Маржа */}
       <td
         className={`px-2 py-2 text-right text-sm font-semibold tabular-nums ${
           marginPct == null
@@ -175,11 +169,13 @@ function MarketplaceCommissionColumns({
         ) : (
           <span className="text-muted-foreground text-xs">нет цены</span>
         )}
+        {/* Цена безубыточности — временно скрыта
         {breakEven != null && (
-          <div className="text-xs text-muted-foreground font-normal mt-0.5" title="Минимальная цена при маржа = 0">
+          <div className="text-xs text-muted-foreground font-normal mt-0.5">
             б/у: {fmt(breakEven)} ₽
           </div>
         )}
+        */}
       </td>
     </>
   )
@@ -373,20 +369,18 @@ export function FinanceTable({ scheme }: Props) {
           </p>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
+          {/* Оборачиваемость — временно скрыта (нет синка цен с маркетов)
           {scheme === "FBO" && (
             <label className="flex items-center gap-2 text-sm text-muted-foreground">
               <span>Оборачиваемость:</span>
-              <input
-                type="number"
-                min={1}
-                max={365}
-                value={storageDays}
+              <input type="number" min={1} max={365} value={storageDays}
                 onChange={(e) => setStorageDays(Math.max(1, Math.min(365, Number(e.target.value) || 30)))}
                 className="w-16 rounded border border-input px-2 py-0.5 text-sm text-right bg-background focus:outline-none focus:ring-1 focus:ring-primary"
               />
               <span>дней</span>
             </label>
           )}
+          */}
           <Button variant="outline" size="sm" onClick={handleSync} disabled={syncing}>
             {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
             <span className="ml-1.5">{syncing ? "Синхронизация..." : "Обновить тарифы"}</span>
@@ -400,16 +394,13 @@ export function FinanceTable({ scheme }: Props) {
         <div className="space-y-1">
           <p className="font-medium">Данные носят ориентировочный характер</p>
           <p>
-            Цены берутся из последней синхронизации с маркетплейсом.
+            Цены появятся после нажатия «Обновить тарифы» — они берутся из последней синхронизации с маркетплейсом.
             Комиссии Ozon — точные данные из API. Комиссии и логистика WB — <em>расчётные</em>: усреднены
-            по тарифам всех складов, умножены на объём товара из карточки. Фактические списания в отчёте
-            WB могут отличаться из-за акций, СПП, динамических складских коэффициентов и округлений.
-            {scheme === "FBO" && " Хранение = тариф/день × оборачиваемость (настраивается выше)."}
-            {" "}«Б/у» — цена безубыточности: минимальная цена при нулевой марже.
+            по тарифам всех складов и умножены на объём товара из карточки. Фактические списания могут
+            отличаться из-за акций, СПП и динамических коэффициентов.
           </p>
           <p className="text-xs opacity-80">
-            Используйте как инструмент для первичного анализа ценообразования, а не для точных финансовых расчётов.
-            Нажмите «Обновить тарифы» чтобы актуализировать данные.
+            Используйте страницу как инструмент для первичного анализа ценообразования, а не для точной финансовой отчётности.
           </p>
         </div>
       </div>
@@ -447,12 +438,12 @@ export function FinanceTable({ scheme }: Props) {
                 <th className="text-right font-medium px-2 py-2" rowSpan={2}>Себест. ₽</th>
                 {marketplaces.map((mp) => {
                   const meta = MP_META[mp] ?? { label: mp, color: "#888", textColor: "#fff" }
-                  // 7 cols: цена на маркете, комиссия, логистика, 3-й (приёмка/1-я миля/—), хранение, итого, маржа
-                  // Возврат скрыт (учтён в итого)
+                  // 6 cols: цена на маркете, комиссия, логистика, 3-й (приёмка/1-я миля/—), итого, маржа
+                  // Хранение и б/у временно скрыты; Возврат скрыт (учтён в итого)
                   return (
                     <th
                       key={mp}
-                      colSpan={7}
+                      colSpan={6}
                       className="px-2 py-2 text-center font-semibold text-xs tracking-wide border-l"
                       style={{ backgroundColor: meta.color, color: meta.textColor }}
                     >
@@ -473,15 +464,14 @@ export function FinanceTable({ scheme }: Props) {
                       <th key={`${mp}-acc`} className="px-2 py-1.5 text-right font-medium">
                         {col3?.label ?? "—"}
                       </th>
-                      {/* Хранение: для FBO показываем ×дней, для FBS — «—» */}
-                      <th key={`${mp}-str`} className="px-2 py-1.5 text-right font-medium text-sky-700">
-                        {scheme === "FBO" ? `Хранение ×${storageDays}д` : "Хранение"}
-                      </th>
+                      {/* Хранение — временно скрыто
+                      <th key={`${mp}-str`} className="px-2 py-1.5 text-right font-medium text-sky-700">Хранение</th>
+                      */}
                       {/* Столбец Возврат скрыт — учтён в «Итого»
                       <th key={`${mp}-ret`} className="px-2 py-1.5 text-right font-medium">Возврат</th>
                       */}
                       <th key={`${mp}-tot`} className="px-2 py-1.5 text-right font-medium">Итого</th>
-                      <th key={`${mp}-mrg`} className="px-2 py-1.5 text-right font-medium">Маржа / б/у</th>
+                      <th key={`${mp}-mrg`} className="px-2 py-1.5 text-right font-medium">Маржа</th>
                     </>
                   )
                 })}
@@ -538,7 +528,7 @@ export function FinanceTable({ scheme }: Props) {
                       if (!block) {
                         return (
                           <>
-                            {Array.from({ length: 7 }).map((_, i) => (
+                            {Array.from({ length: 6 }).map((_, i) => (
                               <td key={`${mp}-empty-${i}`} className="px-2 py-2 text-center text-xs text-muted-foreground border-l first:border-l">—</td>
                             ))}
                           </>
