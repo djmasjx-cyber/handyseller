@@ -198,7 +198,8 @@ model Product {
   stockLogs           StockLog[]
   fieldLogs           ProductFieldLog[]
   changeLogs          ProductChangeLog[]
-  marketplaceMappings ProductMarketplaceMapping[]
+  marketplaceMappings   ProductMarketplaceMapping[]
+  commissions           ProductMarketplaceCommission[]
 
   @@index([userId, article])
 }
@@ -246,6 +247,30 @@ model ProductMarketplaceMapping {
   @@unique([userId, marketplace, externalSystemId])
   @@index([productId])
   @@index([userId, marketplace])
+}
+
+/// Комиссии и тарифы маркетплейса по схеме хранения (FBO/FBS) для конкретного товара.
+/// Синхронизируется из API маркетплейсов ежедневно и по запросу.
+model ProductMarketplaceCommission {
+  id                  String   @id @default(uuid())
+  productId           String   @map("product_id")
+  marketplace         String   // 'OZON' | 'WILDBERRIES' | 'YANDEX' | ...
+  scheme              String   // 'FBO' | 'FBS'
+  salesCommissionPct  Decimal  @default(0) @db.Decimal(6, 2) @map("sales_commission_pct")
+  salesCommissionAmt  Decimal  @default(0) @db.Decimal(10, 2) @map("sales_commission_amt")
+  logisticsAmt        Decimal  @default(0) @db.Decimal(10, 2) @map("logistics_amt")
+  firstMileAmt        Decimal  @default(0) @db.Decimal(10, 2) @map("first_mile_amt")
+  returnAmt           Decimal  @default(0) @db.Decimal(10, 2) @map("return_amt")
+  acceptanceAmt       Decimal  @default(0) @db.Decimal(10, 2) @map("acceptance_amt")
+  totalFeeAmt         Decimal  @default(0) @db.Decimal(10, 2) @map("total_fee_amt")
+  syncedAt            DateTime @default(now()) @map("synced_at")
+  rawData             Json?    @map("raw_data")
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, marketplace, scheme])
+  @@index([productId])
+  @@map("product_marketplace_commission")
 }
 
 model StockLog {

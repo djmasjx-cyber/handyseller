@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, ReactNode } from "react"
 import { useRouter, usePathname } from "next/navigation"
 import Link from "next/link"
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from "@handyseller/ui"
-import { LayoutDashboard, Package, BarChart3, Settings, Menu, Palette, LogIn, ShoppingCart, Shield, CreditCard, X, Archive, ChevronDown } from "lucide-react"
+import { LayoutDashboard, Package, BarChart3, Settings, Menu, Palette, LogIn, ShoppingCart, Shield, CreditCard, X, Archive, ChevronDown, DollarSign } from "lucide-react"
 import { LogoutButton } from "@/components/logout-button"
 import { AUTH_STORAGE_KEYS, isAdmin } from "@/lib/auth-storage"
 
@@ -20,6 +20,7 @@ export function DashboardAuthGate({ children }: { children: ReactNode }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [productsExpanded, setProductsExpanded] = useState(false)
   const [ordersExpanded, setOrdersExpanded] = useState(false)
+  const [financeExpanded, setFinanceExpanded] = useState(false)
 
   const checkAuth = useCallback(() => {
     const token = getToken()
@@ -43,6 +44,9 @@ export function DashboardAuthGate({ children }: { children: ReactNode }) {
     }
     if (pathname?.startsWith("/dashboard/products")) {
       setProductsExpanded(true)
+    }
+    if (pathname?.startsWith("/dashboard/finance")) {
+      setFinanceExpanded(true)
     }
   }, [pathname])
 
@@ -91,6 +95,9 @@ export function DashboardAuthGate({ children }: { children: ReactNode }) {
   const isOnAssembly = pathname === "/dashboard/orders/assembly"
   const isOnProducts = pathname === "/dashboard/products"
   const isOnProductsArchive = pathname === "/dashboard/products/archive"
+  const isOnFinanceFbo = pathname === "/dashboard/finance/fbo"
+  const isOnFinanceFbs = pathname === "/dashboard/finance/fbs"
+  const isOnFinance = isOnFinanceFbo || isOnFinanceFbs
 
   // Загрузка или авторизован — рендерим layout
   return (
@@ -248,6 +255,50 @@ export function DashboardAuthGate({ children }: { children: ReactNode }) {
                   </>
                 )}
               </div>
+              {/* Финансы — раскрываемая группа */}
+              <div className="py-1">
+                <div
+                  className={`w-full flex items-center px-3 py-3 rounded-md min-h-[44px] touch-manipulation ${isOnFinance ? "text-primary bg-primary/10 font-medium" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+                >
+                  <Link
+                    href="/dashboard/finance/fbo"
+                    onClick={() => { setFinanceExpanded(true); setMenuOpen(false) }}
+                    className="flex items-center space-x-3 flex-1"
+                  >
+                    <DollarSign className="h-5 w-5 flex-shrink-0" />
+                    <span>Финансы</span>
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => setFinanceExpanded((v) => !v)}
+                    className="ml-2 p-1 rounded hover:bg-muted"
+                    aria-label="Развернуть финансы"
+                    aria-expanded={financeExpanded}
+                  >
+                    <ChevronDown className={`h-5 w-5 transition-transform ${financeExpanded ? "rotate-180" : ""}`} />
+                  </button>
+                </div>
+                {financeExpanded && (
+                  <>
+                    <Link
+                      href="/dashboard/finance/fbo"
+                      onClick={() => setMenuOpen(false)}
+                      className={`flex items-center space-x-3 pl-6 pr-3 py-2.5 rounded-md min-h-[40px] touch-manipulation text-sm ${isOnFinanceFbo ? "text-primary bg-primary/10 font-medium" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+                    >
+                      <span className="w-2 h-2 rounded-full bg-muted-foreground/50 shrink-0" />
+                      <span>FBO</span>
+                    </Link>
+                    <Link
+                      href="/dashboard/finance/fbs"
+                      onClick={() => setMenuOpen(false)}
+                      className={`flex items-center space-x-3 pl-6 pr-3 py-2.5 rounded-md min-h-[40px] touch-manipulation text-sm ${isOnFinanceFbs ? "text-primary bg-primary/10 font-medium" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+                    >
+                      <span className="w-2 h-2 rounded-full bg-muted-foreground/50 shrink-0" />
+                      <span>FBS</span>
+                    </Link>
+                  </>
+                )}
+              </div>
               {/* Остальные пункты */}
               {navLinks.slice(1).map((item) => {
                 const isActive = pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(item.href))
@@ -375,6 +426,48 @@ export function DashboardAuthGate({ children }: { children: ReactNode }) {
                       >
                         <span className="w-2 h-2 rounded-full bg-muted-foreground/50 shrink-0" />
                         <span>Заказы на сборке</span>
+                      </Link>
+                    </>
+                  )}
+                </div>
+                {/* Финансы — группа */}
+                <div className="space-y-0.5">
+                  <div
+                    className={`w-full flex items-center px-3 py-2 rounded-md ${isOnFinance ? "text-primary bg-primary/10 font-medium" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+                  >
+                    <Link
+                      href="/dashboard/finance/fbo"
+                      onClick={() => setFinanceExpanded(true)}
+                      className="flex items-center space-x-3 flex-1 text-left"
+                    >
+                      <DollarSign className="h-5 w-5 flex-shrink-0" />
+                      <span>Финансы</span>
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={() => setFinanceExpanded((v) => !v)}
+                      className="ml-2 p-1 rounded hover:bg-muted"
+                      aria-label="Развернуть финансы"
+                      aria-expanded={financeExpanded}
+                    >
+                      <ChevronDown className={`h-5 w-5 transition-transform ${financeExpanded ? "rotate-180" : ""}`} />
+                    </button>
+                  </div>
+                  {financeExpanded && (
+                    <>
+                      <Link
+                        href="/dashboard/finance/fbo"
+                        className={`flex items-center space-x-3 pl-6 pr-3 py-2 rounded-md text-sm ${isOnFinanceFbo ? "text-primary bg-primary/10 font-medium" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+                      >
+                        <span className="w-2 h-2 rounded-full bg-muted-foreground/50 shrink-0" />
+                        <span>FBO</span>
+                      </Link>
+                      <Link
+                        href="/dashboard/finance/fbs"
+                        className={`flex items-center space-x-3 pl-6 pr-3 py-2 rounded-md text-sm ${isOnFinanceFbs ? "text-primary bg-primary/10 font-medium" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+                      >
+                        <span className="w-2 h-2 rounded-full bg-muted-foreground/50 shrink-0" />
+                        <span>FBS</span>
                       </Link>
                     </>
                   )}
