@@ -36,8 +36,18 @@ interface OzonV5Item {
 /** Тарифы WB для логистики коробок — кешируются в рамках одной синхронизации. */
 interface WbBoxTariff {
   warehouseName: string;
+  /** Доставка до клиента (последняя миля) — базовая стоимость. */
   boxDeliveryBase: number;
+  /** Доставка до клиента — стоимость каждого доп. литра. */
   boxDeliveryLiter: number;
+  /**
+   * Обработка/приёмка отправления на складе/СЦ WB (первая миля FBS).
+   * В ответе API поле boxDeliveryMarketplaceBase.
+   * 0 если поле не пришло.
+   */
+  boxFirstMileBase: number;
+  /** Первая миля FBS — стоимость доп. литра. */
+  boxFirstMileLiter: number;
   boxStorageBase: number;
   boxStorageLiter: number;
 }
@@ -346,21 +356,29 @@ export class CommissionSyncService {
         ? Math.max((w * h * l) / 1_000_000, 1)
         : 1;
 
-      // Стоимость доставки из тарифа коробок
+      const extraVol = Math.max(volumeLiters - 1, 0);
+
+      // Доставка последней мили до клиента (одинакова для FBO и FBS)
       const deliveryCost = boxTariff
-        ? Math.round((boxTariff.boxDeliveryBase + boxTariff.boxDeliveryLiter * Math.max(volumeLiters - 1, 0)) * 100) / 100
+        ? round2(boxTariff.boxDeliveryBase + boxTariff.boxDeliveryLiter * extraVol)
         : 0;
 
-      // Стоимость хранения в день (примерно за 30 дней)
+      // Первая миля FBS: обработка/приёмка отправления на СЦ или ПВЗ WB
+      // Поле boxDeliveryMarketplaceBase/Liter из /api/v1/tariffs/box
+      const fbsFirstMile = boxTariff && boxTariff.boxFirstMileBase > 0
+        ? round2(boxTariff.boxFirstMileBase + boxTariff.boxFirstMileLiter * extraVol)
+        : 0;
+
+      // Стоимость хранения в день
       const storageCostPerDay = boxTariff
-        ? Math.round((boxTariff.boxStorageBase + boxTariff.boxStorageLiter * Math.max(volumeLiters - 1, 0)) * 100) / 100
+        ? round2(boxTariff.boxStorageBase + boxTariff.boxStorageLiter * extraVol)
         : 0;
 
-      // Приёмка FBO — коэффициент * базовая стоимость за литр (примерно 50₽/л × коэф)
-      const acceptanceAmt = Math.round(volumeLiters * 50 * acceptanceCoef * 100) / 100;
+      // Приёмка FBO — коэффициент × базовая стоимость за литр (≈50 ₽/л × коэф)
+      const acceptanceAmt = round2(volumeLiters * 50 * acceptanceCoef);
 
-      const fboSalesAmt = productPrice > 0 ? Math.round((productPrice * fboCommissionPct) / 100 * 100) / 100 : 0;
-      const fbsSalesAmt = productPrice > 0 ? Math.round((productPrice * fbsCommissionPct) / 100 * 100) / 100 : 0;
+      const fboSalesAmt = productPrice > 0 ? round2((productPrice * fboCommissionPct) / 100) : 0;
+      const fbsSalesAmt = productPrice > 0 ? round2((productPrice * fbsCommissionPct) / 100) : 0;
 
       const schemes = [
         {
@@ -368,21 +386,21 @@ export class CommissionSyncService {
           salesCommissionPct: fboCommissionPct,
           salesCommissionAmt: fboSalesAmt,
           logisticsAmt: deliveryCost,
-          firstMileAmt: 0,
+          firstMileAmt: 0,          // FBO: нет первой мили, товар уже на складе WB
           returnAmt: returnCostBase,
           acceptanceAmt,
-          totalFeeAmt: Math.round((fboSalesAmt + deliveryCost + returnCostBase + acceptanceAmt) * 100) / 100,
+          totalFeeAmt: round2(fboSalesAmt + deliveryCost + returnCostBase + acceptanceAmt),
           storageCostPerDay,
         },
         {
           scheme: 'FBS',
           salesCommissionPct: fbsCommissionPct,
           salesCommissionAmt: fbsSalesAmt,
-          logisticsAmt: deliveryCost,
-          firstMileAmt: 0,
+          logisticsAmt: deliveryCost, // последняя миля WB → клиент
+          firstMileAmt: fbsFirstMile, // обработка отправления на СЦ/ПВЗ WB
           returnAmt: returnCostBase,
-          acceptanceAmt: 0,
-          totalFeeAmt: Math.round((fbsSalesAmt + deliveryCost + returnCostBase) * 100) / 100,
+          acceptanceAmt: 0,           // FBS: товар хранится у продавца
+          totalFeeAmt: round2(fbsSalesAmt + deliveryCost + fbsFirstMile + returnCostBase),
           storageCostPerDay: 0,
         },
       ];
@@ -461,6 +479,9 @@ export class CommissionSyncService {
                 warehouseName: string;
                 boxDeliveryBase: string;
                 boxDeliveryLiter: string;
+                // Первая миля FBS: обработка/приёмка отправления на СЦ/ПВЗ WB
+                boxDeliveryMarketplaceBase?: string;
+                boxDeliveryMarketplaceLiter?: string;
                 boxStorageBase: string;
                 boxStorageLiter: string;
               }>;
@@ -474,14 +495,18 @@ export class CommissionSyncService {
       );
       const list = data?.response?.data?.warehouseList;
       if (!list?.length) return null;
-      // Берём первый склад (Коледино / Подольск как наиболее репрезентативный)
-      const wh = list[0];
+      const p = (s: string | undefined) => parseFloat(String(s ?? '0').replace(',', '.').replace(/\s/g, '')) || 0;
+      // Предпочитаем Коледино/Подольск — самые репрезентативные склады
+      const wh =
+        list.find((w) => /коледино|подольск/i.test(w.warehouseName)) ?? list[0];
       return {
         warehouseName: wh.warehouseName,
-        boxDeliveryBase: parseFloat(String(wh.boxDeliveryBase).replace(',', '.')) || 0,
-        boxDeliveryLiter: parseFloat(String(wh.boxDeliveryLiter).replace(',', '.')) || 0,
-        boxStorageBase: parseFloat(String(wh.boxStorageBase).replace(',', '.')) || 0,
-        boxStorageLiter: parseFloat(String(wh.boxStorageLiter).replace(',', '.')) || 0,
+        boxDeliveryBase: p(wh.boxDeliveryBase),
+        boxDeliveryLiter: p(wh.boxDeliveryLiter),
+        boxFirstMileBase: p(wh.boxDeliveryMarketplaceBase),
+        boxFirstMileLiter: p(wh.boxDeliveryMarketplaceLiter),
+        boxStorageBase: p(wh.boxStorageBase),
+        boxStorageLiter: p(wh.boxStorageLiter),
       };
     } catch (e) {
       this.logger.warn(`[fetchWbBoxTariff] ${e instanceof Error ? e.message : String(e)}`);

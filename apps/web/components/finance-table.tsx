@@ -53,7 +53,8 @@ const MP_META: Record<string, { label: string; color: string; textColor: string 
 function getMpCol3Config(mp: string, scheme: string): { label: string; value: (b: MarketplaceCommissionBlock) => number } | null {
   if (mp === "WILDBERRIES") {
     if (scheme === "FBO") return { label: "Приёмка", value: (b) => b.acceptanceAmt }
-    return null // WB FBS: нет 1-й мили и нет приёмки
+    // WB FBS: «Обработка» = приёмка/обработка отправления на СЦ или ПВЗ WB (первая миля)
+    return { label: "Обработка", value: (b) => b.firstMileAmt }
   }
   // Ozon и другие площадки
   if (scheme === "FBO") return { label: "Фулфилмент", value: (b) => b.acceptanceAmt }
