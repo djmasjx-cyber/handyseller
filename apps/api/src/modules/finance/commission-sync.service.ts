@@ -378,18 +378,27 @@ export class CommissionSyncService {
       const extraVol = Math.max(volumeLiters - 1, 0);
 
       /**
-       * Формула WB: base + liter × extraVol
-       * CoefExpr из API уже учтён WB в значениях base/liter — не умножаем повторно.
+       * WB API /api/v1/tariffs/box содержит ДВА разных тарифа доставки:
+       *  boxDeliveryBase           = тариф доставки FBO (со склада WB → покупатель)
+       *  boxDeliveryMarketplaceBase = тариф доставки FBS (СЦ WB → покупатель, после сдачи продавцом)
+       * Они не равны: FBO обычно дороже (~75 ₽ среднее), FBS дешевле (~42 ₽ среднее).
+       *
+       * "Обработка товара" / "Операции на приёмке" (FBS) — ОТДЕЛЬНАЯ фиксированная плата
+       * за приёмку посылки на СЦ/ПВЗ WB. Отсутствует в tariffs/box — фиксирована (~15 ₽).
+       * Подтверждено реальным отчётом WB (строка "Обработка товара", кол.61 = 15 ₽).
        */
-      // Доставка последней мили WB → покупатель (одинакова для FBO и FBS)
-      const deliveryCost = boxTariff
+      const WB_FBS_ACCEPTANCE_FEE = 15; // ₽ за приёмку на СЦ/ПВЗ WB (фиксировано)
+
+      // FBO: доставка со склада WB до покупателя
+      const fboDeliveryCost = boxTariff
         ? round2(boxTariff.boxDeliveryBase + boxTariff.boxDeliveryLiter * extraVol)
         : 0;
 
-      // FBS первая миля: обработка/приёмка отправления на СЦ WB
-      const fbsFirstMile = boxTariff && boxTariff.boxFirstMileBase > 0
+      // FBS: доставка от СЦ WB до покупателя (boxDeliveryMarketplaceBase, ≈42 ₽ среднее)
+      // В нашем WbBoxTariff это поле хранится как boxFirstMileBase (исторически)
+      const fbsDeliveryCost = boxTariff && boxTariff.boxFirstMileBase > 0
         ? round2(boxTariff.boxFirstMileBase + boxTariff.boxFirstMileLiter * extraVol)
-        : 0;
+        : fboDeliveryCost; // фоллбэк на FBO-тариф если FBS-тариф недоступен
 
       // Хранение в день (для справки, сохраняется в rawData)
       const storageCostPerDay = boxTariff
@@ -412,11 +421,11 @@ export class CommissionSyncService {
           marketplacePrice: productPrice,
           salesCommissionPct: fboCommissionPct,
           salesCommissionAmt: fboSalesAmt,
-          logisticsAmt: deliveryCost,
-          firstMileAmt: 0,          // FBO: нет первой мили, товар уже на складе WB
+          logisticsAmt: fboDeliveryCost,  // FBO: доставка склад WB → покупатель
+          firstMileAmt: 0,                // FBO: первой мили нет, товар уже на складе
           returnAmt: returnCostBase,
-          acceptanceAmt,
-          totalFeeAmt: round2(fboSalesAmt + deliveryCost + returnCostBase + acceptanceAmt),
+          acceptanceAmt,                  // FBO: приёмка поставки на склад WB
+          totalFeeAmt: round2(fboSalesAmt + fboDeliveryCost + returnCostBase + acceptanceAmt),
           storageCostPerDay,
         },
         {
@@ -424,11 +433,11 @@ export class CommissionSyncService {
           marketplacePrice: productPrice,
           salesCommissionPct: fbsCommissionPct,
           salesCommissionAmt: fbsSalesAmt,
-          logisticsAmt: deliveryCost, // последняя миля WB → клиент
-          firstMileAmt: fbsFirstMile, // обработка отправления на СЦ/ПВЗ WB
+          logisticsAmt: fbsDeliveryCost,     // FBS: доставка СЦ WB → покупатель (~42 ₽)
+          firstMileAmt: WB_FBS_ACCEPTANCE_FEE, // FBS: приёмка заказа на СЦ/ПВЗ WB (фикс. 15 ₽)
           returnAmt: returnCostBase,
-          acceptanceAmt: 0,           // FBS: товар хранится у продавца
-          totalFeeAmt: round2(fbsSalesAmt + deliveryCost + fbsFirstMile + returnCostBase),
+          acceptanceAmt: 0,                  // FBS: товар хранится у продавца
+          totalFeeAmt: round2(fbsSalesAmt + fbsDeliveryCost + WB_FBS_ACCEPTANCE_FEE + returnCostBase),
           storageCostPerDay: 0,
         },
       ];
