@@ -103,7 +103,7 @@ function MarketplaceCommissionColumns({
   const commPct = block.salesCommissionPct / 100
   const fixedFees = block.logisticsAmt + (col3 ? col3.value(block) : 0) + block.returnAmt + storageTotal
   const breakEven = commPct < 1 ? Math.ceil((cost + fixedFees) / (1 - commPct)) : null
-  --- *\//
+  --- */
 
   return (
     <>
