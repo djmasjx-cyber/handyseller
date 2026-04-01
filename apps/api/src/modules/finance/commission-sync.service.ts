@@ -35,27 +35,23 @@ interface OzonV5Item {
 
 /**
  * Тарифы WB для логистики коробок (из /api/v1/tariffs/box).
- * Все поля Base/Liter — базовые рублёвые ставки.
- * CoefExpr — динамический коэффициент WB в процентах (160 = ×1.60).
- * Итоговая стоимость = (base + liter × max(vol−1, 0)) × coef / 100.
+ * Поля Base/Liter — уже финальные рублёвые ставки (CoefExpr уже учтён WB в значениях).
+ * Формула: base + liter × max(vol−1, 0).
  */
 interface WbBoxTariff {
   warehouseName: string;
   /** FBO и FBS последняя миля: склад/СЦ WB → покупатель. */
   boxDeliveryBase: number;
   boxDeliveryLiter: number;
-  boxDeliveryCoef: number;   // boxDeliveryCoefExpr / 100
   /**
    * FBS «первая миля»: приёмка/обработка отправления на СЦ WB.
-   * API-поле: boxDeliveryMarketplaceBase / Liter / CoefExpr.
+   * API-поле: boxDeliveryMarketplaceBase / Liter.
    */
   boxFirstMileBase: number;
   boxFirstMileLiter: number;
-  boxFirstMileCoef: number;  // boxDeliveryMarketplaceCoefExpr / 100
   /** Хранение на складе WB (₽ / литр / день). */
   boxStorageBase: number;
   boxStorageLiter: number;
-  boxStorageCoef: number;    // boxStorageCoefExpr / 100
 }
 
 /** Комиссии по категориям WB. */
@@ -68,7 +64,7 @@ interface WbCategoryCommission {
 @Injectable()
 export class CommissionSyncService {
   private readonly logger = new Logger(CommissionSyncService.name);
-  private readonly WB_TARIFF_API = 'https://discounts-prices-api.wildberries.ru';
+  private readonly WB_TARIFF_API = 'https://common-api.wildberries.ru';
 
   constructor(
     private readonly prisma: PrismaService,
@@ -365,24 +361,22 @@ export class CommissionSyncService {
       const extraVol = Math.max(volumeLiters - 1, 0);
 
       /**
-       * Формула WB: (base + liter × extraVol) × coef
-       * coef = boxDeliveryCoefExpr / 100  (WB хранит в %, напр. 160 → 1.60)
-       * Коэффициент меняется динамически, обновляется cron-ом ежедневно.
+       * Формула WB: base + liter × extraVol
+       * CoefExpr из API уже учтён WB в значениях base/liter — не умножаем повторно.
        */
       // Доставка последней мили WB → покупатель (одинакова для FBO и FBS)
       const deliveryCost = boxTariff
-        ? round2((boxTariff.boxDeliveryBase + boxTariff.boxDeliveryLiter * extraVol) * boxTariff.boxDeliveryCoef)
+        ? round2(boxTariff.boxDeliveryBase + boxTariff.boxDeliveryLiter * extraVol)
         : 0;
 
       // FBS первая миля: обработка/приёмка отправления на СЦ WB
-      // boxDeliveryMarketplaceBase × MarketplaceCoefExpr
       const fbsFirstMile = boxTariff && boxTariff.boxFirstMileBase > 0
-        ? round2((boxTariff.boxFirstMileBase + boxTariff.boxFirstMileLiter * extraVol) * boxTariff.boxFirstMileCoef)
+        ? round2(boxTariff.boxFirstMileBase + boxTariff.boxFirstMileLiter * extraVol)
         : 0;
 
       // Хранение в день (для справки, сохраняется в rawData)
       const storageCostPerDay = boxTariff
-        ? round2((boxTariff.boxStorageBase + boxTariff.boxStorageLiter * extraVol) * boxTariff.boxStorageCoef)
+        ? round2(boxTariff.boxStorageBase + boxTariff.boxStorageLiter * extraVol)
         : 0;
 
       // Приёмка FBO — коэффициент × базовая стоимость за литр (≈50 ₽/л × коэф)
@@ -517,16 +511,13 @@ export class CommissionSyncService {
       const wh = list.find((w) => /коледино|подольск/i.test(w.warehouseName ?? '')) ?? list[0];
 
       return {
-        warehouseName: wh.warehouseName ?? '—',
-        boxDeliveryBase:     p(wh.boxDeliveryBase, 0),
-        boxDeliveryLiter:    p(wh.boxDeliveryLiter, 0),
-        boxDeliveryCoef:     p(wh.boxDeliveryCoefExpr, 100) / 100,
-        boxFirstMileBase:    p(wh.boxDeliveryMarketplaceBase, 0),
-        boxFirstMileLiter:   p(wh.boxDeliveryMarketplaceLiter, 0),
-        boxFirstMileCoef:    p(wh.boxDeliveryMarketplaceCoefExpr, 100) / 100,
-        boxStorageBase:      p(wh.boxStorageBase, 0),
-        boxStorageLiter:     p(wh.boxStorageLiter, 0),
-        boxStorageCoef:      p(wh.boxStorageCoefExpr, 100) / 100,
+        warehouseName:    wh.warehouseName ?? '—',
+        boxDeliveryBase:  p(wh.boxDeliveryBase, 0),
+        boxDeliveryLiter: p(wh.boxDeliveryLiter, 0),
+        boxFirstMileBase:  p(wh.boxDeliveryMarketplaceBase, 0),
+        boxFirstMileLiter: p(wh.boxDeliveryMarketplaceLiter, 0),
+        boxStorageBase:   p(wh.boxStorageBase, 0),
+        boxStorageLiter:  p(wh.boxStorageLiter, 0),
       };
     } catch (e) {
       this.logger.warn(`[fetchWbBoxTariff] ${e instanceof Error ? e.message : String(e)}`);
@@ -566,7 +557,7 @@ export class CommissionSyncService {
     try {
       const { data } = await firstValueFrom(
         this.httpService.get<Array<{ coefficient: number | null }>>(
-          'https://marketplace-api.wildberries.ru/api/tariffs/v1/acceptance/coefficients',
+          'https://common-api.wildberries.ru/api/tariffs/v1/acceptance/coefficients',
           { headers: authHeader, timeout: 20000 },
         ),
       );
