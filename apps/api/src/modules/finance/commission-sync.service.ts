@@ -307,14 +307,24 @@ export class CommissionSyncService {
     // 1. Получаем тарифы комиссий по категориям
     const categoryCommissions = await this.fetchWbCategoryCommissions(authHeader);
 
-    // 2. Получаем тарифы логистики коробок (берём первый склад как базовый)
+    // 2. Получаем тарифы логистики коробок (Коледино/Подольск или первый склад)
     const boxTariff = await this.fetchWbBoxTariff(authHeader, today);
+    if (boxTariff) {
+      this.logger.log(
+        `[syncWbCommissions] boxTariff warehouse=${boxTariff.warehouseName}` +
+        ` delivery=${boxTariff.boxDeliveryBase}+${boxTariff.boxDeliveryLiter}/л` +
+        ` firstMile=${boxTariff.boxFirstMileBase}+${boxTariff.boxFirstMileLiter}/л` +
+        ` storage=${boxTariff.boxStorageBase}+${boxTariff.boxStorageLiter}/л`,
+      );
+    } else {
+      this.logger.warn('[syncWbCommissions] boxTariff=null — проверьте API-ключ WB и права доступа');
+    }
 
     // 3. Получаем тарифы возвратов (базовый тариф)
     const returnCostBase = await this.fetchWbReturnTariff(authHeader, today);
 
-    // 4. Получаем коэффициент приёмки (FBO) — среднее по доступным складам
-    const acceptanceCoef = await this.fetchWbAcceptanceCoef(authHeader);
+    // 4. Получаем тариф приёмки FBO: минимальный коэф. среди складов с allowUnload=true
+    const acceptanceData = await this.fetchWbAcceptanceCoef(authHeader);
 
     // 5. Товары пользователя с маппингом на WB
     const mappings = await this.prisma.productMarketplaceMapping.findMany({
@@ -379,8 +389,12 @@ export class CommissionSyncService {
         ? round2(boxTariff.boxStorageBase + boxTariff.boxStorageLiter * extraVol)
         : 0;
 
-      // Приёмка FBO — коэффициент × базовая стоимость за литр (≈50 ₽/л × коэф)
-      const acceptanceAmt = round2(volumeLiters * 50 * acceptanceCoef);
+      // Приёмка FBO: baseLiter (₽/л) × объём × коэффициент
+      // baseLiter берётся из API (deliveryBaseLiter) или 30 ₽/л по умолчанию
+      // Коэффициент = минимальный из складов WB где allowUnload=true
+      const acceptanceAmt = acceptanceData.coef === 0
+        ? 0
+        : round2(volumeLiters * acceptanceData.baseLiter * acceptanceData.coef);
 
       const fboSalesAmt = productPrice > 0 ? round2((productPrice * fboCommissionPct) / 100) : 0;
       const fbsSalesAmt = productPrice > 0 ? round2((productPrice * fbsCommissionPct) / 100) : 0;
@@ -431,7 +445,15 @@ export class CommissionSyncService {
             acceptanceAmt: d.acceptanceAmt,
             totalFeeAmt: d.totalFeeAmt,
             syncedAt: new Date(),
-            rawData: { subjectId: wbSubjectId, volumeLiters, storageCostPerDay: d.storageCostPerDay },
+            rawData: {
+              subjectId: wbSubjectId, volumeLiters, storageCostPerDay: d.storageCostPerDay,
+              tariff: boxTariff ? {
+                warehouse: boxTariff.warehouseName,
+                deliveryBase: boxTariff.boxDeliveryBase, deliveryLiter: boxTariff.boxDeliveryLiter,
+                firstMileBase: boxTariff.boxFirstMileBase, firstMileLiter: boxTariff.boxFirstMileLiter,
+              } : null,
+              acceptanceCoef: acceptanceData.coef, acceptanceBaseLiter: acceptanceData.baseLiter,
+            },
           },
           update: {
             salesCommissionPct: d.salesCommissionPct,
@@ -442,7 +464,15 @@ export class CommissionSyncService {
             acceptanceAmt: d.acceptanceAmt,
             totalFeeAmt: d.totalFeeAmt,
             syncedAt: new Date(),
-            rawData: { subjectId: wbSubjectId, volumeLiters, storageCostPerDay: d.storageCostPerDay },
+            rawData: {
+              subjectId: wbSubjectId, volumeLiters, storageCostPerDay: d.storageCostPerDay,
+              tariff: boxTariff ? {
+                warehouse: boxTariff.warehouseName,
+                deliveryBase: boxTariff.boxDeliveryBase, deliveryLiter: boxTariff.boxDeliveryLiter,
+                firstMileBase: boxTariff.boxFirstMileBase, firstMileLiter: boxTariff.boxFirstMileLiter,
+              } : null,
+              acceptanceCoef: acceptanceData.coef, acceptanceBaseLiter: acceptanceData.baseLiter,
+            },
           },
         }).catch((e: unknown) =>
           this.logger.warn(`[syncWbCommissions] upsert error: ${e instanceof Error ? e.message : String(e)}`),
@@ -553,22 +583,43 @@ export class CommissionSyncService {
     }
   }
 
-  private async fetchWbAcceptanceCoef(authHeader: Record<string, string>): Promise<number> {
+  private async fetchWbAcceptanceCoef(authHeader: Record<string, string>): Promise<{ coef: number; baseLiter: number }> {
+    const DEFAULT: { coef: number; baseLiter: number } = { coef: 1, baseLiter: 30 };
     try {
       const { data } = await firstValueFrom(
-        this.httpService.get<Array<{ coefficient: number | null }>>(
+        this.httpService.get<Array<{
+          coefficient: number | null;
+          allowUnload: boolean | null;
+          deliveryBaseLiter: number | null;
+          deliveryAdditionalLiter: number | null;
+        }>>(
           'https://common-api.wildberries.ru/api/tariffs/v1/acceptance/coefficients',
           { headers: authHeader, timeout: 20000 },
         ),
       );
-      if (!Array.isArray(data) || data.length === 0) return 1;
-      // Берём среднее ненулевых коэффициентов
-      const coefs = data.map((d) => Number(d.coefficient ?? 1)).filter((c) => c > 0);
-      if (!coefs.length) return 1;
-      return Math.round((coefs.reduce((a, b) => a + b, 0) / coefs.length) * 100) / 100;
+      if (!Array.isArray(data) || data.length === 0) return DEFAULT;
+
+      // Берём только склады, которые принимают товар (allowUnload=true, coef >= 0)
+      // Используем МИНИМАЛЬНЫЙ коэффициент — он отражает лучший доступный вариант.
+      // Это важно для юнит-экономики: селлер всегда выберет минимальную ставку.
+      const accepting = data.filter(
+        (d) => d.allowUnload === true && d.coefficient !== null && Number(d.coefficient) >= 0,
+      );
+      if (!accepting.length) return DEFAULT;
+
+      const minCoef = Math.min(...accepting.map((d) => Number(d.coefficient)));
+      const best = accepting.find((d) => Number(d.coefficient) === minCoef);
+
+      // deliveryBaseLiter — реальная ставка ₽/л от WB API; если null, используем 30 ₽/л
+      const baseLiter = Number(best?.deliveryBaseLiter ?? 0) || 30;
+
+      this.logger.log(
+        `[fetchWbAcceptanceCoef] minCoef=${minCoef}, baseLiter=${baseLiter} (от ${accepting.length} складов)`,
+      );
+      return { coef: minCoef, baseLiter };
     } catch (e) {
       this.logger.warn(`[fetchWbAcceptanceCoef] ${e instanceof Error ? e.message : String(e)}`);
-      return 1;
+      return DEFAULT;
     }
   }
 }
