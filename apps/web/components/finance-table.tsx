@@ -128,8 +128,8 @@ function MarketplaceCommissionColumns({
       ) : (
         <td className="px-2 py-2 text-center text-xs text-muted-foreground">—</td>
       )}
-      {/* Хранение: для FBO показываем storageCostPerDay × дней, для FBS — прочерк */}
-      {isFBO ? (
+      {/* Хранение: только для FBO */}
+      {isFBO && (
         <td className="px-2 py-2 text-right text-sm tabular-nums text-sky-600">
           {storageTotal > 0 ? (
             <>
@@ -140,8 +140,6 @@ function MarketplaceCommissionColumns({
             <span className="text-muted-foreground text-xs">—</span>
           )}
         </td>
-      ) : (
-        <td className="px-2 py-2 text-center text-xs text-muted-foreground">—</td>
       )}
       {/* Возврат — скрыт, учтён в totalFeeAmt
       <td className="px-2 py-2 text-right text-sm tabular-nums">{fmt(block.returnAmt)} ₽</td>
