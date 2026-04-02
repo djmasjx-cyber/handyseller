@@ -33,4 +33,4 @@ CREATE UNIQUE INDEX "organization_profile_user_id_key" ON "organization_profile"
 -- AddForeignKey
 ALTER TABLE "organization_profile"
     ADD CONSTRAINT "organization_profile_user_id_fkey"
-    FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+    FOREIGN KEY ("user_id") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;

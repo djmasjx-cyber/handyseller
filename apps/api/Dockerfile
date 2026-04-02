@@ -32,4 +32,5 @@ RUN npx prisma generate --schema=./prisma/schema.prisma
 EXPOSE 4000
 
 # Миграции при старте контейнера, затем запуск API (Nest: outDir=dist → dist/src/main.js)
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/src/main.js"]
+# resolve --rolled-back нужен однократно: если миграция уже не в failed-состоянии — команда завершится с ошибкой, || true это подавляет
+CMD ["sh", "-c", "npx prisma migrate resolve --rolled-back 20260402000000_add_organization_profile 2>&1 || true && npx prisma migrate deploy && node dist/src/main.js"]
