@@ -10,8 +10,6 @@ import {
   XCircle,
   Link as LinkIcon,
   Loader2,
-  Zap,
-  TrendingUp,
   CreditCard,
   AlertTriangle,
 } from "lucide-react"
@@ -173,7 +171,7 @@ export default function MarketplacesPage() {
   const [wbWarehouseSaving, setWbWarehouseSaving] = useState(false)
   const [wbWarehouses, setWbWarehouses] = useState<Array<{ id: string; name?: string }> | null>(null)
   const [wbWarehousesLoading, setWbWarehousesLoading] = useState(false)
-  const [wbColorsSyncing, setWbColorsSyncing] = useState(false)
+
 
   const token = typeof window !== "undefined" ? localStorage.getItem("accessToken") : null
 
@@ -257,24 +255,6 @@ export default function MarketplacesPage() {
       alert(err instanceof Error ? err.message : "Ошибка")
     } finally {
       setOzonWarehouseSaving(false)
-    }
-  }
-
-  const handleWbColorsSync = async () => {
-    if (!token) return
-    setWbColorsSyncing(true)
-    try {
-      const res = await fetch("/api/marketplaces/wb-colors/sync", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(data.message ?? data.error ?? "Ошибка синхронизации")
-      alert(`Синхронизировано цветов: ${data.synced ?? 0}`)
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Ошибка синхронизации цветов")
-    } finally {
-      setWbColorsSyncing(false)
     }
   }
 
@@ -727,25 +707,6 @@ export default function MarketplacesPage() {
                           </div>
                         )}
                       </div>
-                      <div className="space-y-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={handleWbColorsSync}
-                          disabled={wbColorsSyncing}
-                          className="border-[#CB11AB] text-[#CB11AB] hover:bg-[#CB11AB]/10"
-                        >
-                          {wbColorsSyncing ? (
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          ) : (
-                            <RefreshCw className="mr-2 h-4 w-4" />
-                          )}
-                          Синхронизировать цвета WB
-                        </Button>
-                        <p className="text-xs text-muted-foreground">
-                          Справочник цветов для выпадающего списка при создании/редактировании товара.
-                        </p>
-                      </div>
                     </div>
                   )}
                   {marketplace.slug === "ozon" && (
@@ -835,30 +796,7 @@ export default function MarketplacesPage() {
                       )}
                     </div>
                   )}
-                  <div className="grid grid-cols-3 gap-4">
-                    <div className="text-center p-3 bg-muted rounded-lg">
-                      <div className="text-2xl font-bold text-primary">—</div>
-                      <div className="text-xs text-muted-foreground">товара</div>
-                    </div>
-                    <div className="text-center p-3 bg-muted rounded-lg">
-                      <div className="text-2xl font-bold text-green-500">—</div>
-                      <div className="text-xs text-muted-foreground">₽ продаж</div>
-                    </div>
-                    <div className="text-center p-3 bg-muted rounded-lg">
-                      <div className="text-2xl font-bold text-blue-500">—</div>
-                      <div className="text-xs text-muted-foreground">заказов</div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-3 pt-4 border-t">
-                    <Button variant="outline" className="w-full justify-between" disabled>
-                      <span>Настроить синхронизацию</span>
-                      <Zap className="h-4 w-4" />
-                    </Button>
-                    <Button variant="outline" className="w-full justify-between" disabled>
-                      <span>Статистика продаж</span>
-                      <TrendingUp className="h-4 w-4" />
-                    </Button>
+                  <div className="pt-4 border-t">
                     <Button
                       variant="destructive"
                       className="w-full"
