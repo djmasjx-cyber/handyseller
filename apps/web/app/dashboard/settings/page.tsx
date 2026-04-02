@@ -193,8 +193,8 @@ export default function SettingsPage() {
     }
   }
 
-  async function handleOrgSubmit(e: React.FormEvent) {
-    e.preventDefault()
+  async function handleOrgSubmit(e?: React.FormEvent | React.MouseEvent) {
+    e?.preventDefault()
     if (!token) { router.push("/login"); return }
     setOrgSaving(true)
     setOrgMsg(null)
@@ -334,7 +334,11 @@ export default function SettingsPage() {
                 Загрузка…
               </div>
             ) : (
-              <form onSubmit={handleOrgSubmit} className="space-y-8">
+              <form
+                onSubmit={(e) => e.preventDefault()}
+                onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault() }}
+                className="space-y-8"
+              >
                 {orgMsg && (
                   <div className={`rounded-md p-3 text-sm ${
                     orgMsg.type === "success"
@@ -466,7 +470,7 @@ export default function SettingsPage() {
                   </div>
                 </section>
 
-                <Button type="submit" disabled={orgSaving}>
+                <Button type="button" onClick={handleOrgSubmit} disabled={orgSaving}>
                   {orgSaving ? "Сохранение…" : "Сохранить реквизиты"}
                 </Button>
               </form>
