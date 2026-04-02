@@ -1,7 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
-import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/database/prisma.service';
 import { CryptoService } from '../../common/crypto/crypto.service';
 
@@ -125,7 +124,7 @@ export class CommissionSyncService {
     // Строим индекс локальных маппингов по offer_id и product_id для O(1) поиска
     const mappings = await this.prisma.productMarketplaceMapping.findMany({
       where: { userId, marketplace: 'OZON', isActive: true },
-      include: { product: { select: { id: true, price: true } } },
+      include: { product: { select: { id: true, price: true, width: true, height: true, length: true } } },
     });
     if (mappings.length === 0) return 0;
 
@@ -197,7 +196,20 @@ export class CommissionSyncService {
 
         const fboLogistics    = Number(c.fbo_deliv_to_customer_amount       ?? 0);
         const fboFirstMile    = Number(c.fbo_direct_flow_trans_min_amount   ?? 0);
-        const fboFulfillment  = Number(c.fbo_fulfillment_amount             ?? 0);
+
+        // fbo_fulfillment_amount = плата Ozon за обработку единицы товара на складе (приёмка/фулфилмент).
+        // Если API вернул 0 (товар не размещён на FBO или данные ещё не рассчитаны Ozon) —
+        // подставляем расчётное значение по публичному тарифу Ozon (декабрь 2025).
+        const fboFulfillmentFromApi = Number(c.fbo_fulfillment_amount ?? 0);
+        const ozonW = Number(mapping.product?.width  ?? 0);
+        const ozonH = Number(mapping.product?.height ?? 0);
+        const ozonL = Number(mapping.product?.length ?? 0);
+        const ozonVolumeLiters = ozonW > 0 && ozonH > 0 && ozonL > 0
+          ? Math.max((ozonW * ozonH * ozonL) / 1_000_000, 0.001)
+          : 1;
+        const fboFulfillment = fboFulfillmentFromApi > 0
+          ? fboFulfillmentFromApi
+          : calcOzonFboFulfillment(ozonVolumeLiters);
         const fboReturn       = round2(
           Number(c.fbo_return_flow_amount               ?? 0) +
           Number(c.fbo_return_flow_trans_min_amount     ?? 0),
@@ -221,7 +233,7 @@ export class CommissionSyncService {
             acceptanceAmt:      fboFulfillment,
             returnAmt:          fboReturn,
             totalFeeAmt: round2(fboSalesAmt + fboLogistics + fboFirstMile + fboFulfillment + fboReturn),
-            rawData: c as unknown as Prisma.InputJsonValue,
+            rawData: c as object,
           },
           {
             scheme: 'FBS',
@@ -233,7 +245,7 @@ export class CommissionSyncService {
             acceptanceAmt:      0,
             returnAmt:          fbsReturn,
             totalFeeAmt: round2(fbsSalesAmt + fbsLogistics + fbsFirstMile + fbsReturn),
-            rawData: c as unknown as Prisma.InputJsonValue,
+            rawData: c as object,
           },
         ];
 
@@ -405,12 +417,10 @@ export class CommissionSyncService {
         ? round2(boxTariff.boxStorageBase + boxTariff.boxStorageLiter * extraVol)
         : 0;
 
-      // Приёмка FBO: baseLiter (₽/л) × объём × коэффициент
-      // baseLiter берётся из API (deliveryBaseLiter) или 30 ₽/л по умолчанию
-      // Коэффициент = минимальный из складов WB где allowUnload=true
-      const acceptanceAmt = acceptanceData.coef === 0
-        ? 0
-        : round2(volumeLiters * acceptanceData.baseLiter * acceptanceData.coef);
+      // Приёмка FBO: baseLiter (₽/л) × объём × средний коэффициент приёмки
+      // baseLiter — усредн. из API (deliveryBaseLiter) или 1,7 ₽/л по умолчанию
+      // avgCoef   — средний из складов WB с allowUnload=true; 0 = бесплатная приёмка
+      const acceptanceAmt = round2(volumeLiters * acceptanceData.baseLiter * acceptanceData.coef);
 
       const fboSalesAmt = productPrice > 0 ? round2((productPrice * fboCommissionPct) / 100) : 0;
       const fbsSalesAmt = productPrice > 0 ? round2((productPrice * fbsCommissionPct) / 100) : 0;
@@ -620,7 +630,8 @@ export class CommissionSyncService {
   }
 
   private async fetchWbAcceptanceCoef(authHeader: Record<string, string>): Promise<{ coef: number; baseLiter: number }> {
-    const DEFAULT: { coef: number; baseLiter: number } = { coef: 1, baseLiter: 30 };
+    // Базовый тариф WB: 1,7 ₽/л (публичная документация WB)
+    const DEFAULT: { coef: number; baseLiter: number } = { coef: 1, baseLiter: 1.7 };
     try {
       const { data } = await firstValueFrom(
         this.httpService.get<Array<{
@@ -635,24 +646,32 @@ export class CommissionSyncService {
       );
       if (!Array.isArray(data) || data.length === 0) return DEFAULT;
 
-      // Берём только склады, которые принимают товар (allowUnload=true, coef >= 0)
-      // Используем МИНИМАЛЬНЫЙ коэффициент — он отражает лучший доступный вариант.
-      // Это важно для юнит-экономики: селлер всегда выберет минимальную ставку.
+      // Берём только склады, которые принимают товар (allowUnload=true, coef >= 0).
+      // Используем СРЕДНИЙ коэффициент — это даёт более реалистичную оценку для
+      // юнит-экономики. Селлер ищет минимум, но в среднем платит не минимум,
+      // а усреднённое значение по доступным складам.
       const accepting = data.filter(
         (d) => d.allowUnload === true && d.coefficient !== null && Number(d.coefficient) >= 0,
       );
       if (!accepting.length) return DEFAULT;
 
-      const minCoef = Math.min(...accepting.map((d) => Number(d.coefficient)));
-      const best = accepting.find((d) => Number(d.coefficient) === minCoef);
+      const coefs = accepting.map((d) => Number(d.coefficient));
+      const avgCoef = round2(coefs.reduce((a, b) => a + b, 0) / coefs.length);
 
-      // deliveryBaseLiter — реальная ставка ₽/л от WB API; если null, используем 30 ₽/л
-      const baseLiter = Number(best?.deliveryBaseLiter ?? 0) || 30;
+      // deliveryBaseLiter — ставка ₽/л от WB API; усредняем по ненулевым значениям.
+      // Fallback: 1,7 ₽/л (публичный тариф WB для коробов).
+      const baseLiterValues = accepting
+        .map((d) => Number(d.deliveryBaseLiter ?? 0))
+        .filter((v) => v > 0);
+      const avgBaseLiter = baseLiterValues.length
+        ? round2(baseLiterValues.reduce((a, b) => a + b, 0) / baseLiterValues.length)
+        : 1.7;
 
       this.logger.log(
-        `[fetchWbAcceptanceCoef] minCoef=${minCoef}, baseLiter=${baseLiter} (от ${accepting.length} складов)`,
+        `[fetchWbAcceptanceCoef] avgCoef=${avgCoef}, baseLiter=${avgBaseLiter}` +
+        ` (по ${accepting.length} складам, min=${Math.min(...coefs)}, max=${Math.max(...coefs)})`,
       );
-      return { coef: minCoef, baseLiter };
+      return { coef: avgCoef, baseLiter: avgBaseLiter };
     } catch (e) {
       this.logger.warn(`[fetchWbAcceptanceCoef] ${e instanceof Error ? e.message : String(e)}`);
       return DEFAULT;
@@ -663,4 +682,33 @@ export class CommissionSyncService {
 /** Округление до 2 знаков. */
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+/**
+ * Расчётная стоимость FBO-фулфилмента Ozon на единицу товара по объёму (₽).
+ * Используется как fallback, когда API возвращает 0 (товар не на FBO или данные не готовы).
+ *
+ * Прогрессивный тариф Ozon «Обработка и перемещение» (действует с 10 декабря 2025):
+ *   1-й литр:      46,77 ₽
+ *   2–3 литры:    +10,17 ₽/л
+ *   4–190 литры:  +15,25 ₽/л
+ *   191–1000 л:   + 6,10 ₽/л
+ *   > 1000 л:     фиксировано 7 859,86 ₽
+ * Применяем без коэффициента СВД (K=1.0 — доставка < 29 ч, Ozon FBO оптимальный сценарий).
+ */
+function calcOzonFboFulfillment(volumeLiters: number): number {
+  const v = Math.max(volumeLiters, 0.001);
+  let cost: number;
+  if (v <= 1) {
+    cost = 46.77;
+  } else if (v <= 3) {
+    cost = 46.77 + (v - 1) * 10.17;
+  } else if (v <= 190) {
+    cost = 46.77 + 2 * 10.17 + (v - 3) * 15.25;
+  } else if (v <= 1000) {
+    cost = 46.77 + 2 * 10.17 + 187 * 15.25 + (v - 190) * 6.1;
+  } else {
+    cost = 7859.86;
+  }
+  return round2(cost);
 }

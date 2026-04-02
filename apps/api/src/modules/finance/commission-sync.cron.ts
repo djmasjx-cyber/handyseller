@@ -29,7 +29,7 @@ export class CommissionSyncCron {
       distinct: ['userId', 'marketplace'],
     });
 
-    const userIds = [...new Set(connections.map((c) => c.userId))];
+    const userIds = [...new Set(connections.map((c: { userId: string }) => c.userId))];
     this.logger.log(`[CommissionSyncCron] Пользователей для синхронизации: ${userIds.length}`);
 
     let totalOzon = 0;
