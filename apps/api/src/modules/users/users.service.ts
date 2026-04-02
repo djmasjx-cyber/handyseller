@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../common/database/prisma.service';
 import { CryptoService } from '../../common/crypto/crypto.service';
 
@@ -43,9 +43,28 @@ export class UsersService {
     });
   }
 
-  async updateProfile(userId: string, data: { name?: string; phone?: string; linkedToUserEmail?: string }) {
+  async updateProfile(userId: string, data: { name?: string; phone?: string; email?: string; linkedToUserEmail?: string }) {
     const encryptedName = data.name !== undefined ? this.crypto.encryptOptional(data.name) : undefined;
     const encryptedPhone = data.phone !== undefined ? this.crypto.encryptOptional(data.phone) : undefined;
+
+    // Смена email: перехешировать и перешифровать, проверить уникальность
+    let newEmailHash: string | undefined;
+    let newEmailEncrypted: string | undefined;
+    if (data.email !== undefined && data.email.trim()) {
+      const emailNorm = data.email.trim().toLowerCase();
+      const candidateHash = this.crypto.hashForLookup(emailNorm);
+      // Проверяем, не занят ли email другим пользователем
+      const existing = await this.prisma.user.findFirst({
+        where: { emailHash: candidateHash, NOT: { id: userId } },
+        select: { id: true },
+      });
+      if (existing) {
+        throw new ConflictException('Этот email уже используется другим аккаунтом.');
+      }
+      newEmailHash = candidateHash;
+      newEmailEncrypted = this.crypto.encrypt(emailNorm);
+    }
+
     let linkedToUserId: string | null | undefined = undefined;
     if (data.linkedToUserEmail !== undefined) {
       const email = data.linkedToUserEmail == null ? '' : String(data.linkedToUserEmail).trim();
@@ -68,6 +87,8 @@ export class UsersService {
     const updateData: Record<string, unknown> = {};
     if (encryptedName !== undefined) updateData.name = encryptedName;
     if (encryptedPhone !== undefined) updateData.phone = encryptedPhone;
+    if (newEmailHash !== undefined) updateData.emailHash = newEmailHash;
+    if (newEmailEncrypted !== undefined) updateData.emailEncrypted = newEmailEncrypted;
     if (linkedToUserId !== undefined) updateData.linkedToUserId = linkedToUserId;
     if (Object.keys(updateData).length === 0) return this.findById(userId);
 

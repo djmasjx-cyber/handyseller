@@ -167,23 +167,47 @@ export default function SettingsPage() {
     setOrg((prev) => ({ ...prev, [field]: value }))
   }
 
+  /** 8xxxxxxxxxx → +7..., 10 цифр → +7..., 7xxxxxxxxxx → +7... */
+  function normalizePhone(raw: string): string {
+    const digits = raw.replace(/\D/g, "")
+    if (digits.length === 11 && (digits.startsWith("8") || digits.startsWith("7"))) {
+      return "+7" + digits.slice(1)
+    }
+    if (digits.length === 10) {
+      return "+7" + digits
+    }
+    return raw.trim()
+  }
+
+  function handlePhoneChange(raw: string) {
+    // Автозамена: пользователь вводит с "8" — сразу конвертируем в +7
+    if (raw.startsWith("8") && !raw.startsWith("+")) {
+      setPhone("+7" + raw.slice(1))
+    } else {
+      setPhone(raw)
+    }
+  }
+
   async function handleProfileSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!token) { router.push("/login"); return }
     setProfileSaving(true)
     setProfileMsg(null)
     try {
+      const normalizedPhone = phone.trim() ? normalizePhone(phone.trim()) : undefined
       const res = await fetch("/api/users/me", {
         method: "PATCH",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           name: name.trim() || undefined,
-          phone: phone.trim() || undefined,
+          phone: normalizedPhone,
+          email: email.trim() || undefined,
           linkedToUserEmail: linkedToUserEmail.trim() ? linkedToUserEmail.trim() : null,
         }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.message || "Ошибка сохранения")
+      if (normalizedPhone) setPhone(normalizedPhone)
       document.cookie = userCookie(data.name || name.trim())
       setProfileMsg({ type: "success", text: "Профиль сохранён" })
     } catch (err) {
@@ -278,17 +302,36 @@ export default function SettingsPage() {
                 <Label htmlFor="phone">Телефон</Label>
                 <div className="relative">
                   <Smartphone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input id="phone" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+7 (999) 123-45-67" className="pl-10" />
+                  <Input
+                    id="phone"
+                    value={phone}
+                    onChange={(e) => handlePhoneChange(e.target.value)}
+                    onBlur={() => { if (phone.trim()) setPhone(normalizePhone(phone)) }}
+                    placeholder="+7 (999) 123-45-67"
+                    className="pl-10"
+                  />
                 </div>
+                <p className="text-xs text-muted-foreground">
+                  Если ввести 8 или 10 цифр — автоматически добавится +7.
+                </p>
               </div>
 
               <div className="space-y-2">
                 <Label htmlFor="email">Почта</Label>
                 <div className="relative">
                   <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input id="email" value={email} readOnly className="pl-10 bg-muted cursor-default" />
+                  <Input
+                    id="email"
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="example@mail.ru"
+                    className="pl-10"
+                  />
                 </div>
-                <p className="text-xs text-muted-foreground">Email используется для входа — изменить можно через обращение в поддержку.</p>
+                <p className="text-xs text-muted-foreground">
+                  Email используется для входа в систему. После смены войдите с новым адресом.
+                </p>
               </div>
 
               <div className="space-y-2">
