@@ -101,6 +101,29 @@ export class UsersService {
     return { ...out, linkedToUserEmail };
   }
 
+  // ---------------------------------------------------------------------------
+  // Organization profile
+  // ---------------------------------------------------------------------------
+
+  async getOrganization(userId: string) {
+    return this.prisma.organizationProfile.findUnique({ where: { userId } });
+  }
+
+  async upsertOrganization(userId: string, data: {
+    entityType?: string; taxSystem?: string; vatRate?: string;
+    inn?: string; kpp?: string; ogrn?: string; okpo?: string; okved?: string;
+    fullName?: string; shortName?: string;
+    legalAddress?: string; actualAddress?: string;
+    bik?: string; bankName?: string; settlementAccount?: string; corrAccount?: string;
+    orgPhone?: string; directorName?: string; chiefAccountant?: string;
+  }) {
+    return this.prisma.organizationProfile.upsert({
+      where: { userId },
+      create: { userId, ...data },
+      update: { ...data, updatedAt: new Date() },
+    });
+  }
+
   /** Для админа: список всех пользователей с агрегатами */
   async findAllForAdmin(opts?: { skip?: number; take?: number }) {
     const [users, total] = await Promise.all([

@@ -39,6 +39,7 @@ model User {
   productChangeLogs ProductChangeLog[]
   payments          Payment[]
   reviews           Review[]
+  organizationProfile OrganizationProfile?
 }
 
 model RefreshToken {
@@ -120,6 +121,50 @@ model EmailVerification {
 enum Role {
   USER
   ADMIN
+}
+
+/// Реквизиты юридического лица / ИП — для выставления счетов и актов.
+model OrganizationProfile {
+  id              String   @id @default(uuid())
+  userId          String   @unique @map("user_id")
+
+  // Тип организации и налогообложение
+  entityType      String?  @map("entity_type")   // ООО | ИП | АО | ПАО
+  taxSystem       String?  @map("tax_system")     // ОСНО | УСН_ДОХОДЫ | УСН_ДОХОДЫ_РАСХОДЫ | ПСН | ЕСХН | НПД | АУСН
+  vatRate         String?  @map("vat_rate")       // БЕЗ_НДС | 0 | 5 | 7 | 10 | 20
+
+  // Идентификаторы
+  inn             String?  // ИНН
+  kpp             String?  // КПП (только для ООО/АО)
+  ogrn            String?  // ОГРН (ООО) или ОГРНИП (ИП)
+  okpo            String?  // ОКПО
+  okved           String?  // Основной ОКВЭД
+
+  // Наименования
+  fullName        String?  @map("full_name")      // Полное наименование
+  shortName       String?  @map("short_name")     // Сокращённое наименование
+
+  // Адреса
+  legalAddress    String?  @map("legal_address")  // Юридический адрес
+  actualAddress   String?  @map("actual_address") // Фактический адрес
+
+  // Банковские реквизиты
+  bik             String?  // БИК
+  bankName        String?  @map("bank_name")      // Наименование банка
+  settlementAccount String? @map("settlement_account") // Расчётный счёт
+  corrAccount     String?  @map("corr_account")   // Корреспондентский счёт
+
+  // Контакты и подписанты
+  orgPhone        String?  @map("org_phone")      // Телефон организации
+  directorName    String?  @map("director_name")  // Генеральный директор / ИП
+  chiefAccountant String?  @map("chief_accountant") // Главный бухгалтер
+
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("organization_profile")
 }
 
 enum ReviewStatus {
