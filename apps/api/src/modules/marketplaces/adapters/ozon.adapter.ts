@@ -112,7 +112,7 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
     const endpoints: Array<{ url: string; body: object }> = [
       { url: `${this.API_BASE}/v1/warehouse/list`, body: {} },
       { url: `${this.API_BASE}/v2/product/list`, body: { limit: 1, offset: 0 } },
-      { url: `${this.API_BASE}/v3/product/list`, body: {} },
+      { url: `${this.API_BASE}/v3/product/list`, body: { filter: { visibility: 'ALL' }, limit: 1 } },
     ];
     let lastError: string | null = null;
     for (const { url, body } of endpoints) {
