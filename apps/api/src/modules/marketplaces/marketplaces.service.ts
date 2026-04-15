@@ -2801,6 +2801,7 @@ export class MarketplacesService {
   async importProductsFromMarketplace(
     userId: string,
     marketplace: 'WILDBERRIES' | 'OZON' | 'YANDEX' | 'AVITO',
+    options?: { onProgress?: (progress: { processed: number; total: number; percent: number }) => Promise<void> | void },
   ): Promise<{ imported: number; skipped: number; articlesUpdated?: number; errors: string[] }> {
     if (marketplace !== 'WILDBERRIES' && marketplace !== 'OZON') {
       throw new BadRequestException(`Импорт с ${marketplace} пока не поддерживается`);
@@ -2824,7 +2825,7 @@ export class MarketplacesService {
       if (!adapter || !(adapter instanceof OzonAdapter)) {
         throw new BadRequestException('Ошибка загрузки товаров с Ozon: неверный адаптер');
       }
-      return this.importFromOzon(userId, conn, adapter);
+      return this.importFromOzon(userId, conn, adapter, options);
     }
 
     if (!adapter || !(adapter instanceof WildberriesAdapter)) {
@@ -2970,6 +2971,7 @@ export class MarketplacesService {
     userId: string,
     conn: { id: string },
     adapter: OzonAdapter,
+    options?: { onProgress?: (progress: { processed: number; total: number; percent: number }) => Promise<void> | void },
   ): Promise<{ imported: number; skipped: number; articlesUpdated?: number; errors: string[] }> {
     console.log(`[importFromOzon] Starting import for userId=${userId}, connId=${conn.id}`);
     const [ozonProducts, categoryTree] = await Promise.all([
@@ -2983,8 +2985,16 @@ export class MarketplacesService {
     let skipped = 0;
     let articlesUpdated = 0;
     const errors: string[] = [];
-
-    for (const p of ozonProducts) {
+    const PROCESS_CONCURRENCY = 12;
+    let processed = 0;
+    const total = ozonProducts.length;
+    const reportProgress = async () => {
+      if (!options?.onProgress) return;
+      const percent = total > 0 ? Math.round((processed / total) * 100) : 100;
+      await options.onProgress({ processed, total, percent });
+    };
+    await reportProgress();
+    const processProduct = async (p: (typeof ozonProducts)[number]) => {
       const ozonCategoryPath = (p.ozonCategoryId && p.ozonTypeId)
         ? categoryPathMap.get(`${p.ozonCategoryId}-${p.ozonTypeId}`)
         : undefined;
@@ -3032,11 +3042,11 @@ export class MarketplacesService {
           externalArticle: p.offerId,
         });
         skipped++;
-        continue;
+        return;
       }
       try {
         const title = (p.name || `Товар ${p.productId}`).trim().slice(0, 500);
-        if (!title) continue;
+        if (!title) return;
         const created = await this.productsService.create(userId, {
           title,
           description: p.description?.slice(0, 5000),
@@ -3062,6 +3072,13 @@ export class MarketplacesService {
       } catch (err) {
         errors.push(`${p.name}: ${err instanceof Error ? err.message : String(err)}`);
       }
+    };
+
+    for (let i = 0; i < ozonProducts.length; i += PROCESS_CONCURRENCY) {
+      const chunk = ozonProducts.slice(i, i + PROCESS_CONCURRENCY);
+      await Promise.all(chunk.map((p) => processProduct(p)));
+      processed += chunk.length;
+      await reportProgress();
     }
 
     if (imported > 0 || articlesUpdated > 0) {

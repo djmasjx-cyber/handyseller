@@ -29,3 +29,13 @@ scenarios:
             email: "load-{{ $randomNumber() }}@test.com"
             password: "LoadTest123!"
             name: "Load User"
+  - name: "Marketplace import async (heavy)"
+    weight: 2
+    flow:
+      - post:
+          url: "/marketplaces/import?async=true"
+          headers:
+            Authorization: "Bearer {{ $env.API_BEARER_TOKEN }}"
+            Content-Type: "application/json"
+          json:
+            marketplace: "OZON"

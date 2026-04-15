@@ -233,6 +233,17 @@ export class MarketplacesController {
     return status;
   }
 
+  /** Статус фонового импорта маркетплейса (очередь BullMQ) */
+  @Get('import/status/:jobId')
+  async getImportStatus(
+    @CurrentUser('userId') _userId: string,
+    @Param('jobId') jobId: string,
+  ) {
+    const status = await this.syncQueueService.getJobStatus(jobId);
+    if (!status) throw new BadRequestException('Задача не найдена');
+    return status;
+  }
+
   @Get('orders')
   async getOrders(
     @CurrentUser('userId') userId: string,
@@ -542,9 +553,16 @@ export class MarketplacesController {
   async importProducts(
     @CurrentUser('userId') userId: string,
     @Body() body: { marketplace?: 'WILDBERRIES' | 'OZON' | 'YANDEX' | 'AVITO' },
+    @Query('async') asyncMode?: string,
   ) {
     const marketplace = body?.marketplace ?? 'WILDBERRIES';
+    const isAsyncRequested = asyncMode === '1' || asyncMode === 'true';
+    // Ozon import can include thousands of products and often exceeds gateway timeout.
+    const shouldRunAsync = isAsyncRequested || marketplace === 'OZON';
     try {
+      if (shouldRunAsync) {
+        return this.syncQueueService.addImportJob(userId, marketplace);
+      }
       return await this.marketplacesService.importProductsFromMarketplace(userId, marketplace);
     } catch (err) {
       if (err instanceof BadRequestException) throw err;

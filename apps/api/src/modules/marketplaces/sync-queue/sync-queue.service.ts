@@ -9,6 +9,11 @@ export interface SyncJobResult {
   message: string;
 }
 
+export interface ImportJobResult {
+  jobId: string;
+  message: string;
+}
+
 @Injectable()
 export class SyncQueueService {
   constructor(
@@ -25,6 +30,17 @@ export class SyncQueueService {
     return {
       jobId: job.id ?? String(job),
       message: `Синхронизация запущена. jobId=${job.id}`,
+    };
+  }
+
+  async addImportJob(
+    userId: string,
+    marketplace: 'WILDBERRIES' | 'OZON' | 'YANDEX' | 'AVITO',
+  ): Promise<ImportJobResult> {
+    const job = await this.syncQueue.add('import', { userId, marketplace }, { removeOnComplete: 100 });
+    return {
+      jobId: job.id ?? String(job),
+      message: `Импорт запущен в фоне. jobId=${job.id}`,
     };
   }
 

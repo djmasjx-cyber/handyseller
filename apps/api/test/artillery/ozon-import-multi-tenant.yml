@@ -1,0 +1,43 @@
+# Multi-tenant heavy import load test for Ozon.
+# Goal: emulate several large sellers triggering import concurrently.
+#
+# Usage:
+# 1) Create CSV file with bearer tokens, one row per client:
+#    apps/api/test/artillery/data/import-clients.csv
+#    token
+#    eyJhbGciOi...
+#    eyJhbGciOi...
+# 2) Run:
+#    npx artillery run apps/api/test/artillery/ozon-import-multi-tenant.yml
+#
+config:
+  target: "http://localhost:4000"
+  processor: "./processors/import-auth.js"
+  phases:
+    - duration: 60
+      arrivalRate: 2
+      rampTo: 8
+      name: "Ramp imports"
+    - duration: 180
+      arrivalRate: 8
+      name: "Sustained parallel imports"
+  payload:
+    path: "./data/import-clients.csv"
+    fields:
+      - token
+    order: sequence
+  defaults:
+    headers:
+      Content-Type: "application/json"
+
+scenarios:
+  - name: "Async Ozon import by many tenants"
+    flow:
+      - function: "setAuthHeader"
+      - post:
+          url: "/marketplaces/import?async=true"
+          headers:
+            Authorization: "{{ __authHeader }}"
+          json:
+            marketplace: "OZON"
+      - think: 2

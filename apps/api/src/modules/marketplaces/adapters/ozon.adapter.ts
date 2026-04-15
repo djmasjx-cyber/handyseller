@@ -1908,6 +1908,8 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
         depth?: number;
         description_category_id?: number;
         type_id?: number;
+        primary_image?: string;
+        image?: string;
       }>;
       this.logger.log(`[getProductsFromOzon] /v3/product/info/list batch returned ${infoItems.length} items`);
       for (const inf of infoItems) {
@@ -1949,6 +1951,11 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
         const allImageUrls = (Array.isArray(rawImages) ? rawImages : [])
           .map((img) => (typeof img === 'string' ? img : (img as { url?: string })?.url))
           .filter((u): u is string => typeof u === 'string' && u.startsWith('http'));
+        const primaryImage = [inf?.primary_image, inf?.image]
+          .find((u): u is string => typeof u === 'string' && u.startsWith('http'));
+        if (primaryImage && !allImageUrls.includes(primaryImage)) {
+          allImageUrls.unshift(primaryImage);
+        }
         const imageUrl = allImageUrls[0];
         const priceStr = inf?.marketing_price ?? inf?.price ?? inf?.old_price;
         const price = priceStr != null ? parseFloat(String(priceStr)) : undefined;
