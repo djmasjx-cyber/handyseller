@@ -101,6 +101,23 @@ interface SubscriptionLimits {
   materialsAllowed: boolean
 }
 
+interface ImportProgressInfo {
+  phase?: string
+  processed?: number
+  total?: number
+  percent?: number
+}
+
+interface ImportJobState {
+  jobId: string
+  marketplace: "WILDBERRIES" | "OZON"
+  state: string
+  progress?: ImportProgressInfo
+  result?: { imported?: number; skipped?: number; errors?: string[]; articlesUpdated?: number }
+  failedReason?: string
+  message?: string
+}
+
 export default function ProductsPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -109,6 +126,7 @@ export default function ProductsPage() {
   const [limits, setLimits] = useState<SubscriptionLimits | null>(null)
   const [loading, setLoading] = useState(true)
   const [importingMarketplace, setImportingMarketplace] = useState<"WILDBERRIES" | "OZON" | null>(null)
+  const [importJob, setImportJob] = useState<ImportJobState | null>(null)
 
   const token = typeof window !== "undefined" ? localStorage.getItem("accessToken") : null
 
@@ -541,6 +559,65 @@ export default function ProductsPage() {
 
   const [importError, setImportError] = useState<string | null>(null)
 
+  useEffect(() => {
+    if (!token || !importJob?.jobId) return
+    const terminalStates = new Set(["completed", "failed"])
+    if (terminalStates.has(importJob.state)) return
+
+    let stop = false
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/marketplaces/import/status/${importJob.jobId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) return
+        const nextState = String(data?.state ?? "")
+        const nextProgressRaw = data?.progress
+        const nextProgress =
+          typeof nextProgressRaw === "object" && nextProgressRaw !== null
+            ? (nextProgressRaw as ImportProgressInfo)
+            : undefined
+        const nextResult =
+          typeof data?.result === "object" && data?.result !== null
+            ? (data.result as ImportJobState["result"])
+            : undefined
+        setImportJob((prev) =>
+          prev
+            ? {
+                ...prev,
+                state: nextState || prev.state,
+                progress: nextProgress ?? prev.progress,
+                result: nextResult ?? prev.result,
+                failedReason: (data?.failedReason as string | undefined) ?? prev.failedReason,
+              }
+            : prev
+        )
+        if (nextState === "completed") {
+          setImportingMarketplace(null)
+          fetchProducts()
+          fetchWbStockFbo()
+          fetchOzonStockFbo()
+        } else if (nextState === "failed") {
+          setImportingMarketplace(null)
+          const reason = (data?.failedReason as string | undefined) ?? "Ошибка фонового импорта"
+          setImportError(reason)
+        }
+      } catch {
+        // silent background polling
+      }
+    }
+
+    poll()
+    const id = window.setInterval(() => {
+      if (!stop) void poll()
+    }, 2000)
+    return () => {
+      stop = true
+      window.clearInterval(id)
+    }
+  }, [token, importJob?.jobId, importJob?.state])
+
   // История изменений (остатки + поля)
   const [historyProduct, setHistoryProduct] = useState<Product | null>(null)
   const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([])
@@ -574,6 +651,7 @@ export default function ProductsPage() {
     if (marketplace === "OZON" && !isOzonConnected) return
     setImportingMarketplace(marketplace)
     setImportError(null)
+    let asyncStarted = false
     try {
       const res = await fetch("/api/marketplaces/import", {
         method: "POST",
@@ -600,6 +678,18 @@ export default function ProductsPage() {
         setImportError(String(msg))
         return
       }
+      const jobId = typeof data.jobId === "string" ? data.jobId : null
+      if (jobId) {
+        asyncStarted = true
+        setImportJob({
+          jobId,
+          marketplace,
+          state: "waiting",
+          progress: { phase: "start", processed: 0, total: 0, percent: 0 },
+          message: typeof data.message === "string" ? data.message : undefined,
+        })
+        return
+      }
       const msg = `Импортировано: ${data.imported}. Пропущено (уже есть): ${data.skipped}.`
       if (Array.isArray(data.errors) && data.errors.length) {
         setImportError(`${msg} Ошибки: ${(data.errors as string[]).slice(0, 3).join("; ")}`)
@@ -611,7 +701,9 @@ export default function ProductsPage() {
     } catch (err) {
       setImportError(err instanceof Error ? err.message : "Ошибка импорта товаров")
     } finally {
-      setImportingMarketplace(null)
+      if (!asyncStarted) {
+        setImportingMarketplace(null)
+      }
     }
   }
 
@@ -719,6 +811,50 @@ export default function ProductsPage() {
       {importError && (
         <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">
           {importError}
+        </div>
+      )}
+
+      {importJob && (
+        <div className="rounded-lg border border-primary/20 bg-primary/5 p-4 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-sm font-medium">
+              Импорт {importJob.marketplace === "OZON" ? "Ozon" : "WB"}: {importJob.state === "completed" ? "завершён" : importJob.state === "failed" ? "ошибка" : "в процессе"}
+            </div>
+            <div className="text-xs text-muted-foreground">jobId: {importJob.jobId}</div>
+          </div>
+          {typeof importJob.progress?.percent === "number" && (
+            <>
+              <div className="h-2 w-full rounded bg-muted">
+                <div
+                  className="h-2 rounded bg-primary transition-all"
+                  style={{ width: `${Math.max(0, Math.min(100, importJob.progress.percent))}%` }}
+                />
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {importJob.progress.processed ?? 0} / {importJob.progress.total ?? 0} • {importJob.progress.percent}%
+              </div>
+            </>
+          )}
+          {importJob.state === "completed" && importJob.result && (
+            <div className="text-sm text-green-700 dark:text-green-400">
+              Импортировано: {importJob.result.imported ?? 0}. Пропущено: {importJob.result.skipped ?? 0}.
+              {Array.isArray(importJob.result.errors) && importJob.result.errors.length > 0 && (
+                <span> Ошибки: {importJob.result.errors.slice(0, 2).join("; ")}</span>
+              )}
+            </div>
+          )}
+          {importJob.state === "failed" && (
+            <div className="text-sm text-destructive">
+              {importJob.failedReason || "Импорт завершился с ошибкой"}
+            </div>
+          )}
+          {(importJob.state === "completed" || importJob.state === "failed") && (
+            <div>
+              <Button variant="outline" size="sm" onClick={() => setImportJob(null)}>
+                Скрыть статус
+              </Button>
+            </div>
+          )}
         </div>
       )}
 
