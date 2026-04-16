@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback, useRef } from "react"
+import { Fragment, useState, useEffect, useCallback, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { Button, Badge } from "@handyseller/ui"
 import { RefreshCw, Loader2, AlertCircle, Info, PencilLine, Check, X } from "lucide-react"
@@ -542,7 +542,7 @@ export function FinanceTable({ scheme }: Props) {
                 {marketplaces.map((mp) => {
                   const col3 = getMpCol3Config(mp, scheme)
                   return (
-                    <React.Fragment key={mp}>
+                    <Fragment key={mp}>
                       <th className="px-2 py-1.5 text-right font-medium border-l">
                         <button
                           type="button"
@@ -633,7 +633,7 @@ export function FinanceTable({ scheme }: Props) {
                           )}
                         </button>
                       </th>
-                    </React.Fragment>
+                    </Fragment>
                   )
                 })}
               </tr>
