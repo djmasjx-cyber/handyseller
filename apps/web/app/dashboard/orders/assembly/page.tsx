@@ -202,13 +202,14 @@ export default function OrdersAssemblyPage() {
   const [loadingMore, setLoadingMore] = useState(false)
   const [ordersTotal, setOrdersTotal] = useState(0)
   const loadMoreRef = useRef<HTMLDivElement | null>(null)
+  const offsetRef = useRef(0)
   const assemblyOrders = orders.filter(
     (o) => (o.status === "IN_PROGRESS" || o.status === "NEW") && !isFinalOrder(o)
   )
 
-  const fetchOrders = useCallback(async (reset = true) => {
+  const fetchOrders = useCallback(async (reset = true, pageOffset?: number) => {
     if (!token) return
-    const nextOffset = reset ? 0 : offset
+    const nextOffset = reset ? 0 : (pageOffset ?? offsetRef.current)
     const params = new URLSearchParams({
       limit: String(PAGE_SIZE),
       offset: String(nextOffset),
@@ -221,9 +222,11 @@ export default function OrdersAssemblyPage() {
     const items = Array.isArray(data?.items) ? data.items : []
     setOrders((prev) => (reset ? items : [...prev, ...items]))
     setHasMore(Boolean(data?.hasMore))
-    setOffset(nextOffset + items.length)
+    const newOffset = nextOffset + items.length
+    setOffset(newOffset)
+    offsetRef.current = newOffset
     setOrdersTotal(typeof data?.total === "number" ? data.total : 0)
-  }, [token, offset])
+  }, [token])
 
   const hasWbInProgress = assemblyOrders.some((o) => o.marketplace === "WILDBERRIES" && o.status === "IN_PROGRESS")
 
@@ -297,7 +300,7 @@ export default function OrdersAssemblyPage() {
       clearInterval(t)
       document.removeEventListener("visibilitychange", onVisibilityChange)
     }
-  }, [router, token, fetchOrders])
+  }, [router, token])
 
   const handleSync = async () => {
     if (!token) return
@@ -419,7 +422,7 @@ export default function OrdersAssemblyPage() {
     const observer = new IntersectionObserver((entries) => {
       if (!entries[0]?.isIntersecting) return
       setLoadingMore(true)
-      fetchOrders(false).catch(() => {}).finally(() => setLoadingMore(false))
+      fetchOrders(false, offsetRef.current).catch(() => {}).finally(() => setLoadingMore(false))
     }, { rootMargin: "300px" })
     observer.observe(node)
     return () => observer.disconnect()

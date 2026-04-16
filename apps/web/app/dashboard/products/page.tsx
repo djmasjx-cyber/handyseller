@@ -133,6 +133,7 @@ export default function ProductsPage() {
   const [loadingMore, setLoadingMore] = useState(false)
   const [productsTotal, setProductsTotal] = useState(0)
   const loadMoreRef = useRef<HTMLDivElement | null>(null)
+  const offsetRef = useRef(0)
   const [searchQuery, setSearchQuery] = useState("") // Поиск по артикулу или наименованию
   type ProductsSortKey = "stockFbs" | "stockFbo" | "reservedFbs" | "reservedFbo" | "cost"
   type SortDirection = "asc" | "desc"
@@ -153,9 +154,9 @@ export default function ProductsPage() {
   const [wbStockFbo, setWbStockFbo] = useState<Record<string, number>>({})
   const [ozonStockFbo, setOzonStockFbo] = useState<Record<string, number>>({})
 
-  const fetchProducts = useCallback(async (reset = true) => {
+  const fetchProducts = useCallback(async (reset = true, pageOffset?: number) => {
     if (!token) return
-    const nextOffset = reset ? 0 : offset
+    const nextOffset = reset ? 0 : (pageOffset ?? offsetRef.current)
     const params = new URLSearchParams({
       limit: String(PAGE_SIZE),
       offset: String(nextOffset),
@@ -168,9 +169,11 @@ export default function ProductsPage() {
     const list = Array.isArray(data?.items) ? data.items : []
     setProducts((prev) => (reset ? list : [...prev, ...list]))
     setHasMore(Boolean(data?.hasMore))
-    setOffset(nextOffset + list.length)
+    const newOffset = nextOffset + list.length
+    setOffset(newOffset)
+    offsetRef.current = newOffset
     setProductsTotal(typeof data?.total === "number" ? data.total : 0)
-  }, [token, offset, sortKey, sortDirection, searchQuery])
+  }, [token, sortKey, sortDirection, searchQuery])
 
   const fetchWbStockFbo = () => {
     if (!token || !isWbConnected) return
@@ -229,7 +232,7 @@ export default function ProductsPage() {
     }).catch(() => {})
     const t = setInterval(() => { fetchProducts(true).catch(() => {}) }, 60000)
     return () => clearInterval(t)
-  }, [router, token, fetchProducts])
+  }, [router, token])
 
   // Открыть историю по ?history=productId (при переходе из карточки товара).
   // historyId — UUID или displayId (0006, 6).
@@ -369,6 +372,8 @@ export default function ProductsPage() {
 
   useEffect(() => {
     if (!token) return
+    setOffset(0)
+    offsetRef.current = 0
     fetchProducts(true).catch(() => setProducts([]))
   }, [token, sortKey, sortDirection, searchQuery, fetchProducts])
 
@@ -378,7 +383,7 @@ export default function ProductsPage() {
     const observer = new IntersectionObserver((entries) => {
       if (!entries[0]?.isIntersecting) return
       setLoadingMore(true)
-      fetchProducts(false)
+      fetchProducts(false, offsetRef.current)
         .catch(() => {})
         .finally(() => setLoadingMore(false))
     }, { rootMargin: "300px" })

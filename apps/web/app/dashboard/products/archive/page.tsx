@@ -47,13 +47,14 @@ export default function ProductsArchivePage() {
   const [hasMore, setHasMore] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const loadMoreRef = useRef<HTMLDivElement | null>(null)
+  const offsetRef = useRef(0)
   const PAGE_SIZE = 20
 
   const token = typeof window !== "undefined" ? localStorage.getItem("accessToken") : null
 
-  const fetchArchived = useCallback(async (reset = true) => {
+  const fetchArchived = useCallback(async (reset = true, pageOffset?: number) => {
     if (!token) return
-    const nextOffset = reset ? 0 : offset
+    const nextOffset = reset ? 0 : (pageOffset ?? offsetRef.current)
     const params = new URLSearchParams({
       limit: String(PAGE_SIZE),
       offset: String(nextOffset),
@@ -64,8 +65,10 @@ export default function ProductsArchivePage() {
     const items = Array.isArray(data?.items) ? data.items : []
     setProducts((prev) => (reset ? items : [...prev, ...items]))
     setHasMore(Boolean(data?.hasMore))
-    setOffset(nextOffset + items.length)
-  }, [token, offset])
+    const newOffset = nextOffset + items.length
+    setOffset(newOffset)
+    offsetRef.current = newOffset
+  }, [token])
 
   useEffect(() => {
     if (!token) {
@@ -74,7 +77,7 @@ export default function ProductsArchivePage() {
     }
     fetchArchived(true).catch(() => setProducts([]))
     setLoading(false)
-  }, [router, token, fetchArchived])
+  }, [router, token])
 
   useEffect(() => {
     const node = loadMoreRef.current
@@ -82,7 +85,7 @@ export default function ProductsArchivePage() {
     const observer = new IntersectionObserver((entries) => {
       if (!entries[0]?.isIntersecting) return
       setLoadingMore(true)
-      fetchArchived(false).catch(() => {}).finally(() => setLoadingMore(false))
+      fetchArchived(false, offsetRef.current).catch(() => {}).finally(() => setLoadingMore(false))
     }, { rootMargin: "300px" })
     observer.observe(node)
     return () => observer.disconnect()

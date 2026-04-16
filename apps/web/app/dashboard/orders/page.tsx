@@ -177,6 +177,7 @@ export default function OrdersPage() {
   const [loadingMore, setLoadingMore] = useState(false)
   const [ordersTotal, setOrdersTotal] = useState(0)
   const loadMoreRef = useRef<HTMLDivElement | null>(null)
+  const offsetRef = useRef(0)
 
   type OrdersSortKey = "totalAmount" | "warehouse" | "status" | "processingTime"
   type SortDirection = "asc" | "desc"
@@ -185,9 +186,9 @@ export default function OrdersPage() {
 
   const token = typeof window !== "undefined" ? localStorage.getItem("accessToken") : null
 
-  const fetchOrders = useCallback(async (reset = true) => {
+  const fetchOrders = useCallback(async (reset = true, pageOffset?: number) => {
     if (!token) return
-    const nextOffset = reset ? 0 : offset
+    const nextOffset = reset ? 0 : (pageOffset ?? offsetRef.current)
     const params = new URLSearchParams({
       limit: String(PAGE_SIZE),
       offset: String(nextOffset),
@@ -200,14 +201,16 @@ export default function OrdersPage() {
       const items = Array.isArray(data?.items) ? data.items : []
       setOrders((prev) => (reset ? items : [...prev, ...items]))
       setHasMore(Boolean(data?.hasMore))
-      setOffset(nextOffset + items.length)
+      const newOffset = nextOffset + items.length
+      setOffset(newOffset)
+      offsetRef.current = newOffset
       setOrdersTotal(typeof data?.total === "number" ? data.total : 0)
     } catch {
       if (reset) setOrders([])
     } finally {
       setLoading(false)
     }
-  }, [token, offset, sortKey, sortDirection])
+  }, [token, sortKey, sortDirection])
 
   useEffect(() => {
     if (!token) {
@@ -246,11 +249,13 @@ export default function OrdersPage() {
       clearInterval(t)
       document.removeEventListener("visibilitychange", onVisibilityChange)
     }
-  }, [router, token, fetchOrders])
+  }, [router, token])
 
   useEffect(() => {
     if (!token) return
     setLoading(true)
+    setOffset(0)
+    offsetRef.current = 0
     fetchOrders(true)
   }, [token, sortKey, sortDirection, fetchOrders])
 
@@ -260,7 +265,7 @@ export default function OrdersPage() {
     const observer = new IntersectionObserver((entries) => {
       if (!entries[0]?.isIntersecting) return
       setLoadingMore(true)
-      fetchOrders(false).finally(() => setLoadingMore(false))
+      fetchOrders(false, offsetRef.current).finally(() => setLoadingMore(false))
     }, { rootMargin: "300px" })
     observer.observe(node)
     return () => observer.disconnect()
