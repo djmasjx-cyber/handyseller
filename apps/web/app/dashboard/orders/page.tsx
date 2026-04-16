@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Badge } from "@handyseller/ui"
 import { ShoppingCart, Loader2, RefreshCw, Package } from "lucide-react"
@@ -171,6 +171,12 @@ export default function OrdersPage() {
   const [syncingError, setSyncingError] = useState<string | null>(null)
   const [statusUpdatingId, setStatusUpdatingId] = useState<string | null>(null)
   const [statusError, setStatusError] = useState<string | null>(null)
+  const PAGE_SIZE = 20
+  const [offset, setOffset] = useState(0)
+  const [hasMore, setHasMore] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [ordersTotal, setOrdersTotal] = useState(0)
+  const loadMoreRef = useRef<HTMLDivElement | null>(null)
 
   type OrdersSortKey = "totalAmount" | "warehouse" | "status" | "processingTime"
   type SortDirection = "asc" | "desc"
@@ -179,21 +185,36 @@ export default function OrdersPage() {
 
   const token = typeof window !== "undefined" ? localStorage.getItem("accessToken") : null
 
-  const fetchOrders = () => {
+  const fetchOrders = useCallback(async (reset = true) => {
     if (!token) return
-    fetch("/api/orders", { headers: { Authorization: `Bearer ${token}` } })
-      .then((r) => r.json())
-      .then((data) => setOrders(Array.isArray(data) ? data : []))
-      .catch(() => setOrders([]))
-      .finally(() => setLoading(false))
-  }
+    const nextOffset = reset ? 0 : offset
+    const params = new URLSearchParams({
+      limit: String(PAGE_SIZE),
+      offset: String(nextOffset),
+      sortBy: sortKey,
+      sortDirection,
+    })
+    try {
+      const res = await fetch(`/api/orders/paged?${params.toString()}`, { headers: { Authorization: `Bearer ${token}` } })
+      const data = await res.json().catch(() => ({}))
+      const items = Array.isArray(data?.items) ? data.items : []
+      setOrders((prev) => (reset ? items : [...prev, ...items]))
+      setHasMore(Boolean(data?.hasMore))
+      setOffset(nextOffset + items.length)
+      setOrdersTotal(typeof data?.total === "number" ? data.total : 0)
+    } catch {
+      if (reset) setOrders([])
+    } finally {
+      setLoading(false)
+    }
+  }, [token, offset, sortKey, sortDirection])
 
   useEffect(() => {
     if (!token) {
       router.push("/login")
       return
     }
-    fetchOrders()
+    fetchOrders(true)
     const doSync = async () => {
       try {
         const res = await fetch("/api/orders/sync", {
@@ -202,7 +223,7 @@ export default function OrdersPage() {
         })
         const data = await res.json().catch(() => ({}))
         if (res.ok) {
-          fetchOrders()
+          fetchOrders(true)
           if (Array.isArray(data.errors) && data.errors.length > 0) {
             setSyncingError(`Ошибки: ${data.errors.join("; ")}`)
           }
@@ -214,7 +235,7 @@ export default function OrdersPage() {
     doSync()
     const refreshSilently = async () => {
       await doSync()
-      fetchOrders()
+      fetchOrders(true)
     }
     const t = setInterval(refreshSilently, 60000)
     const onVisibilityChange = () => {
@@ -225,7 +246,25 @@ export default function OrdersPage() {
       clearInterval(t)
       document.removeEventListener("visibilitychange", onVisibilityChange)
     }
-  }, [router, token])
+  }, [router, token, fetchOrders])
+
+  useEffect(() => {
+    if (!token) return
+    setLoading(true)
+    fetchOrders(true)
+  }, [token, sortKey, sortDirection, fetchOrders])
+
+  useEffect(() => {
+    const node = loadMoreRef.current
+    if (!node || !hasMore || loading || loadingMore) return
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries[0]?.isIntersecting) return
+      setLoadingMore(true)
+      fetchOrders(false).finally(() => setLoadingMore(false))
+    }, { rootMargin: "300px" })
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [fetchOrders, hasMore, loading, loadingMore])
 
   // Обновление таймера холда каждую секунду
   const [tick, setTick] = useState(0)
@@ -326,40 +365,6 @@ export default function OrdersPage() {
     })
   }
 
-  const sortedOrders = (() => {
-    const dir = sortDirection === "desc" ? -1 : 1
-    return [...orders].sort((a, b) => {
-      let va: string | number | null = null
-      let vb: string | number | null = null
-
-      if (sortKey === "totalAmount") {
-        va = Number(a.totalAmount)
-        vb = Number(b.totalAmount)
-      } else if (sortKey === "warehouse") {
-        va = (a.warehouseName ?? "").toLowerCase()
-        vb = (b.warehouseName ?? "").toLowerCase()
-      } else if (sortKey === "status") {
-        va = formatStatus(a).toLowerCase()
-        vb = formatStatus(b).toLowerCase()
-      } else if (sortKey === "processingTime") {
-        const pa = a.processingTimeMin ?? -1
-        const pb = b.processingTimeMin ?? -1
-        // -1 (нет данных) всегда в конце
-        if (pa < 0 && pb < 0) return 0
-        if (pa < 0) return 1
-        if (pb < 0) return -1
-        va = pa
-        vb = pb
-      }
-
-      if (va == null && vb == null) return 0
-      if (va == null) return 1
-      if (vb == null) return -1
-      if (va === vb) return 0
-      return va > vb ? dir : -dir
-    })
-  })()
-
   if (loading) {
     return (
       <div className="flex items-center justify-center py-16">
@@ -429,8 +434,8 @@ export default function OrdersPage() {
             Список заказов
           </CardTitle>
           <CardDescription>
-            {orders.length}{" "}
-            {orders.length === 1 ? "заказ" : orders.length < 5 ? "заказа" : "заказов"}
+            {ordersTotal}{" "}
+            {ordersTotal === 1 ? "заказ" : ordersTotal < 5 ? "заказа" : "заказов"}
           </CardDescription>
         </CardHeader>
         <CardContent className="pt-0">
@@ -509,7 +514,7 @@ export default function OrdersPage() {
                     </td>
                   </tr>
                 ) : (
-                  sortedOrders.map((order) => {
+                  orders.map((order) => {
                     const item = order.items[0]
                     const rawTitle = item?.product?.title?.trim() ?? ""
                     const article = item?.product?.article ?? item?.product?.sku ?? ""
@@ -591,6 +596,9 @@ export default function OrdersPage() {
           </div>
         </CardContent>
       </Card>
+      <div ref={loadMoreRef} className="h-8 flex items-center justify-center text-xs text-muted-foreground">
+        {loadingMore ? "Загрузка..." : hasMore ? "Прокрутите вниз для загрузки" : "Все записи загружены"}
+      </div>
     </div>
   )
 }

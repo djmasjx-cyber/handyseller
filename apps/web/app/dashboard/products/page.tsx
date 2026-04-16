@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Badge, Input, Label, Textarea } from "@handyseller/ui"
 import Link from "next/link"
@@ -127,6 +127,17 @@ export default function ProductsPage() {
   const [loading, setLoading] = useState(true)
   const [importingMarketplace, setImportingMarketplace] = useState<"WILDBERRIES" | "OZON" | null>(null)
   const [importJob, setImportJob] = useState<ImportJobState | null>(null)
+  const PAGE_SIZE = 20
+  const [offset, setOffset] = useState(0)
+  const [hasMore, setHasMore] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [productsTotal, setProductsTotal] = useState(0)
+  const loadMoreRef = useRef<HTMLDivElement | null>(null)
+  const [searchQuery, setSearchQuery] = useState("") // Поиск по артикулу или наименованию
+  type ProductsSortKey = "stockFbs" | "stockFbo" | "reservedFbs" | "reservedFbo" | "cost"
+  type SortDirection = "asc" | "desc"
+  const [sortKey, setSortKey] = useState<ProductsSortKey>("stockFbs")
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc")
 
   const token = typeof window !== "undefined" ? localStorage.getItem("accessToken") : null
 
@@ -142,16 +153,24 @@ export default function ProductsPage() {
   const [wbStockFbo, setWbStockFbo] = useState<Record<string, number>>({})
   const [ozonStockFbo, setOzonStockFbo] = useState<Record<string, number>>({})
 
-  const fetchProducts = () => {
+  const fetchProducts = useCallback(async (reset = true) => {
     if (!token) return
-    fetch("/api/products", { headers: { Authorization: `Bearer ${token}` } })
-      .then((r) => r.json())
-      .then((data) => {
-        const list = Array.isArray(data) ? data : []
-        setProducts(list)
-      })
-      .catch(() => setProducts([]))
-  }
+    const nextOffset = reset ? 0 : offset
+    const params = new URLSearchParams({
+      limit: String(PAGE_SIZE),
+      offset: String(nextOffset),
+      sortBy: sortKey === "stockFbo" ? "createdAt" : sortKey,
+      sortDirection,
+    })
+    if (searchQuery.trim()) params.set("search", searchQuery.trim())
+    const res = await fetch(`/api/products/paged?${params.toString()}`, { headers: { Authorization: `Bearer ${token}` } })
+    const data = await res.json().catch(() => ({}))
+    const list = Array.isArray(data?.items) ? data.items : []
+    setProducts((prev) => (reset ? list : [...prev, ...list]))
+    setHasMore(Boolean(data?.hasMore))
+    setOffset(nextOffset + list.length)
+    setProductsTotal(typeof data?.total === "number" ? data.total : 0)
+  }, [token, offset, sortKey, sortDirection, searchQuery])
 
   const fetchWbStockFbo = () => {
     if (!token || !isWbConnected) return
@@ -192,7 +211,7 @@ export default function ProductsPage() {
       router.push("/login")
       return
     }
-    fetchProducts()
+    fetchProducts(true).catch(() => setProducts([]))
     fetchConnections()
     fetchSubscription()
     // Загружаем остатки FBO при инициализации (WB и Ozon)
@@ -203,10 +222,14 @@ export default function ProductsPage() {
     fetch("/api/marketplaces/backfill-wb-photos", {
       method: "POST",
       headers: { Authorization: `Bearer ${token}` },
-    }).then((r) => r.ok && fetchProducts()).catch(() => {})
-    const t = setInterval(fetchProducts, 60000)
+    }).then((r) => {
+      if (r.ok) {
+        return fetchProducts(true)
+      }
+    }).catch(() => {})
+    const t = setInterval(() => { fetchProducts(true).catch(() => {}) }, 60000)
     return () => clearInterval(t)
-  }, [router, token])
+  }, [router, token, fetchProducts])
 
   // Открыть историю по ?history=productId (при переходе из карточки товара).
   // historyId — UUID или displayId (0006, 6).
@@ -235,12 +258,11 @@ export default function ProductsPage() {
       fetchOzonStockFbo()
     }
   }, [isWbConnected, isOzonConnected])
-  const atProductLimit = limits ? products.length >= limits.maxProducts : false
+  const atProductLimit = limits ? productsTotal >= limits.maxProducts : false
 
   // Селектор склада: local | WILDBERRIES | OZON | YANDEX | AVITO — горизонтальные вкладки
   type WarehouseFilter = "local" | "WILDBERRIES" | "OZON" | "YANDEX" | "AVITO"
   const [warehouseFilter, setWarehouseFilter] = useState<WarehouseFilter>("local")
-  const [searchQuery, setSearchQuery] = useState("") // Поиск по артикулу или наименованию
 
   // Отмена редактирования при переключении с Мой склад + загрузка остатков FBO
   useEffect(() => {
@@ -302,11 +324,6 @@ export default function ProductsPage() {
     return list
   })()
 
-  type ProductsSortKey = "stockFbs" | "stockFbo" | "reservedFbs" | "reservedFbo" | "cost"
-  type SortDirection = "asc" | "desc"
-  const [sortKey, setSortKey] = useState<ProductsSortKey>("stockFbs")
-  const [sortDirection, setSortDirection] = useState<SortDirection>("desc")
-
   const toggleSort = (key: ProductsSortKey) => {
     setSortKey((prevKey) => {
       if (prevKey === key) {
@@ -349,6 +366,25 @@ export default function ProductsPage() {
       return va > vb ? dir : -dir
     })
   })()
+
+  useEffect(() => {
+    if (!token) return
+    fetchProducts(true).catch(() => setProducts([]))
+  }, [token, sortKey, sortDirection, searchQuery, fetchProducts])
+
+  useEffect(() => {
+    const node = loadMoreRef.current
+    if (!node || !hasMore || loading || loadingMore) return
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries[0]?.isIntersecting) return
+      setLoadingMore(true)
+      fetchProducts(false)
+        .catch(() => {})
+        .finally(() => setLoadingMore(false))
+    }, { rootMargin: "300px" })
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [fetchProducts, hasMore, loading, loadingMore])
 
   // Inline-редактирование остатков
   const [editingStockId, setEditingStockId] = useState<string | null>(null)
@@ -796,7 +832,7 @@ export default function ProductsPage() {
             Каталог ваших изделий.
             {limits && (
               <span className="ml-1">
-                {products.length} / {limits.maxProducts >= 999_999 ? "∞" : limits.maxProducts} товаров
+                {productsTotal} / {limits.maxProducts >= 999_999 ? "∞" : limits.maxProducts} товаров
               </span>
             )}
             {!limits && " Остатки и заказы синхронизируются автоматически"}
@@ -1262,6 +1298,9 @@ export default function ProductsPage() {
                 })}
               </tbody>
             </table>
+          </div>
+          <div ref={loadMoreRef} className="mt-2 h-8 flex items-center justify-center text-xs text-muted-foreground">
+            {loadingMore ? "Загрузка..." : hasMore ? "Прокрутите вниз для загрузки" : "Все записи загружены"}
           </div>
         </CardContent>
       </Card>

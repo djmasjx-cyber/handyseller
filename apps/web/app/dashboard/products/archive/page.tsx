@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { Button, Card, CardContent, Badge } from "@handyseller/ui"
 import Link from "next/link"
@@ -43,25 +43,50 @@ export default function ProductsArchivePage() {
   const [loading, setLoading] = useState(true)
   const [restoringId, setRestoringId] = useState<string | null>(null)
   const [restoreError, setRestoreError] = useState<string | null>(null)
+  const [offset, setOffset] = useState(0)
+  const [hasMore, setHasMore] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const loadMoreRef = useRef<HTMLDivElement | null>(null)
+  const PAGE_SIZE = 20
 
   const token = typeof window !== "undefined" ? localStorage.getItem("accessToken") : null
 
-  const fetchArchived = () => {
+  const fetchArchived = useCallback(async (reset = true) => {
     if (!token) return
-    fetch("/api/products/archive", { headers: { Authorization: `Bearer ${token}` } })
-      .then((r) => r.json())
-      .then((data) => setProducts(Array.isArray(data) ? data : []))
-      .catch(() => setProducts([]))
-  }
+    const nextOffset = reset ? 0 : offset
+    const params = new URLSearchParams({
+      limit: String(PAGE_SIZE),
+      offset: String(nextOffset),
+      sortDirection: "desc",
+    })
+    const res = await fetch(`/api/products/archive?${params.toString()}`, { headers: { Authorization: `Bearer ${token}` } })
+    const data = await res.json().catch(() => ({}))
+    const items = Array.isArray(data?.items) ? data.items : []
+    setProducts((prev) => (reset ? items : [...prev, ...items]))
+    setHasMore(Boolean(data?.hasMore))
+    setOffset(nextOffset + items.length)
+  }, [token, offset])
 
   useEffect(() => {
     if (!token) {
       router.push("/login")
       return
     }
-    fetchArchived()
+    fetchArchived(true).catch(() => setProducts([]))
     setLoading(false)
-  }, [router, token])
+  }, [router, token, fetchArchived])
+
+  useEffect(() => {
+    const node = loadMoreRef.current
+    if (!node || !hasMore || loading || loadingMore) return
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries[0]?.isIntersecting) return
+      setLoadingMore(true)
+      fetchArchived(false).catch(() => {}).finally(() => setLoadingMore(false))
+    }, { rootMargin: "300px" })
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [fetchArchived, hasMore, loading, loadingMore])
 
   const handleRestore = async (product: Product) => {
     if (!token) return
@@ -205,6 +230,9 @@ export default function ProductsArchivePage() {
               </table>
             </div>
           )}
+          <div ref={loadMoreRef} className="mt-2 h-8 flex items-center justify-center text-xs text-muted-foreground">
+            {loadingMore ? "Загрузка..." : hasMore ? "Прокрутите вниз для загрузки" : "Все записи загружены"}
+          </div>
         </CardContent>
       </Card>
     </div>

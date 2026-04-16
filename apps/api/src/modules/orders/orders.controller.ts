@@ -16,6 +16,24 @@ export class OrdersController {
     return this.ordersService.findAll(userId);
   }
 
+  @Get('paged')
+  async findPaged(
+    @CurrentUser('userId') userId: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('sortBy') sortBy?: 'createdAt' | 'totalAmount' | 'warehouse' | 'status' | 'processingTime',
+    @Query('sortDirection') sortDirection?: 'asc' | 'desc',
+    @Query('assemblyOnly') assemblyOnly?: string,
+  ) {
+    return this.ordersService.findPaged(userId, {
+      limit: limit ? parseInt(limit, 10) : undefined,
+      offset: offset ? parseInt(offset, 10) : undefined,
+      sortBy,
+      sortDirection,
+      assemblyOnly: assemblyOnly === '1' || assemblyOnly === 'true',
+    });
+  }
+
   /** Создание ручного заказа (MANUAL) */
   @Post()
   async createManual(@CurrentUser('userId') userId: string, @Body() dto: CreateManualOrderDto) {

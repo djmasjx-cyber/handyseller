@@ -17,10 +17,44 @@ export class ProductsController {
     return this.productsService.findAll(userId);
   }
 
+  @Get('paged')
+  async findPaged(
+    @CurrentUser('userId') userId: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('search') search?: string,
+    @Query('sortBy') sortBy?: 'stockFbs' | 'reservedFbs' | 'reservedFbo' | 'cost' | 'createdAt',
+    @Query('sortDirection') sortDirection?: 'asc' | 'desc',
+  ) {
+    return this.productsService.findPaged(userId, {
+      limit: limit ? parseInt(limit, 10) : undefined,
+      offset: offset ? parseInt(offset, 10) : undefined,
+      search,
+      sortBy,
+      sortDirection,
+    });
+  }
+
   /** Список архивных товаров */
   @Get('archive')
   async findArchived(@CurrentUser('userId') userId: string) {
     return this.productsService.findArchived(userId);
+  }
+
+  @Get('archive/paged')
+  async findArchivedPaged(
+    @CurrentUser('userId') userId: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('search') search?: string,
+    @Query('sortDirection') sortDirection?: 'asc' | 'desc',
+  ) {
+    return this.productsService.findArchivedPaged(userId, {
+      limit: limit ? parseInt(limit, 10) : undefined,
+      offset: offset ? parseInt(offset, 10) : undefined,
+      search,
+      sortDirection,
+    });
   }
 
   /** Поиск товара по ID или артикулу — для автоподстановки в форме пополнения */

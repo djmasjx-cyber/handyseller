@@ -177,6 +177,80 @@ export class OrdersService {
     });
   }
 
+  async findPaged(
+    userId: string,
+    params: {
+      limit?: number;
+      offset?: number;
+      sortBy?: 'createdAt' | 'totalAmount' | 'warehouse' | 'status' | 'processingTime';
+      sortDirection?: 'asc' | 'desc';
+      assemblyOnly?: boolean;
+    },
+  ) {
+    const limit = Math.min(Math.max(params.limit ?? 20, 1), 100);
+    const offset = Math.max(params.offset ?? 0, 0);
+    const sortBy = params.sortBy ?? 'totalAmount';
+    const sortDirection = params.sortDirection ?? 'desc';
+
+    const where: Record<string, unknown> = { userId };
+    if (params.assemblyOnly) {
+      where.status = { in: [OrderStatus.NEW, OrderStatus.IN_PROGRESS] };
+    }
+
+    const [orders, total] = await Promise.all([
+      this.prisma.order.findMany({
+        where,
+        include: {
+          items: { include: { product: true } },
+          processingTime: true,
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: offset,
+        take: limit,
+      }),
+      this.prisma.order.count({ where }),
+    ]);
+
+    const mapped = orders.map((o) => {
+      const fromTable = o.processingTime?.processingTimeMin;
+      const fromLegacy = o.processingTimeMin;
+      const val = fromTable ?? (fromLegacy != null && fromLegacy <= MAX_TRUSTED_PROCESSING_MIN ? fromLegacy : null);
+      return { ...o, processingTimeMin: val };
+    });
+
+    const dir = sortDirection === 'desc' ? -1 : 1;
+    const sorted = [...mapped].sort((a, b) => {
+      let va: string | number = 0;
+      let vb: string | number = 0;
+      if (sortBy === 'totalAmount') {
+        va = Number(a.totalAmount);
+        vb = Number(b.totalAmount);
+      } else if (sortBy === 'warehouse') {
+        va = (a.warehouseName ?? '').toLowerCase();
+        vb = (b.warehouseName ?? '').toLowerCase();
+      } else if (sortBy === 'status') {
+        va = a.status;
+        vb = b.status;
+      } else if (sortBy === 'processingTime') {
+        va = a.processingTimeMin ?? -1;
+        vb = b.processingTimeMin ?? -1;
+      } else {
+        va = new Date(a.createdAt).getTime();
+        vb = new Date(b.createdAt).getTime();
+      }
+      if (va === vb) return 0;
+      return va > vb ? dir : -dir;
+    });
+
+    return {
+      items: sorted,
+      total,
+      offset,
+      limit,
+      hasMore: offset + limit < total,
+    };
+  }
+
   /** Создание ручного заказа (MANUAL). */
   async createManualOrder(userId: string, dto: CreateManualOrderDto) {
     const externalId = dto.externalId.trim();

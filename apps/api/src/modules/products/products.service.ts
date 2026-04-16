@@ -46,6 +46,94 @@ export class ProductsService {
     }));
   }
 
+  async findPaged(
+    userId: string,
+    params: {
+      limit?: number;
+      offset?: number;
+      search?: string;
+      sortBy?: 'stockFbs' | 'reservedFbs' | 'reservedFbo' | 'cost' | 'createdAt';
+      sortDirection?: 'asc' | 'desc';
+      archived?: boolean;
+    },
+  ) {
+    const limit = Math.min(Math.max(params.limit ?? 20, 1), 100);
+    const offset = Math.max(params.offset ?? 0, 0);
+    const search = params.search?.trim();
+    const sortBy = params.sortBy ?? 'stockFbs';
+    const sortDirection = params.sortDirection ?? 'desc';
+    const archived = params.archived ?? false;
+
+    const where = {
+      userId,
+      ...(archived ? { archivedAt: { not: null } } : { archivedAt: null }),
+      ...(search
+        ? {
+            OR: [
+              { article: { contains: search, mode: 'insensitive' as const } },
+              { title: { contains: search, mode: 'insensitive' as const } },
+              { sku: { contains: search, mode: 'insensitive' as const } },
+            ],
+          }
+        : {}),
+    };
+
+    const [products, total] = await Promise.all([
+      this.prisma.product.findMany({
+        where,
+        include: {
+          marketplaceMappings: {
+            where: { isActive: true },
+            select: { marketplace: true, externalSystemId: true },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: offset,
+        take: limit,
+      }),
+      this.prisma.product.count({ where }),
+    ]);
+
+    const reserves = await this.getReservesByProduct(userId);
+    const rows = products.map((p) => ({
+      ...p,
+      reservedFbs: reserves.get(p.id)?.fbs ?? 0,
+      reservedFbo: reserves.get(p.id)?.fbo ?? 0,
+    }));
+
+    const dir = sortDirection === 'desc' ? -1 : 1;
+    const sorted = [...rows].sort((a, b) => {
+      let va = 0;
+      let vb = 0;
+      if (sortBy === 'stockFbs') {
+        va = a.stock ?? 0;
+        vb = b.stock ?? 0;
+      } else if (sortBy === 'reservedFbs') {
+        va = a.reservedFbs ?? 0;
+        vb = b.reservedFbs ?? 0;
+      } else if (sortBy === 'reservedFbo') {
+        va = a.reservedFbo ?? 0;
+        vb = b.reservedFbo ?? 0;
+      } else if (sortBy === 'cost') {
+        va = Number(a.cost ?? 0);
+        vb = Number(b.cost ?? 0);
+      } else {
+        va = new Date(a.createdAt).getTime();
+        vb = new Date(b.createdAt).getTime();
+      }
+      if (va === vb) return 0;
+      return va > vb ? dir : -dir;
+    });
+
+    return {
+      items: sorted,
+      total,
+      offset,
+      limit,
+      hasMore: offset + limit < total,
+    };
+  }
+
   /** Резервы FBS (наш склад) и FBO (склад WB) по productId */
   /**
    * Резервы по productId.
@@ -96,6 +184,20 @@ export class ProductsService {
           select: { marketplace: true, externalSystemId: true },
         },
       },
+    });
+  }
+
+  async findArchivedPaged(
+    userId: string,
+    params: { limit?: number; offset?: number; search?: string; sortDirection?: 'asc' | 'desc' },
+  ) {
+    return this.findPaged(userId, {
+      limit: params.limit,
+      offset: params.offset,
+      search: params.search,
+      sortBy: 'createdAt',
+      sortDirection: params.sortDirection ?? 'desc',
+      archived: true,
     });
   }
 

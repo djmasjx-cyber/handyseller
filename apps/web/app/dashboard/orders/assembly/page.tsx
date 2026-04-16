@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Badge, Label } from "@handyseller/ui"
@@ -196,17 +196,34 @@ export default function OrdersAssemblyPage() {
   const [wbSupplyAction, setWbSupplyAction] = useState<string | null>(null)
   const [wbSupplyBarcode, setWbSupplyBarcode] = useState<string | null>(null)
   const [trbxLabelSize, setTrbxLabelSize] = useState<"60x40" | "40x25">("60x40")
+  const PAGE_SIZE = 20
+  const [offset, setOffset] = useState(0)
+  const [hasMore, setHasMore] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [ordersTotal, setOrdersTotal] = useState(0)
+  const loadMoreRef = useRef<HTMLDivElement | null>(null)
   const assemblyOrders = orders.filter(
     (o) => (o.status === "IN_PROGRESS" || o.status === "NEW") && !isFinalOrder(o)
   )
 
-  const fetchOrders = () => {
+  const fetchOrders = useCallback(async (reset = true) => {
     if (!token) return
-    return fetch("/api/orders", { headers: { Authorization: `Bearer ${token}` } })
-      .then((r) => r.json())
-      .then((data) => setOrders(Array.isArray(data) ? data : []))
-      .catch(() => setOrders([]))
-  }
+    const nextOffset = reset ? 0 : offset
+    const params = new URLSearchParams({
+      limit: String(PAGE_SIZE),
+      offset: String(nextOffset),
+      assemblyOnly: "1",
+      sortBy: "createdAt",
+      sortDirection: "desc",
+    })
+    const res = await fetch(`/api/orders/paged?${params.toString()}`, { headers: { Authorization: `Bearer ${token}` } })
+    const data = await res.json().catch(() => ({}))
+    const items = Array.isArray(data?.items) ? data.items : []
+    setOrders((prev) => (reset ? items : [...prev, ...items]))
+    setHasMore(Boolean(data?.hasMore))
+    setOffset(nextOffset + items.length)
+    setOrdersTotal(typeof data?.total === "number" ? data.total : 0)
+  }, [token, offset])
 
   const hasWbInProgress = assemblyOrders.some((o) => o.marketplace === "WILDBERRIES" && o.status === "IN_PROGRESS")
 
@@ -254,7 +271,7 @@ export default function OrdersAssemblyPage() {
         } else {
           setSyncingError(null)
         }
-        await fetchOrders()
+        await fetchOrders(true)
       } catch {
         /* фоновое обновление — тихо, не мешаем пользователю */
       }
@@ -280,7 +297,7 @@ export default function OrdersAssemblyPage() {
       clearInterval(t)
       document.removeEventListener("visibilitychange", onVisibilityChange)
     }
-  }, [router, token])
+  }, [router, token, fetchOrders])
 
   const handleSync = async () => {
     if (!token) return
@@ -302,7 +319,7 @@ export default function OrdersAssemblyPage() {
         setSyncingError(String(msg))
         return
       }
-      fetchOrders()
+      fetchOrders(true)
     } finally {
       setSyncing(false)
     }
@@ -395,6 +412,18 @@ export default function OrdersAssemblyPage() {
     const t = setInterval(() => setTick((c) => c + 1), 1000)
     return () => clearInterval(t)
   }, [assemblyOrders, tick])
+
+  useEffect(() => {
+    const node = loadMoreRef.current
+    if (!node || !hasMore || loading || loadingMore) return
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries[0]?.isIntersecting) return
+      setLoadingMore(true)
+      fetchOrders(false).catch(() => {}).finally(() => setLoadingMore(false))
+    }, { rootMargin: "300px" })
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [fetchOrders, hasMore, loading, loadingMore])
 
   if (loading) {
     return (
@@ -684,8 +713,8 @@ export default function OrdersAssemblyPage() {
             Список заказов на сборке
           </CardTitle>
           <CardDescription>
-            {assemblyOrders.length}{" "}
-            {assemblyOrders.length === 1 ? "заказ" : assemblyOrders.length < 5 ? "заказа" : "заказов"}
+            {ordersTotal}{" "}
+            {ordersTotal === 1 ? "заказ" : ordersTotal < 5 ? "заказа" : "заказов"}
             {" (Новые + На сборке)"}
           </CardDescription>
         </CardHeader>
@@ -866,6 +895,9 @@ export default function OrdersAssemblyPage() {
           </div>
         </CardContent>
       </Card>
+      <div ref={loadMoreRef} className="h-8 flex items-center justify-center text-xs text-muted-foreground">
+        {loadingMore ? "Загрузка..." : hasMore ? "Прокрутите вниз для загрузки" : "Все записи загружены"}
+      </div>
 
       {printOrder && (
         <PrintLabelsModal
@@ -879,7 +911,7 @@ export default function OrdersAssemblyPage() {
       <CreateOrderModal
         open={createOrderModalOpen}
         onClose={() => setCreateOrderModalOpen(false)}
-        onSuccess={() => fetchOrders()}
+        onSuccess={() => fetchOrders(true)}
         token={token}
       />
     </div>
