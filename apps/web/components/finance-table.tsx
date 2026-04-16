@@ -281,6 +281,15 @@ interface Props {
   scheme: "FBO" | "FBS"
 }
 
+type FinanceSortField = "price" | "commission" | "logistics" | "col3" | "storage" | "total" | "margin"
+
+interface FinanceSortKey {
+  marketplace: string
+  field: FinanceSortField
+}
+
+type SortDirection = "asc" | "desc"
+
 export function FinanceTable({ scheme }: Props) {
   const router = useRouter()
   const [rows, setRows] = useState<ProductFinanceRow[]>([])
@@ -291,6 +300,8 @@ export function FinanceTable({ scheme }: Props) {
   const [mounted, setMounted] = useState(false)
   /** Оборачиваемость для расчёта хранения FBO (дней) */
   const [storageDays, setStorageDays] = useState(30)
+  const [sortKey, setSortKey] = useState<FinanceSortKey | null>(null)
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc")
 
   useEffect(() => { setMounted(true) }, [])
 
@@ -324,6 +335,80 @@ export function FinanceTable({ scheme }: Props) {
     if (mounted && token) fetchRows()
   }, [mounted, token, fetchRows])
 
+  // Marketplace list for columns
+  const marketplaces = Array.from(
+    new Set(rows.flatMap((r) => r.commissions.map((c) => c.marketplace)))
+  ).sort()
+
+  // Инициализация сортировки по умолчанию: маржа по первому маркетплейсу
+  useEffect(() => {
+    if (!sortKey && marketplaces.length > 0) {
+      setSortKey({ marketplace: marketplaces[0], field: "margin" })
+      setSortDirection("desc")
+    }
+  }, [marketplaces, sortKey])
+
+  const toggleSort = (marketplace: string, field: FinanceSortField) => {
+    setSortKey((prevKey) => {
+      if (prevKey && prevKey.marketplace === marketplace && prevKey.field === field) {
+        setSortDirection((prevDir) => (prevDir === "desc" ? "asc" : "desc"))
+        return prevKey
+      }
+      setSortDirection("desc")
+      return { marketplace, field }
+    })
+  }
+
+  const getMetricValue = (row: ProductFinanceRow, marketplace: string, field: FinanceSortField): number | null => {
+    const block = row.commissions.find((c) => c.marketplace === marketplace && c.scheme === scheme)
+    if (!block) return null
+
+    const isFBO = block.scheme === "FBO"
+    const col3 = getMpCol3Config(marketplace, block.scheme)
+    const price = block.marketplacePrice > 0 ? block.marketplacePrice : null
+    const storageTotal = isFBO ? block.storageCostPerDay * storageDays : 0
+    const totalWithStorage = block.totalFeeAmt + storageTotal
+    const margin = price != null && price > 0 ? price - totalWithStorage : null
+
+    switch (field) {
+      case "price":
+        return price
+      case "commission":
+        return block.salesCommissionAmt
+      case "logistics":
+        return block.logisticsAmt
+      case "col3":
+        return col3 ? col3.value(block) : null
+      case "storage":
+        return storageTotal || null
+      case "total":
+        return totalWithStorage
+      case "margin":
+        return margin
+      default:
+        return null
+    }
+  }
+
+  const sortedRows = (() => {
+    if (!sortKey) return rows
+    const { marketplace, field } = sortKey
+    const dir = sortDirection === "desc" ? -1 : 1
+
+    return [...rows].sort((a, b) => {
+      const va = getMetricValue(a, marketplace, field)
+      const vb = getMetricValue(b, marketplace, field)
+
+      // null всегда в конце
+      if (va == null && vb == null) return 0
+      if (va == null) return 1
+      if (vb == null) return -1
+
+      if (va === vb) return 0
+      return va > vb ? dir : -dir
+    })
+  })()
+
   const handleSync = async () => {
     if (!token) return
     setSyncing(true)
@@ -343,11 +428,6 @@ export function FinanceTable({ scheme }: Props) {
   const handleCostUpdated = (productId: string, newCost: number) => {
     setRows((prev) => prev.map((r) => r.productId === productId ? { ...r, cost: newCost } : r))
   }
-
-  // Collect unique marketplaces from all rows
-  const marketplaces = Array.from(
-    new Set(rows.flatMap((r) => r.commissions.map((c) => c.marketplace)))
-  ).sort()
 
   if (!mounted || loading) {
     return (
@@ -462,31 +542,104 @@ export function FinanceTable({ scheme }: Props) {
                 {marketplaces.map((mp) => {
                   const col3 = getMpCol3Config(mp, scheme)
                   return (
-                    <>
-                      <th key={`${mp}-prc`} className="px-2 py-1.5 text-right font-medium border-l">Цена ₽</th>
-                      <th key={`${mp}-com`} className="px-2 py-1.5 text-right font-medium">Комиссия</th>
-                      <th key={`${mp}-log`} className="px-2 py-1.5 text-right font-medium">Логистика</th>
-                      <th key={`${mp}-acc`} className="px-2 py-1.5 text-right font-medium">
-                        {col3?.label ?? "—"}
+                    <React.Fragment key={mp}>
+                      <th className="px-2 py-1.5 text-right font-medium border-l">
+                        <button
+                          type="button"
+                          className="inline-flex items-center gap-1 hover:text-primary"
+                          onClick={() => toggleSort(mp, "price")}
+                        >
+                          Цена ₽
+                          {sortKey?.marketplace === mp && sortKey.field === "price" && (
+                            <span>{sortDirection === "desc" ? "↓" : "↑"}</span>
+                          )}
+                        </button>
+                      </th>
+                      <th className="px-2 py-1.5 text-right font-medium">
+                        <button
+                          type="button"
+                          className="inline-flex items-center gap-1 hover:text-primary"
+                          onClick={() => toggleSort(mp, "commission")}
+                        >
+                          Комиссия
+                          {sortKey?.marketplace === mp && sortKey.field === "commission" && (
+                            <span>{sortDirection === "desc" ? "↓" : "↑"}</span>
+                          )}
+                        </button>
+                      </th>
+                      <th className="px-2 py-1.5 text-right font-medium">
+                        <button
+                          type="button"
+                          className="inline-flex items-center gap-1 hover:text-primary"
+                          onClick={() => toggleSort(mp, "logistics")}
+                        >
+                          Логистика
+                          {sortKey?.marketplace === mp && sortKey.field === "logistics" && (
+                            <span>{sortDirection === "desc" ? "↓" : "↑"}</span>
+                          )}
+                        </button>
+                      </th>
+                      <th className="px-2 py-1.5 text-right font-medium">
+                        <button
+                          type="button"
+                          className="inline-flex items-center gap-1 hover:text-primary"
+                          onClick={() => toggleSort(mp, "col3")}
+                        >
+                          {col3?.label ?? "—"}
+                          {sortKey?.marketplace === mp && sortKey.field === "col3" && (
+                            <span>{sortDirection === "desc" ? "↓" : "↑"}</span>
+                          )}
+                        </button>
                       </th>
                       {/* Хранение: только для FBO */}
                       {scheme === "FBO" && (
-                        <th key={`${mp}-str`} className="px-2 py-1.5 text-right font-medium text-sky-700">
-                          Хранение ×{storageDays}д
+                        <th className="px-2 py-1.5 text-right font-medium text-sky-700">
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1 hover:text-primary"
+                            onClick={() => toggleSort(mp, "storage")}
+                          >
+                            Хранение ×{storageDays}д
+                            {sortKey?.marketplace === mp && sortKey.field === "storage" && (
+                              <span>{sortDirection === "desc" ? "↓" : "↑"}</span>
+                            )}
+                          </button>
                         </th>
                       )}
                       {/* Столбец Возврат скрыт — учтён в «Итого»
-                      <th key={`${mp}-ret`} className="px-2 py-1.5 text-right font-medium">Возврат</th>
+                      <th className="px-2 py-1.5 text-right font-medium">Возврат</th>
                       */}
-                      <th key={`${mp}-tot`} className="px-2 py-1.5 text-right font-medium">Итого</th>
-                      <th key={`${mp}-mrg`} className="px-2 py-1.5 text-right font-medium">Маржа</th>
-                    </>
+                      <th className="px-2 py-1.5 text-right font-medium">
+                        <button
+                          type="button"
+                          className="inline-flex items-center gap-1 hover:text-primary"
+                          onClick={() => toggleSort(mp, "total")}
+                        >
+                          Итого
+                          {sortKey?.marketplace === mp && sortKey.field === "total" && (
+                            <span>{sortDirection === "desc" ? "↓" : "↑"}</span>
+                          )}
+                        </button>
+                      </th>
+                      <th className="px-2 py-1.5 text-right font-medium">
+                        <button
+                          type="button"
+                          className="inline-flex items-center gap-1 hover:text-primary"
+                          onClick={() => toggleSort(mp, "margin")}
+                        >
+                          Маржа
+                          {sortKey?.marketplace === mp && sortKey.field === "margin" && (
+                            <span>{sortDirection === "desc" ? "↓" : "↑"}</span>
+                          )}
+                        </button>
+                      </th>
+                    </React.Fragment>
                   )
                 })}
               </tr>
             </thead>
             <tbody>
-              {rows.map((row, idx) => {
+              {sortedRows.map((row, idx) => {
                 const commByMp: Record<string, MarketplaceCommissionBlock> = {}
                 for (const c of row.commissions) {
                   if (c.scheme === scheme) commByMp[c.marketplace] = c

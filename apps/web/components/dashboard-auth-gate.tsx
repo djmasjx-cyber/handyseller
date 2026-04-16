@@ -37,17 +37,15 @@ export function DashboardAuthGate({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("storage", handleStorage)
   }, [checkAuth])
 
-  // Разворачиваем группы при переходе на их страницы
+  // Разворачиваем только активную группу при переходе на её страницы
   useEffect(() => {
-    if (pathname?.startsWith("/dashboard/orders")) {
-      setOrdersExpanded(true)
-    }
-    if (pathname?.startsWith("/dashboard/products")) {
-      setProductsExpanded(true)
-    }
-    if (pathname?.startsWith("/dashboard/finance")) {
-      setFinanceExpanded(true)
-    }
+    const isOrders = pathname?.startsWith("/dashboard/orders") ?? false
+    const isProducts = pathname?.startsWith("/dashboard/products") ?? false
+    const isFinance = pathname?.startsWith("/dashboard/finance") ?? false
+
+    setOrdersExpanded(isOrders)
+    setProductsExpanded(isProducts)
+    setFinanceExpanded(isFinance)
   }, [pathname])
 
   // Неавторизован или ещё проверяем: показываем явную карточку входа
@@ -255,19 +253,19 @@ export function DashboardAuthGate({ children }: { children: ReactNode }) {
                   </>
                 )}
               </div>
-              {/* Финансы — раскрываемая группа */}
+              {/* Юнит-экономика — раскрываемая группа */}
               <div className="py-1">
                 <div
                   className={`w-full flex items-center px-3 py-3 rounded-md min-h-[44px] touch-manipulation ${isOnFinance ? "text-primary bg-primary/10 font-medium" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
                 >
-                  <Link
-                    href="/dashboard/finance/fbo"
-                    onClick={() => { setFinanceExpanded(true); setMenuOpen(false) }}
-                    className="flex items-center space-x-3 flex-1"
+                  <button
+                    type="button"
+                    onClick={() => setFinanceExpanded((v) => !v)}
+                    className="flex items-center space-x-3 flex-1 text-left"
                   >
                     <DollarSign className="h-5 w-5 flex-shrink-0" />
-                    <span>Финансы</span>
-                  </Link>
+                    <span>Юнит-экономика</span>
+                  </button>
                   <button
                     type="button"
                     onClick={() => setFinanceExpanded((v) => !v)}
@@ -430,19 +428,19 @@ export function DashboardAuthGate({ children }: { children: ReactNode }) {
                     </>
                   )}
                 </div>
-                {/* Финансы — группа */}
+                {/* Юнит-экономика — группа */}
                 <div className="space-y-0.5">
                   <div
                     className={`w-full flex items-center px-3 py-2 rounded-md ${isOnFinance ? "text-primary bg-primary/10 font-medium" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
                   >
-                    <Link
-                      href="/dashboard/finance/fbo"
-                      onClick={() => setFinanceExpanded(true)}
+                    <button
+                      type="button"
+                      onClick={() => setFinanceExpanded((v) => !v)}
                       className="flex items-center space-x-3 flex-1 text-left"
                     >
                       <DollarSign className="h-5 w-5 flex-shrink-0" />
-                      <span>Финансы</span>
-                    </Link>
+                      <span>Юнит-экономика</span>
+                    </button>
                     <button
                       type="button"
                       onClick={() => setFinanceExpanded((v) => !v)}

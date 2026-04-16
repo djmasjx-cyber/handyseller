@@ -172,6 +172,11 @@ export default function OrdersPage() {
   const [statusUpdatingId, setStatusUpdatingId] = useState<string | null>(null)
   const [statusError, setStatusError] = useState<string | null>(null)
 
+  type OrdersSortKey = "totalAmount" | "warehouse" | "status" | "processingTime"
+  type SortDirection = "asc" | "desc"
+  const [sortKey, setSortKey] = useState<OrdersSortKey>("totalAmount")
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc")
+
   const token = typeof window !== "undefined" ? localStorage.getItem("accessToken") : null
 
   const fetchOrders = () => {
@@ -310,6 +315,51 @@ export default function OrdersPage() {
     }
   }
 
+  const toggleSort = (key: OrdersSortKey) => {
+    setSortKey((prevKey) => {
+      if (prevKey === key) {
+        setSortDirection((prevDir) => (prevDir === "desc" ? "asc" : "desc"))
+        return prevKey
+      }
+      setSortDirection("desc")
+      return key
+    })
+  }
+
+  const sortedOrders = (() => {
+    const dir = sortDirection === "desc" ? -1 : 1
+    return [...orders].sort((a, b) => {
+      let va: string | number | null = null
+      let vb: string | number | null = null
+
+      if (sortKey === "totalAmount") {
+        va = Number(a.totalAmount)
+        vb = Number(b.totalAmount)
+      } else if (sortKey === "warehouse") {
+        va = (a.warehouseName ?? "").toLowerCase()
+        vb = (b.warehouseName ?? "").toLowerCase()
+      } else if (sortKey === "status") {
+        va = formatStatus(a).toLowerCase()
+        vb = formatStatus(b).toLowerCase()
+      } else if (sortKey === "processingTime") {
+        const pa = a.processingTimeMin ?? -1
+        const pb = b.processingTimeMin ?? -1
+        // -1 (нет данных) всегда в конце
+        if (pa < 0 && pb < 0) return 0
+        if (pa < 0) return 1
+        if (pb < 0) return -1
+        va = pa
+        vb = pb
+      }
+
+      if (va == null && vb == null) return 0
+      if (va == null) return 1
+      if (vb == null) return -1
+      if (va === vb) return 0
+      return va > vb ? dir : -dir
+    })
+  })()
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-16">
@@ -392,11 +442,58 @@ export default function OrdersPage() {
                   <th className="text-left font-medium p-3">Источник</th>
                   <th className="text-left font-medium p-3">№ заказа</th>
                   <th className="text-left font-medium p-3">Товар</th>
-                  {SHOW_ORDER_PRICES && <th className="text-right font-medium p-3">Стоимость</th>}
-                  <th className="text-left font-medium p-3">Склад</th>
-                  <th className="text-left font-medium p-3">Статус</th>
-                  <th className="text-left font-medium p-3" title="от создан до сдачи в пункт приема (отсканирован)">
-                    Время обработки
+                  {SHOW_ORDER_PRICES && (
+                    <th className="text-right font-medium p-3">
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-1 hover:text-primary"
+                        onClick={() => toggleSort("totalAmount")}
+                      >
+                        Стоимость
+                        {sortKey === "totalAmount" && (
+                          <span>{sortDirection === "desc" ? "↓" : "↑"}</span>
+                        )}
+                      </button>
+                    </th>
+                  )}
+                  <th className="text-left font-medium p-3">
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 hover:text-primary"
+                      onClick={() => toggleSort("warehouse")}
+                    >
+                      Склад
+                      {sortKey === "warehouse" && (
+                        <span>{sortDirection === "desc" ? "↓" : "↑"}</span>
+                      )}
+                    </button>
+                  </th>
+                  <th className="text-left font-medium p-3">
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 hover:text-primary"
+                      onClick={() => toggleSort("status")}
+                    >
+                      Статус
+                      {sortKey === "status" && (
+                        <span>{sortDirection === "desc" ? "↓" : "↑"}</span>
+                      )}
+                    </button>
+                  </th>
+                  <th
+                    className="text-left font-medium p-3"
+                    title="от создан до сдачи в пункт приема (отсканирован)"
+                  >
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 hover:text-primary"
+                      onClick={() => toggleSort("processingTime")}
+                    >
+                      Время обработки
+                      {sortKey === "processingTime" && (
+                        <span>{sortDirection === "desc" ? "↓" : "↑"}</span>
+                      )}
+                    </button>
                   </th>
                 </tr>
               </thead>
@@ -412,7 +509,7 @@ export default function OrdersPage() {
                     </td>
                   </tr>
                 ) : (
-                  orders.map((order) => {
+                  sortedOrders.map((order) => {
                     const item = order.items[0]
                     const rawTitle = item?.product?.title?.trim() ?? ""
                     const article = item?.product?.article ?? item?.product?.sku ?? ""

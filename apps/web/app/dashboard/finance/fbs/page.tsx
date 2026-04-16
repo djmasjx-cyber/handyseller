@@ -9,7 +9,7 @@ export default function FinanceFbsPage() {
       <div>
         <h1 className="text-2xl font-semibold flex items-center gap-2">
           <DollarSign className="h-7 w-7 text-primary" />
-          Финансы · FBS
+          Юнит-экономика · FBS
         </h1>
         <p className="text-sm text-muted-foreground mt-1">
           FBS — товар хранится у вас, вы доставляете до сортировочного центра. Комиссии и логистика.

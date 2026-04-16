@@ -302,6 +302,54 @@ export default function ProductsPage() {
     return list
   })()
 
+  type ProductsSortKey = "stockFbs" | "stockFbo" | "reservedFbs" | "reservedFbo" | "cost"
+  type SortDirection = "asc" | "desc"
+  const [sortKey, setSortKey] = useState<ProductsSortKey>("stockFbs")
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc")
+
+  const toggleSort = (key: ProductsSortKey) => {
+    setSortKey((prevKey) => {
+      if (prevKey === key) {
+        setSortDirection((prevDir) => (prevDir === "desc" ? "asc" : "desc"))
+        return prevKey
+      }
+      setSortDirection("desc")
+      return key
+    })
+  }
+
+  const sortedProducts = (() => {
+    const dir = sortDirection === "desc" ? -1 : 1
+    return [...filteredProducts].sort((a, b) => {
+      let va = 0
+      let vb = 0
+
+      if (sortKey === "stockFbs") {
+        va = a.stock ?? 0
+        vb = b.stock ?? 0
+      } else if (sortKey === "stockFbo") {
+        const awb = wbStockFbo[a.id] ?? 0
+        const aoz = ozonStockFbo[a.id] ?? 0
+        const bwa = wbStockFbo[b.id] ?? 0
+        const boz = ozonStockFbo[b.id] ?? 0
+        va = awb + aoz
+        vb = bwa + boz
+      } else if (sortKey === "reservedFbs") {
+        va = a.reservedFbs ?? 0
+        vb = b.reservedFbs ?? 0
+      } else if (sortKey === "reservedFbo") {
+        va = a.reservedFbo ?? 0
+        vb = b.reservedFbo ?? 0
+      } else if (sortKey === "cost") {
+        va = Number(a.cost) || 0
+        vb = Number(b.cost) || 0
+      }
+
+      if (va === vb) return 0
+      return va > vb ? dir : -dir
+    })
+  })()
+
   // Inline-редактирование остатков
   const [editingStockId, setEditingStockId] = useState<string | null>(null)
   const [editingStockValue, setEditingStockValue] = useState("")
@@ -914,18 +962,91 @@ export default function ProductsPage() {
                   <th className="text-left font-medium p-3">Артикул</th>
                   <th className="text-left font-medium p-3">Название</th>
                   {/* {warehouseFilter !== "local" && <th className="text-left font-medium p-3">Описание</th>} */}
-                  <th className="text-left font-medium p-3" title="Мой склад, клик для редактирования">Остаток FBS</th>
-                  <th className="text-left font-medium p-3" title={warehouseFilter === "OZON" ? "На складах Ozon" : warehouseFilter === "WILDBERRIES" ? "На складах WB" : "На складах маркетплейсов"}>Остаток FBO</th>
-                  <th className="text-left font-medium p-3" title="Резерв с нашего склада">Резерв FBS</th>
-                  <th className="text-left font-medium p-3" title={warehouseFilter === "OZON" ? "Резерв на складах Ozon" : warehouseFilter === "WILDBERRIES" ? "Резерв на складах WB" : "Резерв на складах маркетплейсов"}>Резерв FBO</th>
-                  <th className="text-left font-medium p-3">Себестоимость</th>
+                  <th className="text-left font-medium p-3" title="Мой склад, клик для редактирования">
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 hover:text-primary"
+                      onClick={() => toggleSort("stockFbs")}
+                    >
+                      Остаток FBS
+                      {sortKey === "stockFbs" && (
+                        <span>{sortDirection === "desc" ? "↓" : "↑"}</span>
+                      )}
+                    </button>
+                  </th>
+                  <th
+                    className="text-left font-medium p-3"
+                    title={
+                      warehouseFilter === "OZON"
+                        ? "На складах Ozon"
+                        : warehouseFilter === "WILDBERRIES"
+                        ? "На складах WB"
+                        : "На складах маркетплейсов"
+                    }
+                  >
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 hover:text-primary"
+                      onClick={() => toggleSort("stockFbo")}
+                    >
+                      Остаток FBO
+                      {sortKey === "stockFbo" && (
+                        <span>{sortDirection === "desc" ? "↓" : "↑"}</span>
+                      )}
+                    </button>
+                  </th>
+                  <th className="text-left font-medium p-3" title="Резерв с нашего склада">
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 hover:text-primary"
+                      onClick={() => toggleSort("reservedFbs")}
+                    >
+                      Резерв FBS
+                      {sortKey === "reservedFbs" && (
+                        <span>{sortDirection === "desc" ? "↓" : "↑"}</span>
+                      )}
+                    </button>
+                  </th>
+                  <th
+                    className="text-left font-medium p-3"
+                    title={
+                      warehouseFilter === "OZON"
+                        ? "Резерв на складах Ozon"
+                        : warehouseFilter === "WILDBERRIES"
+                        ? "Резерв на складах WB"
+                        : "Резерв на складах маркетплейсов"
+                    }
+                  >
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 hover:text-primary"
+                      onClick={() => toggleSort("reservedFbo")}
+                    >
+                      Резерв FBO
+                      {sortKey === "reservedFbo" && (
+                        <span>{sortDirection === "desc" ? "↓" : "↑"}</span>
+                      )}
+                    </button>
+                  </th>
+                  <th className="text-left font-medium p-3">
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 hover:text-primary"
+                      onClick={() => toggleSort("cost")}
+                    >
+                      Себестоимость
+                      {sortKey === "cost" && (
+                        <span>{sortDirection === "desc" ? "↓" : "↑"}</span>
+                      )}
+                    </button>
+                  </th>
                   {warehouseFilter !== "local" && <th className="text-left font-medium p-3">SEO</th>}
                   <th className="text-left font-medium p-3">Маркетплейс</th>
                   <th className="text-right font-medium p-3"></th>
                 </tr>
               </thead>
               <tbody>
-                {filteredProducts.map((product) => {
+                {sortedProducts.map((product) => {
                   const mappings = product.marketplaceMappings ?? []
                   const linkedMarketplaces = mappings.length > 0
                     ? mappings.map((m) => m.marketplace)
