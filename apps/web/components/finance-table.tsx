@@ -376,7 +376,7 @@ export function FinanceTable({ scheme }: Props) {
     setLoadingAll(true)
     try {
       let localOffset = offsetRef.current
-      let localHasMore = hasMore
+      let localHasMore: boolean = hasMore
       const collected: ProductFinanceRow[] = []
       let finalTotal = totalRows
 
