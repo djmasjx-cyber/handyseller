@@ -215,19 +215,25 @@ jobs:
 
             echo "=== Disk before ==="
             df -h /
+            docker system df || true
 
             # 1. Перезапускаем только app-сервисы. Redis сохраняем, чтобы не зависеть
             # от Docker Hub на каждом деплое и не терять прогретый volume/image.
             $DC -f docker-compose.ci.yml --env-file .env.production stop web api || true
             docker rm -f handyseller-web handyseller-api 2>/dev/null || true
 
-            # 2. Очистка: только остановленные контейнеры и dangling images.
-            # Не делаем image prune -af, иначе удалим redis-образ и снова упрёмся в Docker Hub.
+            # 2. Освобождаем место под новый rollout, не трогая Redis.
             docker container prune -f
+            docker builder prune -af || true
+            docker images --format '{{.Repository}}:{{.Tag}} {{.ID}}' \
+              | awk '$1 ~ /^ghcr\.io\/djmasjx-cyber\/handyseller-(api|web):/ {print $2}' \
+              | sort -u \
+              | xargs -r docker rmi -f || true
             docker image prune -f
 
             echo "=== Disk after prune ==="
             df -h /
+            docker system df || true
 
             # 3. Pull новых app-образов с retry: сеть на VM бывает нестабильной.
             echo "=== Pulling app images ==="
