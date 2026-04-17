@@ -3,21 +3,25 @@ import { rankQuotes } from '@handyseller/tms-domain';
 import type {
   CarrierDescriptor,
   CarrierQuote,
+  ClientOrderRecord,
+  ClientOrderWithTmsStatusRecord,
   CreateShipmentRequestInput,
   CreateShipmentRequestResult,
   RoutingPolicyRecord,
   ShipmentDocumentRecord,
   ShipmentRecord,
   ShipmentRequestRecord,
+  TmsOrderStatus,
   TmsOverview,
   TrackingEventRecord,
 } from '@handyseller/tms-sdk';
 import { buildMockCarrierAdapters } from './adapters/mock-carrier.adapters';
+import { MajorExpressAdapter } from './adapters/major-express.adapter';
 import type { CarrierAdapter } from './adapters/base-carrier.adapter';
 
 @Injectable()
 export class ShipmentsService {
-  private readonly adapters: CarrierAdapter[] = buildMockCarrierAdapters();
+  private readonly adapters: CarrierAdapter[] = [new MajorExpressAdapter(), ...buildMockCarrierAdapters()];
   private readonly requests = new Map<string, ShipmentRequestRecord>();
   private readonly quotes = new Map<string, CarrierQuote[]>();
   private readonly shipments = new Map<string, ShipmentRecord>();
@@ -56,6 +60,25 @@ export class ShipmentsService {
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
+  async listClientOrders(
+    userId: string,
+    authToken?: string | null,
+  ): Promise<ClientOrderWithTmsStatusRecord[]> {
+    const coreOrders = await this.fetchCoreOrders(userId, authToken);
+    return coreOrders.map((order) => {
+      const request = this.listRequests(userId).find((item) => item.snapshot.coreOrderId === order.id);
+      const shipment = request
+        ? this.listShipments(userId).find((item) => item.requestId === request.id)
+        : undefined;
+      return {
+        ...order,
+        tmsStatus: this.resolveTmsOrderStatus(request?.status, shipment?.status),
+        requestId: request?.id,
+        shipmentId: shipment?.id,
+      };
+    });
+  }
+
   listRoutingPolicies(): RoutingPolicyRecord[] {
     return this.routingPolicies;
   }
@@ -75,6 +98,7 @@ export class ShipmentsService {
   async createFromCoreOrder(
     userId: string,
     input: CreateShipmentRequestInput,
+    authToken?: string | null,
   ): Promise<CreateShipmentRequestResult> {
     const id = `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const now = new Date().toISOString();
@@ -89,14 +113,18 @@ export class ShipmentsService {
       updatedAt: now,
     };
     this.requests.set(id, request);
-    const quotes = await this.refreshQuotes(userId, id);
+    const quotes = await this.refreshQuotes(userId, id, authToken);
     return {
       request: this.requests.get(id)!,
       quotes,
     };
   }
 
-  async refreshQuotes(userId: string, requestId: string): Promise<CarrierQuote[]> {
+  async refreshQuotes(
+    userId: string,
+    requestId: string,
+    authToken?: string | null,
+  ): Promise<CarrierQuote[]> {
     const request = this.getRequestOrThrow(userId, requestId);
     const quotes = rankQuotes(
       (
@@ -108,6 +136,7 @@ export class ShipmentsService {
                 draft: request.draft,
               },
               requestId,
+              { userId, authToken },
             ),
           ),
         )
@@ -203,5 +232,40 @@ export class ShipmentsService {
       throw new NotFoundException('Заявка на перевозку не найдена');
     }
     return request;
+  }
+
+  private resolveTmsOrderStatus(
+    requestStatus?: ShipmentRequestRecord['status'],
+    shipmentStatus?: ShipmentRecord['status'],
+  ): TmsOrderStatus {
+    if (shipmentStatus === 'DELIVERED') return 'DELIVERED';
+    if (shipmentStatus && shipmentStatus !== 'CREATED' && shipmentStatus !== 'CONFIRMED') {
+      return 'IN_TRANSIT';
+    }
+    if (requestStatus === 'BOOKED') return 'BOOKED';
+    if (requestStatus === 'QUOTED') return 'QUOTED';
+    if (requestStatus === 'DRAFT') return 'DRAFT';
+    return 'NO_REQUEST';
+  }
+
+  private async fetchCoreOrders(
+    userId: string,
+    authToken?: string | null,
+  ): Promise<ClientOrderRecord[]> {
+    if (!authToken) {
+      return [];
+    }
+    const base = (process.env.CORE_API_URL ?? 'http://localhost:4000').replace(/\/api\/?$/, '');
+    const res = await fetch(`${base}/api/tms/orders/candidates`, {
+      headers: {
+        Authorization: `Bearer ${authToken}`,
+      },
+      cache: 'no-store',
+    });
+    if (!res.ok) {
+      throw new NotFoundException('Не удалось получить заказы клиента из core');
+    }
+    const data = await res.json().catch(() => []);
+    return Array.isArray(data) ? data : [];
   }
 }

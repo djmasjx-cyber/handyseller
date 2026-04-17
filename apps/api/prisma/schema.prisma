@@ -40,6 +40,7 @@ model User {
   payments          Payment[]
   reviews           Review[]
   organizationProfile OrganizationProfile?
+  carrierConnections CarrierConnection[]
 }
 
 model RefreshToken {
@@ -404,6 +405,37 @@ model MarketplaceConnection {
   updatedAt    DateTime        @updatedAt @map("updated_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model CarrierConnection {
+  id              String             @id @default(uuid())
+  userId          String             @map("user_id")
+  carrierCode     CarrierCode        @map("carrier_code")
+  serviceType     CarrierServiceType @default(EXPRESS) @map("service_type")
+  accountLabel    String?            @map("account_label")
+  contractLabel   String?            @map("contract_label")
+  login           String             @db.Text
+  password        String             @db.Text
+  isDefault       Boolean            @default(true) @map("is_default")
+  lastValidatedAt DateTime?          @map("last_validated_at")
+  lastError       String?            @map("last_error") @db.Text
+  createdAt       DateTime           @default(now()) @map("created_at")
+  updatedAt       DateTime           @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, carrierCode])
+  @@index([userId, carrierCode, serviceType])
+  @@map("carrier_connection")
+}
+
+enum CarrierCode {
+  MAJOR_EXPRESS
+}
+
+enum CarrierServiceType {
+  EXPRESS
+  LTL
 }
 
 enum MarketplaceType {

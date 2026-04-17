@@ -2,6 +2,20 @@ export type ServiceFlag = 'EXPRESS' | 'HAZMAT' | 'CONSOLIDATED' | 'AIR' | 'OVERS
 
 export type CarrierMode = 'ROAD' | 'AIR' | 'COURIER' | 'PICKUP' | 'FLEET';
 
+export type CarrierCode = 'MAJOR_EXPRESS';
+
+export type CarrierServiceType = 'EXPRESS' | 'LTL';
+
+export type OrderLogisticsScenario = 'MARKETPLACE_RC' | 'CARRIER_DELIVERY';
+
+export type TmsOrderStatus =
+  | 'NO_REQUEST'
+  | 'DRAFT'
+  | 'QUOTED'
+  | 'BOOKED'
+  | 'IN_TRANSIT'
+  | 'DELIVERED';
+
 export type ShipmentRequestStatus = 'DRAFT' | 'QUOTED' | 'BOOKED';
 
 export type ShipmentStatus =
@@ -26,6 +40,7 @@ export interface CoreOrderSnapshot {
   coreOrderId: string;
   coreOrderNumber: string;
   marketplace: string;
+  logisticsScenario?: OrderLogisticsScenario;
   createdAt: string;
   originLabel: string | null;
   destinationLabel: string | null;
@@ -45,13 +60,33 @@ export interface ShipmentRequestDraft {
   notes?: string;
 }
 
+export interface ClientOrderRecord {
+  id: string;
+  externalId: string;
+  marketplace: string;
+  status: string;
+  totalAmount: number;
+  warehouseName?: string | null;
+  createdAt: string;
+  logisticsScenario: OrderLogisticsScenario;
+  items: Array<{ title: string; quantity: number }>;
+}
+
+export interface ClientOrderWithTmsStatusRecord extends ClientOrderRecord {
+  tmsStatus: TmsOrderStatus;
+  requestId?: string;
+  shipmentId?: string;
+}
+
 export interface CarrierDescriptor {
   id: string;
+  code?: CarrierCode;
   name: string;
   modes: CarrierMode[];
   supportedFlags: ServiceFlag[];
   supportsTracking: boolean;
   supportsBooking: boolean;
+  requiresCredentials?: boolean;
 }
 
 export interface CarrierQuote {
@@ -124,6 +159,41 @@ export interface RoutingPolicyRecord {
   mode: 'MANUAL_ASSIST' | 'RULE_BASED';
   active: boolean;
   description: string;
+}
+
+export interface CarrierConnectionRecord {
+  id: string;
+  carrierCode: CarrierCode;
+  serviceType: CarrierServiceType;
+  accountLabel: string | null;
+  contractLabel: string | null;
+  loginPreview: string | null;
+  isDefault: boolean;
+  lastValidatedAt: string | null;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpsertCarrierConnectionInput {
+  id?: string;
+  carrierCode: CarrierCode;
+  serviceType?: CarrierServiceType;
+  accountLabel?: string;
+  contractLabel?: string;
+  login: string;
+  password: string;
+  isDefault?: boolean;
+}
+
+export interface InternalCarrierCredentials {
+  id: string;
+  carrierCode: CarrierCode;
+  serviceType: CarrierServiceType;
+  accountLabel: string | null;
+  contractLabel: string | null;
+  login: string;
+  password: string;
 }
 
 export interface CreateShipmentRequestInput {

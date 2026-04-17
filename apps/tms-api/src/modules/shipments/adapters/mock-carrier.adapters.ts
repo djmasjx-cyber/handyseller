@@ -6,7 +6,7 @@ import type {
   ShipmentRecord,
   TrackingEventRecord,
 } from '@handyseller/tms-sdk';
-import type { CarrierAdapter } from './base-carrier.adapter';
+import type { CarrierAdapter, CarrierQuoteContext } from './base-carrier.adapter';
 
 function quoteId(requestId: string, carrierId: string) {
   return `${requestId}:${carrierId}`;
@@ -73,7 +73,11 @@ function buildBooking(
 
 abstract class BaseMockCarrierAdapter implements CarrierAdapter {
   abstract readonly descriptor: CarrierDescriptor;
-  abstract quote(input: CreateShipmentRequestInput, requestId: string): Promise<CarrierQuote | null>;
+  abstract quote(
+    input: CreateShipmentRequestInput,
+    requestId: string,
+    context: CarrierQuoteContext,
+  ): Promise<CarrierQuote | null>;
 
   async book(quote: CarrierQuote) {
     return buildBooking(quote);
@@ -90,7 +94,7 @@ export class CdekMockCarrierAdapter extends BaseMockCarrierAdapter {
     supportsBooking: true,
   };
 
-  async quote(input: CreateShipmentRequestInput, requestId: string) {
+  async quote(input: CreateShipmentRequestInput, requestId: string, _context: CarrierQuoteContext) {
     const weightFactor = Math.max(input.snapshot.cargo.weightGrams / 1000, 1);
     const priceRub = Math.round(280 + weightFactor * 55 + input.draft.serviceFlags.length * 35);
     const etaDays = input.draft.serviceFlags.includes('EXPRESS') ? 1 : 3;
@@ -108,7 +112,7 @@ export class BoxberryMockCarrierAdapter extends BaseMockCarrierAdapter {
     supportsBooking: true,
   };
 
-  async quote(input: CreateShipmentRequestInput, requestId: string) {
+  async quote(input: CreateShipmentRequestInput, requestId: string, _context: CarrierQuoteContext) {
     if (input.draft.serviceFlags.includes('HAZMAT') || input.draft.serviceFlags.includes('AIR')) {
       return null;
     }
@@ -128,7 +132,7 @@ export class FleetMockCarrierAdapter extends BaseMockCarrierAdapter {
     supportsBooking: true,
   };
 
-  async quote(input: CreateShipmentRequestInput, requestId: string) {
+  async quote(input: CreateShipmentRequestInput, requestId: string, _context: CarrierQuoteContext) {
     const weightFactor = Math.max(input.snapshot.cargo.weightGrams / 1000, 1);
     const oversizeFactor = input.draft.serviceFlags.includes('OVERSIZED') ? 220 : 0;
     const priceRub = Math.round(360 + weightFactor * 42 + oversizeFactor);

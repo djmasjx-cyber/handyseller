@@ -54,11 +54,11 @@ export default function TmsTrackingPage() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Трекинг перевозок</CardTitle>
+        <CardTitle>Трекинг следующего этапа</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         {items.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Нет активных перевозок для отслеживания.</p>
+          <p className="text-sm text-muted-foreground">После выбора клиентом подходящего варианта здесь появится отслеживание оформленной перевозки.</p>
         ) : items.map((item) => (
           <div key={item.id} className="rounded-lg border p-4 space-y-3">
             <div className="flex items-center justify-between gap-3">

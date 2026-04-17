@@ -13,9 +13,13 @@ type CandidateOrder = {
   externalId: string
   marketplace: string
   status: string
+  tmsStatus: string
   totalAmount: number
   warehouseName?: string | null
+  logisticsScenario: "MARKETPLACE_RC" | "CARRIER_DELIVERY"
   createdAt: string
+  requestId?: string
+  shipmentId?: string
   items: Array<{ title: string; quantity: number }>
 }
 
@@ -71,6 +75,42 @@ const SERVICE_FLAGS: Array<{ id: ServiceFlag; label: string }> = [
   { id: "OVERSIZED", label: "Негабарит" },
 ]
 
+function scenarioLabel(value: CandidateOrder["logisticsScenario"]) {
+  return value === "MARKETPLACE_RC" ? "Доставка до РЦ маркетплейса" : "Доставка через ТК"
+}
+
+function tmsStatusLabel(value: string) {
+  switch (value) {
+    case "NO_REQUEST":
+      return "Тарифы не запрошены"
+    case "DRAFT":
+      return "Черновик расчета"
+    case "QUOTED":
+      return "Варианты получены"
+    case "BOOKED":
+      return "Вариант выбран"
+    case "IN_TRANSIT":
+      return "В процессе"
+    case "DELIVERED":
+      return "Завершено"
+    default:
+      return value
+  }
+}
+
+function requestStatusLabel(value: string) {
+  switch (value) {
+    case "DRAFT":
+      return "Черновик"
+    case "QUOTED":
+      return "Варианты получены"
+    case "BOOKED":
+      return "Вариант выбран"
+    default:
+      return value
+  }
+}
+
 export default function TmsDashboardPage() {
   const token = typeof window !== "undefined" ? localStorage.getItem(AUTH_STORAGE_KEYS.accessToken) : null
   const [loading, setLoading] = useState(true)
@@ -101,7 +141,7 @@ export default function TmsDashboardPage() {
       const [overviewRes, carriersRes, candidatesRes, requestsRes, shipmentsRes] = await Promise.all([
         authFetch("/api/tms/overview", { headers }),
         authFetch("/api/tms/carriers", { headers }),
-        authFetch("/api/tms/core/orders/candidates", { headers }),
+        authFetch("/api/tms/client-orders", { headers }),
         authFetch("/api/tms/shipment-requests", { headers }),
         authFetch("/api/tms/shipments", { headers }),
       ])
@@ -178,7 +218,7 @@ export default function TmsDashboardPage() {
       setFlags([])
       await loadData()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось создать заявку")
+      setError(err instanceof Error ? err.message : "Не удалось получить варианты")
     } finally {
       setSubmitting(false)
     }
@@ -197,11 +237,11 @@ export default function TmsDashboardPage() {
       })
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
-        throw new Error(data?.message ?? "Не удалось забронировать перевозку")
+        throw new Error(data?.message ?? "Не удалось сохранить выбор клиента")
       }
       await loadData()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось забронировать перевозку")
+      setError(err instanceof Error ? err.message : "Не удалось сохранить выбор клиента")
     } finally {
       setSubmitting(false)
     }
@@ -223,7 +263,7 @@ export default function TmsDashboardPage() {
           TMS
         </h1>
         <p className="text-sm text-muted-foreground">
-          Отдельный транспортный контур: импорт snapshot заказа, параллельный rate shopping, ручной выбор тарифа и бронирование перевозки.
+          Простой логистический помощник: берем заказ, запрашиваем тарифы и сроки у подключенных ТК клиента, показываем понятную матрицу вариантов и помогаем выбрать лучший сценарий.
         </p>
       </div>
 
@@ -236,10 +276,10 @@ export default function TmsDashboardPage() {
       <div className="grid gap-4 md:grid-cols-5">
         {[
           { label: "Перевозчики", value: overview?.carriersCount ?? 0, icon: Network },
-          { label: "Заявки", value: overview?.requestsCount ?? 0, icon: Route },
-          { label: "С тарифами", value: overview?.quotedCount ?? 0, icon: CircleDollarSign },
-          { label: "Забронировано", value: overview?.bookedCount ?? 0, icon: PackageCheck },
-          { label: "Активные отгрузки", value: overview?.activeShipmentsCount ?? 0, icon: Truck },
+          { label: "Расчеты", value: overview?.requestsCount ?? 0, icon: Route },
+          { label: "Варианты получены", value: overview?.quotedCount ?? 0, icon: CircleDollarSign },
+          { label: "Выбрано клиентом", value: overview?.bookedCount ?? 0, icon: PackageCheck },
+          { label: "Следующий этап", value: overview?.activeShipmentsCount ?? 0, icon: Truck },
         ].map((item) => (
           <Card key={item.label}>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -256,8 +296,8 @@ export default function TmsDashboardPage() {
       <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
         <Card>
           <CardHeader>
-            <CardTitle>Создать заявку из заказа</CardTitle>
-            <CardDescription>Core остается источником заказов, TMS забирает только snapshot и строит дальше свой контур перевозки.</CardDescription>
+            <CardTitle>Получить тарифы по заказу</CardTitle>
+            <CardDescription>Пользователь выбирает заказ, уточняет маршрут и получает готовую матрицу тарифов и сроков по своим подключенным ТК.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid gap-3">
@@ -272,6 +312,9 @@ export default function TmsDashboardPage() {
                     <div>
                       <p className="font-medium">{order.marketplace} · {order.externalId}</p>
                       <p className="text-sm text-muted-foreground">{order.items.map((item) => `${item.title} x${item.quantity}`).join(", ")}</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {scenarioLabel(order.logisticsScenario)} · {tmsStatusLabel(order.tmsStatus)}
+                      </p>
                     </div>
                     <Badge variant="outline">{order.status}</Badge>
                   </div>
@@ -310,7 +353,7 @@ export default function TmsDashboardPage() {
 
                 <Button onClick={createShipmentRequest} disabled={submitting}>
                   {submitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                  Запросить тарифы
+                  Получить варианты
                 </Button>
               </div>
             )}
@@ -319,8 +362,8 @@ export default function TmsDashboardPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Подключенные сценарии</CardTitle>
-            <CardDescription>Adapter layer уже отделен от core: перевозчики и автопарк подключаются одинаковым capability-based контрактом.</CardDescription>
+            <CardTitle>Доступные каналы расчета</CardTitle>
+            <CardDescription>Показываем только те ТК, по которым пользователь может получить реальный тариф по своей учётке.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             {carriers.map((carrier) => (
@@ -341,11 +384,11 @@ export default function TmsDashboardPage() {
       <div className="grid gap-6 xl:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>Последние заявки и тарифы</CardTitle>
+            <CardTitle>Последние расчеты и варианты</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             {requests.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Пока нет заявок на перевозку.</p>
+              <p className="text-sm text-muted-foreground">Пока нет расчетов по перевозке.</p>
             ) : (
               requests.slice(0, 5).map((request) => (
                 <div key={request.id} className="rounded-lg border p-4 space-y-3">
@@ -354,14 +397,20 @@ export default function TmsDashboardPage() {
                       <p className="font-medium">{request.snapshot.marketplace} · {request.snapshot.coreOrderNumber}</p>
                       <p className="text-sm text-muted-foreground">{request.draft.originLabel} → {request.draft.destinationLabel}</p>
                     </div>
-                    <Badge>{request.status}</Badge>
+                    <Badge>{requestStatusLabel(request.status)}</Badge>
                   </div>
                   <div className="grid gap-2">
-                    {(quotesByRequest[request.id] ?? []).map((quote) => (
+                    {(quotesByRequest[request.id] ?? []).map((quote, index) => (
                       <div key={quote.id} className="flex items-center justify-between gap-3 rounded-md bg-muted/40 px-3 py-2">
                         <div>
-                          <p className="font-medium">{quote.carrierName}</p>
-                          <p className="text-xs text-muted-foreground">{quote.etaDays} дн. · score {quote.score}</p>
+                          <div className="flex items-center gap-2">
+                            <p className="font-medium">{quote.carrierName}</p>
+                            {index === 0 ? <Badge variant="secondary">Рекомендуем</Badge> : null}
+                            {request.selectedQuoteId === quote.id ? <Badge>Выбор клиента</Badge> : null}
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            {quote.etaDays} дн. · интегральная оценка {quote.score}
+                          </p>
                         </div>
                         <div className="flex items-center gap-3">
                           <span className="font-medium">{quote.priceRub.toLocaleString("ru-RU")} ₽</span>
@@ -371,7 +420,7 @@ export default function TmsDashboardPage() {
                             onClick={() => selectQuote(request.id, quote.id)}
                             disabled={submitting || request.status === "BOOKED"}
                           >
-                            {request.selectedQuoteId === quote.id ? "Выбрано" : "Бронировать"}
+                            {request.selectedQuoteId === quote.id ? "Выбрано" : "Выбрать"}
                           </Button>
                         </div>
                       </div>
@@ -385,11 +434,11 @@ export default function TmsDashboardPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Активные отгрузки</CardTitle>
+            <CardTitle>Следующий этап</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             {shipments.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Пока нет забронированных отгрузок.</p>
+              <p className="text-sm text-muted-foreground">После выбора тарифа здесь появится следующий шаг оформления перевозки.</p>
             ) : (
               shipments.slice(0, 6).map((shipment) => (
                 <div key={shipment.id} className="rounded-lg border p-3">

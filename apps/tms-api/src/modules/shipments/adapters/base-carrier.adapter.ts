@@ -6,9 +6,18 @@ import type {
   TrackingEventRecord,
 } from '@handyseller/tms-sdk';
 
+export interface CarrierQuoteContext {
+  userId: string;
+  authToken?: string | null;
+}
+
 export interface CarrierAdapter {
   readonly descriptor: CarrierDescriptor;
-  quote(input: CreateShipmentRequestInput, requestId: string): Promise<CarrierQuote | null>;
+  quote(
+    input: CreateShipmentRequestInput,
+    requestId: string,
+    context: CarrierQuoteContext,
+  ): Promise<CarrierQuote | null>;
   book(quote: CarrierQuote): Promise<{
     shipment: Omit<ShipmentRecord, 'id' | 'userId' | 'createdAt'>;
     tracking: Array<Omit<TrackingEventRecord, 'id'>>;

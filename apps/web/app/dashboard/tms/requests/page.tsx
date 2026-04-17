@@ -13,6 +13,19 @@ type ShipmentRequest = {
   draft: { originLabel: string; destinationLabel: string; serviceFlags: string[] }
 }
 
+function requestStatusLabel(value: string) {
+  switch (value) {
+    case "DRAFT":
+      return "Черновик"
+    case "QUOTED":
+      return "Варианты получены"
+    case "BOOKED":
+      return "Вариант выбран"
+    default:
+      return value
+  }
+}
+
 export default function TmsRequestsPage() {
   const token = typeof window !== "undefined" ? localStorage.getItem(AUTH_STORAGE_KEYS.accessToken) : null
   const [items, setItems] = useState<ShipmentRequest[]>([])
@@ -31,11 +44,11 @@ export default function TmsRequestsPage() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Заявки на перевозку</CardTitle>
+        <CardTitle>Расчеты по перевозке</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
         {items.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Заявок пока нет.</p>
+          <p className="text-sm text-muted-foreground">Расчетов пока нет.</p>
         ) : items.map((item) => (
           <div key={item.id} className="rounded-lg border p-4">
             <div className="flex items-center justify-between gap-3">
@@ -43,7 +56,7 @@ export default function TmsRequestsPage() {
                 <p className="font-medium">{item.snapshot.marketplace} · {item.snapshot.coreOrderNumber}</p>
                 <p className="text-sm text-muted-foreground">{item.draft.originLabel} → {item.draft.destinationLabel}</p>
               </div>
-              <Badge>{item.status}</Badge>
+              <Badge>{requestStatusLabel(item.status)}</Badge>
             </div>
           </div>
         ))}

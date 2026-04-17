@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, Post, UseGuards } from '@nestjs/common';
 import type { CreateShipmentRequestInput } from '@handyseller/tms-sdk';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
@@ -12,6 +12,15 @@ export class ShipmentsController {
   @Get('overview')
   overview(@CurrentUser('userId') userId: string) {
     return this.shipmentsService.getOverview(userId);
+  }
+
+  @Get('client-orders')
+  clientOrders(
+    @CurrentUser('userId') userId: string,
+    @Headers('authorization') authorization?: string,
+  ) {
+    const authToken = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
+    return this.shipmentsService.listClientOrders(userId, authToken);
   }
 
   @Get('carriers')
@@ -33,8 +42,10 @@ export class ShipmentsController {
   createFromCoreOrder(
     @CurrentUser('userId') userId: string,
     @Body() input: CreateShipmentRequestInput,
+    @Headers('authorization') authorization?: string,
   ) {
-    return this.shipmentsService.createFromCoreOrder(userId, input);
+    const authToken = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
+    return this.shipmentsService.createFromCoreOrder(userId, input, authToken);
   }
 
   @Get('shipment-requests/:id/quotes')
@@ -43,8 +54,13 @@ export class ShipmentsController {
   }
 
   @Post('shipment-requests/:id/quotes/refresh')
-  refreshQuotes(@CurrentUser('userId') userId: string, @Param('id') requestId: string) {
-    return this.shipmentsService.refreshQuotes(userId, requestId);
+  refreshQuotes(
+    @CurrentUser('userId') userId: string,
+    @Headers('authorization') authorization: string | undefined,
+    @Param('id') requestId: string,
+  ) {
+    const authToken = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
+    return this.shipmentsService.refreshQuotes(userId, requestId, authToken);
   }
 
   @Post('shipment-requests/:id/select-quote')

@@ -11,6 +11,7 @@ type Carrier = {
   name: string
   modes: string[]
   supportedFlags: string[]
+  requiresCredentials?: boolean
 }
 
 export default function TmsCarriersPage() {
@@ -38,7 +39,10 @@ export default function TmsCarriersPage() {
           <div key={item.id} className="rounded-lg border p-4">
             <div className="flex items-center justify-between gap-3">
               <p className="font-medium">{item.name}</p>
-              <Badge variant="secondary">{item.modes.join(", ")}</Badge>
+              <div className="flex flex-wrap gap-2">
+                {item.requiresCredentials ? <Badge>Нужна учетка клиента</Badge> : null}
+                <Badge variant="secondary">{item.modes.join(", ")}</Badge>
+              </div>
             </div>
             <p className="text-sm text-muted-foreground mt-2">Флаги: {item.supportedFlags.join(", ") || "базовые"}</p>
           </div>

@@ -52,11 +52,11 @@ export default function TmsShipmentsPage() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Отгрузки</CardTitle>
+        <CardTitle>Следующий этап после выбора</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
         {items.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Забронированных отгрузок пока нет.</p>
+          <p className="text-sm text-muted-foreground">Пока достаточно сравнить тарифы и выбрать вариант. Оформление перевозки подключим следующим этапом.</p>
         ) : items.map((item) => (
           <div key={item.id} className="rounded-lg border p-4">
             <div className="flex items-center justify-between gap-3">
