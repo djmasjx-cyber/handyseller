@@ -8,6 +8,7 @@ import { SalesSourcesService } from '../sales-sources/sales-sources.service';
 import { OrderStatus, OrderCancellationKind, type Prisma } from '@prisma/client';
 import type { MarketplaceType } from '@prisma/client';
 import type { CreateManualOrderDto } from './dto/create-manual-order.dto';
+import { resolveCancellationKind } from './order-cancellation.util';
 
 /** Маппинг статусов WB, Ozon, Яндекс → единый OrderStatus */
 const MARKETPLACE_STATUS_TO_ORDER: Record<string, OrderStatus> = {
@@ -99,54 +100,6 @@ function isRawStatusHandedOver(raw: string | undefined | null): boolean {
 function calcProcessingTimeMin(createdAt: Date, deliveredAtProxy: Date = new Date()): number {
   const mins = (deliveredAtProxy.getTime() - createdAt.getTime()) / (60 * 1000);
   return Math.round(Math.max(0, mins));
-}
-
-function isDeliveryLifecycleStatus(status: OrderStatus): boolean {
-  return (
-    status === OrderStatus.SHIPPED ||
-    status === OrderStatus.READY_FOR_PICKUP ||
-    status === OrderStatus.DELIVERED
-  );
-}
-
-function hasDeliverySignalInRawStatus(rawStatus: string | undefined | null): boolean {
-  const s = (rawStatus ?? '').toLowerCase().trim();
-  if (!s) return false;
-  return [
-    'delivering',
-    'ready_for_pickup',
-    'pickup',
-    'delivered',
-    'sold',
-    'receive',
-  ].includes(s);
-}
-
-function resolveCancellationKind(params: {
-  marketplace: MarketplaceType;
-  mappedStatus: OrderStatus;
-  incomingRawStatus?: string | null;
-  existingStatus?: OrderStatus;
-  existingRawStatus?: string | null;
-  ozonCancelledAfterShip?: boolean;
-}): OrderCancellationKind | null {
-  if (params.mappedStatus !== OrderStatus.CANCELLED) return null;
-
-  if (params.marketplace === 'OZON') {
-    if (params.ozonCancelledAfterShip === true) return OrderCancellationKind.REFUSAL;
-    if (params.ozonCancelledAfterShip === false) return OrderCancellationKind.CANCELLATION;
-  }
-
-  if (params.existingStatus && isDeliveryLifecycleStatus(params.existingStatus)) {
-    return OrderCancellationKind.REFUSAL;
-  }
-  if (
-    hasDeliverySignalInRawStatus(params.existingRawStatus) ||
-    hasDeliverySignalInRawStatus(params.incomingRawStatus)
-  ) {
-    return OrderCancellationKind.REFUSAL;
-  }
-  return OrderCancellationKind.CANCELLATION;
 }
 
 /** Макс. надёжный интервал для sync_proxy: если > 72ч, оценка ненадёжна (заказ мог быть сдан давно) */
