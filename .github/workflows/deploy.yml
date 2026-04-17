@@ -216,24 +216,32 @@ jobs:
             echo "=== Disk before ==="
             df -h /
 
-            # 1. Останавливаем и удаляем контейнеры (сеть external — остаётся)
-            $DC -f docker-compose.ci.yml --env-file .env.production down --remove-orphans
-            # Принудительно убираем контейнеры на случай конфликта (watchdog, предыдущий деплой)
-            docker rm -f handyseller-web handyseller-api handyseller-redis 2>/dev/null || true
+            # 1. Перезапускаем только app-сервисы. Redis сохраняем, чтобы не зависеть
+            # от Docker Hub на каждом деплое и не терять прогретый volume/image.
+            $DC -f docker-compose.ci.yml --env-file .env.production stop web api || true
+            docker rm -f handyseller-web handyseller-api 2>/dev/null || true
 
-            # 2. Очистка: только образы и остановленные контейнеры (сети не трогаем)
+            # 2. Очистка: только остановленные контейнеры и dangling images.
+            # Не делаем image prune -af, иначе удалим redis-образ и снова упрёмся в Docker Hub.
             docker container prune -f
-            docker image prune -af
+            docker image prune -f
 
             echo "=== Disk after prune ==="
             df -h /
 
-            # 3. Pull новых образов
-            echo "=== Pulling images ==="
-            $DC -f docker-compose.ci.yml pull
+            # 3. Pull новых app-образов с retry: сеть на VM бывает нестабильной.
+            echo "=== Pulling app images ==="
+            for i in 1 2 3 4 5; do
+              echo "Pull attempt ${i}/5"
+              if $DC -f docker-compose.ci.yml pull api web; then
+                break
+              fi
+              [ $i -eq 5 ] && { echo "Pull failed after 5 attempts"; exit 1; }
+              sleep $((i * 5))
+            done
 
-            # 5. Запуск
-            $DC -f docker-compose.ci.yml --env-file .env.production up -d
+            # 5. Запуск. Redis поднимется при необходимости, но в штатном деплое не пересоздаётся.
+            $DC -f docker-compose.ci.yml --env-file .env.production up -d redis api web
 
             trap - EXIT
             echo "*/2 * * * * root /opt/handyseller/vm-watchdog.sh" | sudo tee /etc/cron.d/handyseller-watchdog
