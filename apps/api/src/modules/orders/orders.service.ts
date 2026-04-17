@@ -36,6 +36,13 @@ const MARKETPLACE_STATUS_TO_ORDER: Record<string, OrderStatus> = {
   delivering: OrderStatus.SHIPPED,
   cancelled_by_seller: OrderStatus.CANCELLED,
   cancelled_by_client: OrderStatus.CANCELLED,
+  // Ozon: сценарии клиентского отказа/невыкупа после отправки
+  client_not_come: OrderStatus.CANCELLED,
+  client_refused: OrderStatus.CANCELLED,
+  not_accepted: OrderStatus.CANCELLED,
+  not_accepted_by_client: OrderStatus.CANCELLED,
+  cancelled_after_ship: OrderStatus.CANCELLED,
+  cancelled_after_shipment: OrderStatus.CANCELLED,
   // WB возвращает canceled_by_client (амер. орфография) — «Клиент отказался»
   canceled_by_seller: OrderStatus.CANCELLED,
   canceled_by_client: OrderStatus.CANCELLED,

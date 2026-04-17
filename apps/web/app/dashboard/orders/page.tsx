@@ -64,6 +64,19 @@ const WB_RAW_STATUS_LABELS: Record<string, string> = {
   rejected: "Покупатель отказался",
 }
 
+const OZON_REFUSAL_RAW_STATUSES = new Set([
+  "cancelled_by_client",
+  "canceled_by_client",
+  "declined_by_client",
+  "customer_refused",
+  "client_refused",
+  "client_not_come",
+  "not_accepted",
+  "not_accepted_by_client",
+  "cancelled_after_ship",
+  "cancelled_after_shipment",
+])
+
 /** Стоимость заказа — реальная цена продажи на маркете (только на странице «Все заказы») */
 const SHOW_ORDER_PRICES = true
 
@@ -146,6 +159,14 @@ function holdRemaining(order: Order): string {
 }
 
 function formatStatus(order: Order): string {
+  if (
+    order.marketplace === "OZON" &&
+    order.status === "CANCELLED" &&
+    order.rawStatus &&
+    OZON_REFUSAL_RAW_STATUSES.has(order.rawStatus.toLowerCase())
+  ) {
+    return "Отказ"
+  }
   if (order.rawStatus) {
     const label = WB_RAW_STATUS_LABELS[order.rawStatus.toLowerCase()]
     if (label) return label
