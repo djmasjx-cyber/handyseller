@@ -299,6 +299,7 @@ export function FinanceTable({ scheme }: Props) {
   const [loadingMore, setLoadingMore] = useState(false)
   const [offset, setOffset] = useState(0)
   const [hasMore, setHasMore] = useState(true)
+  const offsetRef = useRef(0)
   const [syncing, setSyncing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [syncedAt, setSyncedAt] = useState<string | null>(null)
@@ -314,7 +315,7 @@ export function FinanceTable({ scheme }: Props) {
 
   const fetchRows = useCallback(async (reset = true, nextOffset?: number) => {
     if (!token) return
-    const targetOffset = reset ? 0 : (nextOffset ?? offset)
+    const targetOffset = reset ? 0 : (nextOffset ?? offsetRef.current)
     if (reset) {
       setLoading(true)
       setError(null)
@@ -344,6 +345,7 @@ export function FinanceTable({ scheme }: Props) {
       setHasMore(Boolean(data?.hasMore))
       const newOffset = targetOffset + items.length
       setOffset(newOffset)
+      offsetRef.current = newOffset
       // Берём дату синхронизации из первой строки
       const first = items?.[0]?.commissions?.[0]
       if (first?.syncedAt) setSyncedAt(first.syncedAt)
@@ -355,11 +357,12 @@ export function FinanceTable({ scheme }: Props) {
       setLoading(false)
       setLoadingMore(false)
     }
-  }, [token, scheme, router, offset])
+  }, [token, scheme, router])
 
   useEffect(() => {
     if (mounted && token) {
       setOffset(0)
+      offsetRef.current = 0
       setHasMore(true)
       fetchRows(true)
     }
@@ -448,6 +451,7 @@ export function FinanceTable({ scheme }: Props) {
         headers: { Authorization: `Bearer ${token}` },
       })
       setOffset(0)
+      offsetRef.current = 0
       setHasMore(true)
       fetchRows(true)
     } catch {
@@ -752,7 +756,7 @@ export function FinanceTable({ scheme }: Props) {
         <div className="flex justify-center pt-2">
           <Button
             variant="outline"
-            onClick={() => fetchRows(false, offset)}
+            onClick={() => fetchRows(false, offsetRef.current)}
             disabled={loadingMore}
           >
             {loadingMore ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
