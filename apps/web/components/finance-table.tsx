@@ -296,6 +296,7 @@ export function FinanceTable({ scheme }: Props) {
   const [totalRows, setTotalRows] = useState(0)
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
+  const [loadingAll, setLoadingAll] = useState(false)
   const [offset, setOffset] = useState(0)
   const [hasMore, setHasMore] = useState(true)
   const offsetRef = useRef(0)
@@ -313,6 +314,30 @@ export function FinanceTable({ scheme }: Props) {
 
   const token = mounted && typeof window !== "undefined" ? localStorage.getItem("accessToken") : null
 
+  const fetchPage = useCallback(async (targetOffset: number) => {
+    if (!token) return null
+    const params = new URLSearchParams({
+      scheme,
+      limit: String(PAGE_SIZE),
+      offset: String(targetOffset),
+      includeEmpty: showEmptyRows ? "1" : "0",
+    })
+    const r = await fetch(`/api/finance/products/paged?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    if (r.status === 401) {
+      router.replace("/login?from=" + encodeURIComponent(`/dashboard/finance/${scheme.toLowerCase()}`))
+      throw new Error("401")
+    }
+    const data = await r.json().catch(() => ({}))
+    if (!r.ok) throw new Error(data?.error ?? "Ошибка")
+    return {
+      items: Array.isArray(data?.items) ? (data.items as ProductFinanceRow[]) : [],
+      total: typeof data?.total === "number" ? data.total : 0,
+      hasMore: Boolean(data?.hasMore),
+    }
+  }, [token, scheme, showEmptyRows, router])
+
   const fetchRows = useCallback(async (reset = true, nextOffset?: number) => {
     if (!token) return
     const targetOffset = reset ? 0 : (nextOffset ?? offsetRef.current)
@@ -324,26 +349,12 @@ export function FinanceTable({ scheme }: Props) {
     }
 
     try {
-      const params = new URLSearchParams({
-        scheme,
-        limit: String(PAGE_SIZE),
-        offset: String(targetOffset),
-        includeEmpty: showEmptyRows ? "1" : "0",
-      })
-      const r = await fetch(`/api/finance/products/paged?${params.toString()}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      if (r.status === 401) {
-        router.replace("/login?from=" + encodeURIComponent(`/dashboard/finance/${scheme.toLowerCase()}`))
-        throw new Error("401")
-      }
-      const data = await r.json().catch(() => ({}))
-      if (!r.ok) throw new Error(data?.error ?? "Ошибка")
-
-      const items = Array.isArray(data?.items) ? (data.items as ProductFinanceRow[]) : []
+      const page = await fetchPage(targetOffset)
+      if (!page) return
+      const items = page.items
       setRows((prev) => (reset ? items : [...prev, ...items]))
-      setTotalRows(typeof data?.total === "number" ? data.total : 0)
-      setHasMore(Boolean(data?.hasMore))
+      setTotalRows(page.total)
+      setHasMore(page.hasMore)
       const newOffset = targetOffset + items.length
       setOffset(newOffset)
       offsetRef.current = newOffset
@@ -358,7 +369,42 @@ export function FinanceTable({ scheme }: Props) {
       setLoading(false)
       setLoadingMore(false)
     }
-  }, [token, scheme, router, showEmptyRows])
+  }, [token, fetchPage])
+
+  const handleLoadAll = useCallback(async () => {
+    if (!token || !hasMore || loadingAll || loadingMore) return
+    setLoadingAll(true)
+    try {
+      let localOffset = offsetRef.current
+      let localHasMore = hasMore
+      const collected: ProductFinanceRow[] = []
+      let finalTotal = totalRows
+
+      while (localHasMore) {
+        const page = await fetchPage(localOffset)
+        if (!page) break
+        collected.push(...page.items)
+        localOffset += page.items.length
+        localHasMore = page.hasMore
+        finalTotal = page.total
+        if (page.items.length === 0) break
+      }
+
+      if (collected.length > 0) {
+        setRows((prev) => [...prev, ...collected])
+      }
+      setOffset(localOffset)
+      offsetRef.current = localOffset
+      setHasMore(localHasMore)
+      setTotalRows(finalTotal)
+    } catch (e) {
+      if (e instanceof Error && e.message !== "401") {
+        setError(e.message)
+      }
+    } finally {
+      setLoadingAll(false)
+    }
+  }, [token, hasMore, loadingAll, loadingMore, totalRows, fetchPage])
 
   useEffect(() => {
     if (mounted && token) {
@@ -762,14 +808,24 @@ export function FinanceTable({ scheme }: Props) {
       )}
       {!error && rows.length > 0 && hasMore && (
         <div className="flex justify-center pt-2">
-          <Button
-            variant="outline"
-            onClick={() => fetchRows(false, offsetRef.current)}
-            disabled={loadingMore}
-          >
-            {loadingMore ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-            Показать еще
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={() => fetchRows(false, offsetRef.current)}
+              disabled={loadingMore || loadingAll}
+            >
+              {loadingMore ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Показать еще
+            </Button>
+            <Button
+              variant="outline"
+              onClick={handleLoadAll}
+              disabled={loadingAll || loadingMore}
+            >
+              {loadingAll ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Показать все
+            </Button>
+          </div>
         </div>
       )}
     </div>
