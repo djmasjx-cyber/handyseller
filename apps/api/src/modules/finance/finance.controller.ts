@@ -37,6 +37,25 @@ export class FinanceController {
   }
 
   /**
+   * GET /finance/products/paged?scheme=FBO|FBS&limit=20&offset=0
+   * Постраничная выдача для больших таблиц юнит-экономики.
+   */
+  @Get('products/paged')
+  async getProductsPaged(
+    @CurrentUser('userId') userId: string,
+    @Query('scheme') scheme?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    const s = scheme === 'FBO' || scheme === 'FBS' ? scheme : undefined;
+    return this.financeService.getProductFinanceTablePaged(userId, {
+      scheme: s,
+      limit: limit ? parseInt(limit, 10) : undefined,
+      offset: offset ? parseInt(offset, 10) : undefined,
+    });
+  }
+
+  /**
    * PATCH /finance/products/:id/cost
    * Обновить себестоимость товара inline.
    */

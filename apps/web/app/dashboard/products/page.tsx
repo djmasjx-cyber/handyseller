@@ -132,7 +132,6 @@ export default function ProductsPage() {
   const [hasMore, setHasMore] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [productsTotal, setProductsTotal] = useState(0)
-  const loadMoreRef = useRef<HTMLDivElement | null>(null)
   const offsetRef = useRef(0)
   const [searchQuery, setSearchQuery] = useState("") // Поиск по артикулу или наименованию
   type ProductsSortKey = "stockFbs" | "stockFbo" | "reservedFbs" | "reservedFbo" | "cost"
@@ -377,19 +376,17 @@ export default function ProductsPage() {
     fetchProducts(true).catch(() => setProducts([]))
   }, [token, sortKey, sortDirection, searchQuery, fetchProducts])
 
-  useEffect(() => {
-    const node = loadMoreRef.current
-    if (!node || !hasMore || loading || loadingMore) return
-    const observer = new IntersectionObserver((entries) => {
-      if (!entries[0]?.isIntersecting) return
-      setLoadingMore(true)
-      fetchProducts(false, offsetRef.current)
-        .catch(() => {})
-        .finally(() => setLoadingMore(false))
-    }, { rootMargin: "300px" })
-    observer.observe(node)
-    return () => observer.disconnect()
-  }, [fetchProducts, hasMore, loading, loadingMore])
+  const loadMore = async () => {
+    if (!hasMore || loadingMore) return
+    setLoadingMore(true)
+    try {
+      await fetchProducts(false, offsetRef.current)
+    } catch {
+      // ignore
+    } finally {
+      setLoadingMore(false)
+    }
+  }
 
   // Inline-редактирование остатков
   const [editingStockId, setEditingStockId] = useState<string | null>(null)
@@ -1304,8 +1301,15 @@ export default function ProductsPage() {
               </tbody>
             </table>
           </div>
-          <div ref={loadMoreRef} className="mt-2 h-8 flex items-center justify-center text-xs text-muted-foreground">
-            {loadingMore ? "Загрузка..." : hasMore ? "Прокрутите вниз для загрузки" : "Все записи загружены"}
+          <div className="mt-3 flex items-center justify-center">
+            {hasMore ? (
+              <Button variant="outline" size="sm" onClick={loadMore} disabled={loadingMore}>
+                {loadingMore ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                Показать еще
+              </Button>
+            ) : (
+              <span className="text-xs text-muted-foreground">Все записи загружены</span>
+            )}
           </div>
         </CardContent>
       </Card>

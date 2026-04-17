@@ -292,8 +292,13 @@ type SortDirection = "asc" | "desc"
 
 export function FinanceTable({ scheme }: Props) {
   const router = useRouter()
+  const PAGE_SIZE = 20
   const [rows, setRows] = useState<ProductFinanceRow[]>([])
+  const [totalRows, setTotalRows] = useState(0)
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [offset, setOffset] = useState(0)
+  const [hasMore, setHasMore] = useState(true)
   const [syncing, setSyncing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [syncedAt, setSyncedAt] = useState<string | null>(null)
@@ -307,32 +312,57 @@ export function FinanceTable({ scheme }: Props) {
 
   const token = mounted && typeof window !== "undefined" ? localStorage.getItem("accessToken") : null
 
-  const fetchRows = useCallback(() => {
+  const fetchRows = useCallback(async (reset = true, nextOffset?: number) => {
     if (!token) return
-    setLoading(true)
-    setError(null)
-    fetch(`/api/finance/products?scheme=${scheme}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((r) => {
-        if (r.status === 401) {
-          router.replace("/login?from=" + encodeURIComponent(`/dashboard/finance/${scheme.toLowerCase()}`))
-          throw new Error("401")
-        }
-        return r.ok ? r.json() : r.json().then((d) => { throw new Error(d?.error ?? "Ошибка") })
+    const targetOffset = reset ? 0 : (nextOffset ?? offset)
+    if (reset) {
+      setLoading(true)
+      setError(null)
+    } else {
+      setLoadingMore(true)
+    }
+
+    try {
+      const params = new URLSearchParams({
+        scheme,
+        limit: String(PAGE_SIZE),
+        offset: String(targetOffset),
       })
-      .then((data: ProductFinanceRow[]) => {
-        setRows(Array.isArray(data) ? data : [])
-        // Берём дату синхронизации из первой строки
-        const first = data?.[0]?.commissions?.[0]
-        if (first?.syncedAt) setSyncedAt(first.syncedAt)
+      const r = await fetch(`/api/finance/products/paged?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
       })
-      .catch((e) => { if (e.message !== "401") setError(e.message) })
-      .finally(() => setLoading(false))
-  }, [token, scheme, router])
+      if (r.status === 401) {
+        router.replace("/login?from=" + encodeURIComponent(`/dashboard/finance/${scheme.toLowerCase()}`))
+        throw new Error("401")
+      }
+      const data = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(data?.error ?? "Ошибка")
+
+      const items = Array.isArray(data?.items) ? (data.items as ProductFinanceRow[]) : []
+      setRows((prev) => (reset ? items : [...prev, ...items]))
+      setTotalRows(typeof data?.total === "number" ? data.total : 0)
+      setHasMore(Boolean(data?.hasMore))
+      const newOffset = targetOffset + items.length
+      setOffset(newOffset)
+      // Берём дату синхронизации из первой строки
+      const first = items?.[0]?.commissions?.[0]
+      if (first?.syncedAt) setSyncedAt(first.syncedAt)
+    } catch (e) {
+      if (e instanceof Error && e.message !== "401") {
+        setError(e.message)
+      }
+    } finally {
+      setLoading(false)
+      setLoadingMore(false)
+    }
+  }, [token, scheme, router, offset])
 
   useEffect(() => {
-    if (mounted && token) fetchRows()
+    if (mounted && token) {
+      setOffset(0)
+      setHasMore(true)
+      fetchRows(true)
+    }
   }, [mounted, token, fetchRows])
 
   // Marketplace list for columns
@@ -417,7 +447,9 @@ export function FinanceTable({ scheme }: Props) {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       })
-      fetchRows()
+      setOffset(0)
+      setHasMore(true)
+      fetchRows(true)
     } catch {
       // ignore
     } finally {
@@ -444,6 +476,9 @@ export function FinanceTable({ scheme }: Props) {
         <div>
           <p className="text-sm text-muted-foreground">
             Юнит-экономика по схеме <span className="font-medium">{scheme}</span>
+            <span className="ml-2 text-xs text-muted-foreground/70">
+              · загружено {rows.length} из {totalRows}
+            </span>
             {syncedAt && (
               <span className="ml-2 text-xs text-muted-foreground/70">
                 · тарифы от {new Date(syncedAt).toLocaleDateString("ru-RU")}
@@ -711,6 +746,18 @@ export function FinanceTable({ scheme }: Props) {
               })}
             </tbody>
           </table>
+        </div>
+      )}
+      {!error && rows.length > 0 && hasMore && (
+        <div className="flex justify-center pt-2">
+          <Button
+            variant="outline"
+            onClick={() => fetchRows(false, offset)}
+            disabled={loadingMore}
+          >
+            {loadingMore ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+            Показать еще
+          </Button>
         </div>
       )}
     </div>

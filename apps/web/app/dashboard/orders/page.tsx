@@ -197,7 +197,6 @@ export default function OrdersPage() {
   const [hasMore, setHasMore] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [ordersTotal, setOrdersTotal] = useState(0)
-  const loadMoreRef = useRef<HTMLDivElement | null>(null)
   const offsetRef = useRef(0)
 
   type OrdersSortKey = "totalAmount" | "warehouse" | "status" | "processingTime"
@@ -280,17 +279,15 @@ export default function OrdersPage() {
     fetchOrders(true)
   }, [token, sortKey, sortDirection, fetchOrders])
 
-  useEffect(() => {
-    const node = loadMoreRef.current
-    if (!node || !hasMore || loading || loadingMore) return
-    const observer = new IntersectionObserver((entries) => {
-      if (!entries[0]?.isIntersecting) return
-      setLoadingMore(true)
-      fetchOrders(false, offsetRef.current).finally(() => setLoadingMore(false))
-    }, { rootMargin: "300px" })
-    observer.observe(node)
-    return () => observer.disconnect()
-  }, [fetchOrders, hasMore, loading, loadingMore])
+  const loadMore = async () => {
+    if (!hasMore || loadingMore) return
+    setLoadingMore(true)
+    try {
+      await fetchOrders(false, offsetRef.current)
+    } finally {
+      setLoadingMore(false)
+    }
+  }
 
   // Обновление таймера холда каждую секунду
   const [tick, setTick] = useState(0)
@@ -622,8 +619,15 @@ export default function OrdersPage() {
           </div>
         </CardContent>
       </Card>
-      <div ref={loadMoreRef} className="h-8 flex items-center justify-center text-xs text-muted-foreground">
-        {loadingMore ? "Загрузка..." : hasMore ? "Прокрутите вниз для загрузки" : "Все записи загружены"}
+      <div className="py-2 flex items-center justify-center">
+        {hasMore ? (
+          <Button variant="outline" size="sm" onClick={loadMore} disabled={loadingMore}>
+            {loadingMore ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+            Показать еще
+          </Button>
+        ) : (
+          <span className="text-xs text-muted-foreground">Все записи загружены</span>
+        )}
       </div>
     </div>
   )
