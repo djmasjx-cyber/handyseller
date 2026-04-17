@@ -181,7 +181,7 @@ export class OrdersService {
       const fromTable = o.processingTime?.processingTimeMin;
       const fromLegacy = o.processingTimeMin;
       const val = fromTable ?? (fromLegacy != null && fromLegacy <= MAX_TRUSTED_PROCESSING_MIN ? fromLegacy : null);
-      return { ...o, processingTimeMin: val };
+      return this.normalizeOrderForResponse({ ...o, processingTimeMin: val });
     });
   }
 
@@ -223,7 +223,7 @@ export class OrdersService {
       const fromTable = o.processingTime?.processingTimeMin;
       const fromLegacy = o.processingTimeMin;
       const val = fromTable ?? (fromLegacy != null && fromLegacy <= MAX_TRUSTED_PROCESSING_MIN ? fromLegacy : null);
-      return { ...o, processingTimeMin: val };
+      return this.normalizeOrderForResponse({ ...o, processingTimeMin: val });
     });
 
     const dir = sortDirection === 'desc' ? -1 : 1;
@@ -256,6 +256,18 @@ export class OrdersService {
       offset,
       limit,
       hasMore: offset + limit < total,
+    };
+  }
+
+  private normalizeOrderForResponse<
+    T extends {
+      cancellationReasonId?: bigint | null;
+    },
+  >(order: T): T & { cancellationReasonId: string | null } {
+    return {
+      ...order,
+      cancellationReasonId:
+        order.cancellationReasonId != null ? order.cancellationReasonId.toString() : null,
     };
   }
 
