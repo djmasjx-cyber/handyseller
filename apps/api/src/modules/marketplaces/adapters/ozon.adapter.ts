@@ -1372,6 +1372,14 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
       status: string;
       created_at: string;
       in_process_at?: string;
+      cancellation?: {
+        affect_cancellation_rating?: boolean;
+        cancel_reason?: string;
+        cancel_reason_id?: number;
+        cancellation_initiator?: string;
+        cancellation_type?: string;
+        cancelled_after_ship?: boolean;
+      };
     };
 
     const toOrderData = (posting: FbsPosting, isFbo = false): OrderData => {
@@ -1409,6 +1417,16 @@ export class OzonAdapter extends BaseMarketplaceAdapter {
         createdAt: new Date(posting.in_process_at ?? posting.created_at),
         isFbo,
         ozonOfferId,
+        cancellation: posting.cancellation
+          ? {
+              cancelReason: posting.cancellation.cancel_reason,
+              cancelReasonId: posting.cancellation.cancel_reason_id,
+              cancellationInitiator: posting.cancellation.cancellation_initiator,
+              cancellationType: posting.cancellation.cancellation_type,
+              cancelledAfterShip: posting.cancellation.cancelled_after_ship,
+              affectCancellationRating: posting.cancellation.affect_cancellation_rating,
+            }
+          : undefined,
       };
     };
 

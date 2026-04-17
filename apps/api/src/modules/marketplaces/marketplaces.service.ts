@@ -931,7 +931,8 @@ export class MarketplacesService {
     const fromDate = from ?? new Date(now.getFullYear(), now.getMonth(), 1);
     const toDate = to ?? new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
 
-    // Отказы = «Покупатель отказался»: raw_status IN (WB/Ozon). Без raw_status — все CANCELLED (legacy).
+    // Отказы = cancellation_kind=REFUSAL (новая модель).
+    // Для legacy-данных без cancellation_kind используем fallback по raw_status.
     const rows = await this.prisma.$queryRaw<
       Array<{
         marketplace: string;
@@ -947,8 +948,13 @@ export class MarketplacesService {
         COUNT(*) FILTER (WHERE status <> 'CANCELLED')::bigint as total_orders,
         COUNT(*) FILTER (WHERE status = 'DELIVERED')::bigint as delivered_count,
         COUNT(*) FILTER (WHERE status = 'CANCELLED' AND (
-          raw_status IS NULL
-          OR LOWER(TRIM(raw_status)) IN ('canceled_by_client','declined_by_client','reject','rejected','cancelled_by_client','customer_refused')
+          cancellation_kind = 'REFUSAL'
+          OR (
+            cancellation_kind IS NULL AND (
+              raw_status IS NULL
+              OR LOWER(TRIM(raw_status)) IN ('canceled_by_client','declined_by_client','reject','rejected','cancelled_by_client','customer_refused')
+            )
+          )
         ))::bigint as cancelled_count,
         COALESCE(SUM(total_amount) FILTER (WHERE status = 'DELIVERED'), 0)::text as revenue,
         COALESCE(SUM(total_amount) FILTER (WHERE status <> 'CANCELLED'), 0)::text as sales_revenue

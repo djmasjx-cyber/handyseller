@@ -101,6 +101,15 @@ export interface OrderData {
   isFbo?: boolean;
   /** Ozon FBS v3: offer_id (seller article) из products[]. Используется для маппинга когда sku ≠ product_id. */
   ozonOfferId?: string;
+  /** Ozon cancellation payload for financial classification and analytics. */
+  cancellation?: {
+    cancelReason?: string;
+    cancelReasonId?: number;
+    cancellationInitiator?: string;
+    cancellationType?: string;
+    cancelledAfterShip?: boolean;
+    affectCancellationRating?: boolean;
+  };
 }
 
 export interface SyncResult {

@@ -5,7 +5,7 @@ import { ProductMappingService } from '../marketplaces/product-mapping.service';
 import { ProductsService } from '../products/products.service';
 import { StockService } from '../products/stock.service';
 import { SalesSourcesService } from '../sales-sources/sales-sources.service';
-import { OrderStatus } from '@prisma/client';
+import { OrderStatus, OrderCancellationKind, type Prisma } from '@prisma/client';
 import type { MarketplaceType } from '@prisma/client';
 import type { CreateManualOrderDto } from './dto/create-manual-order.dto';
 
@@ -99,6 +99,54 @@ function isRawStatusHandedOver(raw: string | undefined | null): boolean {
 function calcProcessingTimeMin(createdAt: Date, deliveredAtProxy: Date = new Date()): number {
   const mins = (deliveredAtProxy.getTime() - createdAt.getTime()) / (60 * 1000);
   return Math.round(Math.max(0, mins));
+}
+
+function isDeliveryLifecycleStatus(status: OrderStatus): boolean {
+  return (
+    status === OrderStatus.SHIPPED ||
+    status === OrderStatus.READY_FOR_PICKUP ||
+    status === OrderStatus.DELIVERED
+  );
+}
+
+function hasDeliverySignalInRawStatus(rawStatus: string | undefined | null): boolean {
+  const s = (rawStatus ?? '').toLowerCase().trim();
+  if (!s) return false;
+  return [
+    'delivering',
+    'ready_for_pickup',
+    'pickup',
+    'delivered',
+    'sold',
+    'receive',
+  ].includes(s);
+}
+
+function resolveCancellationKind(params: {
+  marketplace: MarketplaceType;
+  mappedStatus: OrderStatus;
+  incomingRawStatus?: string | null;
+  existingStatus?: OrderStatus;
+  existingRawStatus?: string | null;
+  ozonCancelledAfterShip?: boolean;
+}): OrderCancellationKind | null {
+  if (params.mappedStatus !== OrderStatus.CANCELLED) return null;
+
+  if (params.marketplace === 'OZON') {
+    if (params.ozonCancelledAfterShip === true) return OrderCancellationKind.REFUSAL;
+    if (params.ozonCancelledAfterShip === false) return OrderCancellationKind.CANCELLATION;
+  }
+
+  if (params.existingStatus && isDeliveryLifecycleStatus(params.existingStatus)) {
+    return OrderCancellationKind.REFUSAL;
+  }
+  if (
+    hasDeliverySignalInRawStatus(params.existingRawStatus) ||
+    hasDeliverySignalInRawStatus(params.incomingRawStatus)
+  ) {
+    return OrderCancellationKind.REFUSAL;
+  }
+  return OrderCancellationKind.CANCELLATION;
 }
 
 /** Макс. надёжный интервал для sync_proxy: если > 72ч, оценка ненадёжна (заказ мог быть сдан давно) */
@@ -709,6 +757,13 @@ export class OrdersService {
           createdAt?: Date;
           wbFulfillmentType?: 'FBS' | 'DBS' | 'DBW' | null;
           isFbo?: boolean | null;
+          cancellationKind?: OrderCancellationKind | null;
+          cancelledAfterShip?: boolean | null;
+          cancellationInitiator?: string | null;
+          cancellationType?: string | null;
+          cancellationReason?: string | null;
+          cancellationReasonId?: bigint | null;
+          cancellationRaw?: Prisma.InputJsonValue;
         } = {};
         if (od.createdAt) updateData.createdAt = od.createdAt;
         if (existing.status !== OrderStatus.CANCELLED && isCancelled) {
@@ -732,6 +787,25 @@ export class OrdersService {
         // Единое правило — статус только вперёд (pickResolvedStatus), без понижения.
         // Исключение: rawStatus "waiting" ранее ошибочно маппился в READY_FOR_PICKUP — корректируем на IN_PROGRESS.
         const hasFreshStatus = od.rawStatus != null || od.rawSupplierStatus != null;
+        const cancellationKind = resolveCancellationKind({
+          marketplace,
+          mappedStatus: newStatus,
+          incomingRawStatus: od.rawStatus ?? od.rawSupplierStatus ?? null,
+          existingStatus: existing.status,
+          existingRawStatus: existing.rawStatus,
+          ozonCancelledAfterShip: od.cancellation?.cancelledAfterShip,
+        });
+        if (cancellationKind) {
+          updateData.cancellationKind = cancellationKind;
+        }
+        if (od.cancellation) {
+          updateData.cancelledAfterShip = od.cancellation.cancelledAfterShip ?? null;
+          updateData.cancellationInitiator = od.cancellation.cancellationInitiator ?? null;
+          updateData.cancellationType = od.cancellation.cancellationType ?? null;
+          updateData.cancellationReason = od.cancellation.cancelReason ?? null;
+          updateData.cancellationReasonId = od.cancellation.cancelReasonId != null ? BigInt(od.cancellation.cancelReasonId) : null;
+          updateData.cancellationRaw = od.cancellation as Prisma.InputJsonValue;
+        }
         if (hasFreshStatus) {
           const rawLower = (od.rawStatus ?? od.rawSupplierStatus ?? '').toString().toLowerCase();
           const correctWaiting =
@@ -797,9 +871,30 @@ export class OrdersService {
           (updateData as Record<string, unknown>).ozonPostingNumber = externalId;
         }
         if (Object.keys(updateData).length > 0) {
-          await this.prisma.order.update({
-            where: { id: existing.id },
-            data: updateData,
+          const nextStatus = updateData.status ?? existing.status;
+          await this.prisma.$transaction(async (tx) => {
+            await tx.order.update({
+              where: { id: existing.id },
+              data: updateData,
+            });
+            if (updateData.status && updateData.status !== existing.status) {
+              await tx.orderStatusEvent.create({
+                data: {
+                  orderId: existing.id,
+                  status: nextStatus,
+                  rawStatus: od.rawStatus ?? od.rawSupplierStatus ?? null,
+                  source: 'sync',
+                  cancellationKind: updateData.cancellationKind ?? null,
+                  metadata: {
+                    marketplace,
+                    externalId,
+                    previousStatus: existing.status,
+                    nextStatus,
+                    cancellation: od.cancellation ?? null,
+                  },
+                },
+              });
+            }
           });
           // WB: при переходе в «На сборке» — всегда отправляем статус на WB (иначе «Добавить коробку» не сработает)
           if (updateData.status === OrderStatus.IN_PROGRESS && marketplace === 'WILDBERRIES') {
@@ -847,6 +942,12 @@ export class OrdersService {
         }
 
         const status = this.mapStatus(od.status);
+        const cancellationKind = resolveCancellationKind({
+          marketplace,
+          mappedStatus: status,
+          incomingRawStatus: od.rawStatus ?? od.rawSupplierStatus ?? null,
+          ozonCancelledAfterShip: od.cancellation?.cancelledAfterShip,
+        });
         const amount = od.amount ?? 0;
         const holdUntil =
           status === OrderStatus.NEW
@@ -885,6 +986,13 @@ export class OrdersService {
                   ? (od as { wbFulfillmentType?: 'FBS' | 'DBS' | 'DBW' }).wbFulfillmentType!
                   : null,
               isFbo: odIsFbo || undefined,
+              cancellationKind,
+              cancelledAfterShip: od.cancellation?.cancelledAfterShip ?? null,
+              cancellationInitiator: od.cancellation?.cancellationInitiator ?? null,
+              cancellationType: od.cancellation?.cancellationType ?? null,
+              cancellationReason: od.cancellation?.cancelReason ?? null,
+              cancellationReasonId: od.cancellation?.cancelReasonId != null ? BigInt(od.cancellation.cancelReasonId) : null,
+              cancellationRaw: od.cancellation ? (od.cancellation as Prisma.InputJsonValue) : undefined,
             },
           });
           await tx.orderItem.create({
@@ -895,6 +1003,20 @@ export class OrdersService {
               price: amount / quantity,
               productBarcodeWb,
               productBarcodeOzon,
+            },
+          });
+          await tx.orderStatusEvent.create({
+            data: {
+              orderId: o.id,
+              status,
+              rawStatus: od.rawStatus ?? od.rawSupplierStatus ?? null,
+              source: 'sync',
+              cancellationKind,
+              metadata: {
+                marketplace,
+                externalId,
+                cancellation: od.cancellation ?? null,
+              },
             },
           });
           return o;

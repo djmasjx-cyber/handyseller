@@ -445,9 +445,25 @@ model Order {
   /// FBO: товар со склада маркетплейса (WB: DBW, Ozon: FBO) — не списывать остаток «Мой склад»
   isFbo       Boolean? @map("is_fbo")
 
+  /// Классификация отмен: CANCELLATION — отмена до фактической отгрузки, REFUSAL — отказ после отгрузки.
+  cancellationKind      OrderCancellationKind? @map("cancellation_kind")
+  /// Ozon: отмена после отгрузки по полю cancellation.cancelled_after_ship.
+  cancelledAfterShip    Boolean?               @map("cancelled_after_ship")
+  /// Ozon: кто инициировал отмену (CLIENT/SELLER/OZON/SYSTEM/DELIVERY).
+  cancellationInitiator String?                @map("cancellation_initiator")
+  /// Ozon: тип отмены.
+  cancellationType      String?                @map("cancellation_type")
+  /// Ozon: причина отмены (текст).
+  cancellationReason    String?                @map("cancellation_reason")
+  /// Ozon: ID причины отмены.
+  cancellationReasonId  BigInt?                @map("cancellation_reason_id")
+  /// Полный сырой объект cancellation от маркетплейса для аудита.
+  cancellationRaw       Json?                  @map("cancellation_raw")
+
   user           User                 @relation(fields: [userId], references: [id])
   items          OrderItem[]
   processingTime OrderProcessingTime? // источник истины для времени обработки
+  statusEvents   OrderStatusEvent[]
 
   @@unique([userId, marketplace, externalId])
   @@index([userId, marketplace])
@@ -495,6 +511,27 @@ enum OrderStatus {
   READY_FOR_PICKUP // товар в ПВЗ, ждёт клиента (WB: ready_for_pickup, waiting)
   DELIVERED // получен клиентом (WB: sold, receive, delivered)
   CANCELLED
+}
+
+enum OrderCancellationKind {
+  CANCELLATION
+  REFUSAL
+}
+
+model OrderStatusEvent {
+  id             String      @id @default(uuid())
+  orderId        String      @map("order_id")
+  status         OrderStatus
+  rawStatus      String?     @map("raw_status")
+  source         String      @default("sync")
+  occurredAt     DateTime    @default(now()) @map("occurred_at")
+  cancellationKind OrderCancellationKind? @map("cancellation_kind")
+  metadata       Json?
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId, occurredAt])
+  @@map("order_status_event")
 }
 
 model SalesSource {
