@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, ReactNode } from "react"
 import { useRouter, usePathname } from "next/navigation"
 import Link from "next/link"
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from "@handyseller/ui"
-import { LayoutDashboard, Package, BarChart3, Settings, Menu, Palette, LogIn, ShoppingCart, Shield, CreditCard, X, Archive, ChevronDown, DollarSign } from "lucide-react"
+import { LayoutDashboard, Package, BarChart3, Settings, Menu, Palette, LogIn, ShoppingCart, Shield, CreditCard, X, ChevronDown, DollarSign, Truck } from "lucide-react"
 import { LogoutButton } from "@/components/logout-button"
 import { AUTH_STORAGE_KEYS, isAdmin } from "@/lib/auth-storage"
 
@@ -21,6 +21,7 @@ export function DashboardAuthGate({ children }: { children: ReactNode }) {
   const [productsExpanded, setProductsExpanded] = useState(false)
   const [ordersExpanded, setOrdersExpanded] = useState(false)
   const [financeExpanded, setFinanceExpanded] = useState(false)
+  const [tmsExpanded, setTmsExpanded] = useState(false)
 
   const checkAuth = useCallback(() => {
     const token = getToken()
@@ -42,10 +43,12 @@ export function DashboardAuthGate({ children }: { children: ReactNode }) {
     const isOrders = pathname?.startsWith("/dashboard/orders") ?? false
     const isProducts = pathname?.startsWith("/dashboard/products") ?? false
     const isFinance = pathname?.startsWith("/dashboard/finance") ?? false
+    const isTms = pathname?.startsWith("/dashboard/tms") ?? false
 
     setOrdersExpanded(isOrders)
     setProductsExpanded(isProducts)
     setFinanceExpanded(isFinance)
+    setTmsExpanded(isTms)
   }, [pathname])
 
   // Неавторизован или ещё проверяем: показываем явную карточку входа
@@ -96,6 +99,7 @@ export function DashboardAuthGate({ children }: { children: ReactNode }) {
   const isOnFinanceFbo = pathname === "/dashboard/finance/fbo"
   const isOnFinanceFbs = pathname === "/dashboard/finance/fbs"
   const isOnFinance = isOnFinanceFbo || isOnFinanceFbs
+  const isOnTms = pathname?.startsWith("/dashboard/tms") ?? false
 
   // Загрузка или авторизован — рендерим layout
   return (
@@ -297,6 +301,56 @@ export function DashboardAuthGate({ children }: { children: ReactNode }) {
                   </>
                 )}
               </div>
+              <div className="py-1">
+                <div
+                  className={`w-full flex items-center px-3 py-3 rounded-md min-h-[44px] touch-manipulation ${isOnTms ? "text-primary bg-primary/10 font-medium" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+                >
+                  <Link
+                    href="/dashboard/tms"
+                    onClick={() => {
+                      setTmsExpanded(true)
+                      setMenuOpen(false)
+                    }}
+                    className="flex items-center space-x-3 flex-1"
+                  >
+                    <Truck className="h-5 w-5 flex-shrink-0" />
+                    <span>TMS</span>
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => setTmsExpanded((v) => !v)}
+                    className="ml-2 p-1 rounded hover:bg-muted"
+                    aria-label="Развернуть TMS"
+                    aria-expanded={tmsExpanded}
+                  >
+                    <ChevronDown className={`h-5 w-5 transition-transform ${tmsExpanded ? "rotate-180" : ""}`} />
+                  </button>
+                </div>
+                {tmsExpanded && (
+                  <>
+                    {[
+                      ["/dashboard/tms", "Дашборд"],
+                      ["/dashboard/tms/requests", "Заявки"],
+                      ["/dashboard/tms/shipments", "Отгрузки"],
+                      ["/dashboard/tms/tracking", "Трекинг"],
+                      ["/dashboard/tms/carriers", "Перевозчики"],
+                      ["/dashboard/tms/rules", "Правила"],
+                      ["/dashboard/tms/analytics", "Аналитика"],
+                      ["/dashboard/tms/settings", "Настройки"],
+                    ].map(([href, label]) => (
+                      <Link
+                        key={href}
+                        href={href}
+                        onClick={() => setMenuOpen(false)}
+                        className={`flex items-center space-x-3 pl-6 pr-3 py-2.5 rounded-md min-h-[40px] touch-manipulation text-sm ${pathname === href ? "text-primary bg-primary/10 font-medium" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+                      >
+                        <span className="w-2 h-2 rounded-full bg-muted-foreground/50 shrink-0" />
+                        <span>{label}</span>
+                      </Link>
+                    ))}
+                  </>
+                )}
+              </div>
               {/* Остальные пункты */}
               {navLinks.slice(1).map((item) => {
                 const isActive = pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(item.href))
@@ -467,6 +521,52 @@ export function DashboardAuthGate({ children }: { children: ReactNode }) {
                         <span className="w-2 h-2 rounded-full bg-muted-foreground/50 shrink-0" />
                         <span>FBS</span>
                       </Link>
+                    </>
+                  )}
+                </div>
+                <div className="space-y-0.5">
+                  <div
+                    className={`w-full flex items-center px-3 py-2 rounded-md ${isOnTms ? "text-primary bg-primary/10 font-medium" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+                  >
+                    <Link
+                      href="/dashboard/tms"
+                      onClick={() => setTmsExpanded(true)}
+                      className="flex items-center space-x-3 flex-1 text-left"
+                    >
+                      <Truck className="h-5 w-5 flex-shrink-0" />
+                      <span>TMS</span>
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={() => setTmsExpanded((v) => !v)}
+                      className="ml-2 p-1 rounded hover:bg-muted"
+                      aria-label="Развернуть TMS"
+                      aria-expanded={tmsExpanded}
+                    >
+                      <ChevronDown className={`h-5 w-5 transition-transform ${tmsExpanded ? "rotate-180" : ""}`} />
+                    </button>
+                  </div>
+                  {tmsExpanded && (
+                    <>
+                      {[
+                        ["/dashboard/tms", "Дашборд"],
+                        ["/dashboard/tms/requests", "Заявки"],
+                        ["/dashboard/tms/shipments", "Отгрузки"],
+                        ["/dashboard/tms/tracking", "Трекинг"],
+                        ["/dashboard/tms/carriers", "Перевозчики"],
+                        ["/dashboard/tms/rules", "Правила"],
+                        ["/dashboard/tms/analytics", "Аналитика"],
+                        ["/dashboard/tms/settings", "Настройки"],
+                      ].map(([href, label]) => (
+                        <Link
+                          key={href}
+                          href={href}
+                          className={`flex items-center space-x-3 pl-6 pr-3 py-2 rounded-md text-sm ${pathname === href ? "text-primary bg-primary/10 font-medium" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+                        >
+                          <span className="w-2 h-2 rounded-full bg-muted-foreground/50 shrink-0" />
+                          <span>{label}</span>
+                        </Link>
+                      ))}
                     </>
                   )}
                 </div>

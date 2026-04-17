@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "npm run dev --workspace=web",
     "dev:api": "npm run dev --workspace=api",
+    "dev:tms-api": "npm run dev --workspace=tms-api",
     "dev:start": "./scripts/dev-start.sh",
     "dev:stop": "./scripts/dev-stop.sh",
     "dev:parallel": "bash scripts/dev-start-parallel.sh",
@@ -18,6 +19,7 @@
     "build:web": "npm run build --workspace=web",
     "build:web:standalone": "OUTPUT_MODE=standalone npm run build --workspace=web",
     "build:api": "npm run build --workspace=api",
+    "build:tms-api": "npm run build --workspace=tms-api",
     "build:static": "node scripts/build-static.js",
     "deploy:storage": "yc storage s3 cp ./apps/web/out s3://handyseller-frontend-prod/static/ --recursive",
     "deploy:api": "./scripts/deploy-api.sh",

@@ -26,6 +26,7 @@ import { AssistantModule } from './modules/assistant/assistant.module';
 import { MediaModule } from './modules/media/media.module';
 import { ReviewsModule } from './modules/reviews/reviews.module';
 import { FinanceModule } from './modules/finance/finance.module';
+import { TmsIntegrationModule } from './modules/tms-integration/tms-integration.module';
 
 function getTracker(req: { headers?: Record<string, string | string[] | undefined>; ip?: string; socket?: { remoteAddress?: string } }): string {
   const headers = req.headers ?? {};
@@ -82,6 +83,7 @@ function getTracker(req: { headers?: Record<string, string | string[] | undefine
     MediaModule,
     ReviewsModule,
     FinanceModule,
+    TmsIntegrationModule,
   ],
   controllers: [AppController],
   providers: [

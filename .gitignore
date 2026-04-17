@@ -20,6 +20,10 @@
 # production
 /build
 apps/api/dist
+apps/tms-api/dist
+packages/tms-sdk/dist
+packages/tms-domain/dist
+apps/tms-api/node_modules
 
 # misc
 .DS_Store
