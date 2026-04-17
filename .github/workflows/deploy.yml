@@ -240,8 +240,29 @@ jobs:
               sleep $((i * 5))
             done
 
-            # 5. Запуск. Redis поднимется при необходимости, но в штатном деплое не пересоздаётся.
-            $DC -f docker-compose.ci.yml --env-file .env.production up -d redis api web
+            # 4. Redis восстанавливаем отдельно: сначала используем существующий контейнер/образ,
+            # и только если их нет, делаем явный pull с retry.
+            if docker ps -a --format '{{.Names}}' | rg -x 'handyseller-redis' >/dev/null; then
+              echo "=== Starting existing Redis container ==="
+              docker start handyseller-redis 2>/dev/null || true
+            elif docker image inspect redis:7-alpine >/dev/null 2>&1; then
+              echo "=== Creating Redis from cached image ==="
+              $DC -f docker-compose.ci.yml --env-file .env.production up -d --no-deps redis
+            else
+              echo "=== Pulling Redis image ==="
+              for i in 1 2 3 4 5; do
+                echo "Redis pull attempt ${i}/5"
+                if docker pull redis:7-alpine; then
+                  break
+                fi
+                [ $i -eq 5 ] && { echo "Redis pull failed after 5 attempts"; exit 1; }
+                sleep $((i * 5))
+              done
+              $DC -f docker-compose.ci.yml --env-file .env.production up -d --no-deps redis
+            fi
+
+            # 5. App-сервисы поднимаем без deps, чтобы compose не инициировал новый redis pull.
+            $DC -f docker-compose.ci.yml --env-file .env.production up -d --no-deps api web
 
             trap - EXIT
             echo "*/2 * * * * root /opt/handyseller/vm-watchdog.sh" | sudo tee /etc/cron.d/handyseller-watchdog

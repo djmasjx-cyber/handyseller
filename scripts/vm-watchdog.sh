@@ -20,6 +20,30 @@ export IMAGE_WEB="${IMAGE_WEB:-ghcr.io/djmasjx-cyber/handyseller-web:latest}"
 
 need_restart=0
 
+ensure_redis() {
+  if docker ps -a --format '{{.Names}}' | rg -x 'handyseller-redis' >/dev/null; then
+    docker start handyseller-redis 2>/dev/null || true
+    return 0
+  fi
+
+  if docker image inspect redis:7-alpine >/dev/null 2>&1; then
+    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --no-deps redis 2>/dev/null || true
+    return 0
+  fi
+
+  for i in 1 2 3 4 5; do
+    echo "$(date -Iseconds) [WATCHDOG] Pulling redis image, attempt ${i}/5"
+    if docker pull redis:7-alpine >/dev/null 2>&1; then
+      docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --no-deps redis 2>/dev/null || true
+      return 0
+    fi
+    sleep $((i * 5))
+  done
+
+  echo "$(date -Iseconds) [WATCHDOG] Redis image pull failed"
+  return 1
+}
+
 # Проверка API
 if ! curl -sf --connect-timeout 3 http://127.0.0.1:4000/health >/dev/null 2>&1; then
   echo "$(date -Iseconds) [WATCHDOG] API unhealthy, will restart"
@@ -35,7 +59,8 @@ fi
 if [ "$need_restart" = "1" ]; then
   echo "$(date -Iseconds) [WATCHDOG] Restarting stack..."
   docker network create handyseller_handyseller 2>/dev/null || true
-  docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d 2>/dev/null || true
+  ensure_redis || true
+  docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --no-deps api web 2>/dev/null || true
   sleep 5
   sudo systemctl reload nginx 2>/dev/null || true
   echo "$(date -Iseconds) [WATCHDOG] Restart done"
