@@ -64,9 +64,16 @@ export class FinanceService {
    * Для каждого товара — себестоимость, цена и все комиссии из снапшота.
    * scheme — опциональный фильтр ('FBO' | 'FBS'). Если не указан — возвращаем все схемы.
    */
-  async getProductFinanceTable(userId: string, scheme?: string): Promise<ProductFinanceRow[]> {
+  async getProductFinanceTable(
+    userId: string,
+    scheme?: string,
+    includeEmpty = false,
+  ): Promise<ProductFinanceRow[]> {
+    const where = scheme && !includeEmpty
+      ? { userId, archivedAt: null, commissions: { some: { scheme } } }
+      : { userId, archivedAt: null };
     const products = await this.prisma.product.findMany({
-      where: { userId, archivedAt: null },
+      where,
       select: {
         id: true,
         displayId: true,
@@ -101,13 +108,16 @@ export class FinanceService {
 
   async getProductFinanceTablePaged(
     userId: string,
-    params: { scheme?: string; limit?: number; offset?: number },
+    params: { scheme?: string; limit?: number; offset?: number; includeEmpty?: boolean },
   ): Promise<{ items: ProductFinanceRow[]; total: number; offset: number; limit: number; hasMore: boolean }> {
     const scheme = params.scheme;
+    const includeEmpty = params.includeEmpty === true;
     const limit = Math.min(Math.max(params.limit ?? 20, 1), 100);
     const offset = Math.max(params.offset ?? 0, 0);
 
-    const where = { userId, archivedAt: null };
+    const where = scheme && !includeEmpty
+      ? { userId, archivedAt: null, commissions: { some: { scheme } } }
+      : { userId, archivedAt: null };
     const [products, total] = await Promise.all([
       this.prisma.product.findMany({
         where,

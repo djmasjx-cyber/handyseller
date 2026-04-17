@@ -16,8 +16,9 @@ export async function GET(req: NextRequest) {
   const scheme = req.nextUrl.searchParams.get("scheme") ?? ""
   const limit = req.nextUrl.searchParams.get("limit") ?? "20"
   const offset = req.nextUrl.searchParams.get("offset") ?? "0"
+  const includeEmpty = req.nextUrl.searchParams.get("includeEmpty") ?? "0"
 
-  const params = new URLSearchParams({ limit, offset })
+  const params = new URLSearchParams({ limit, offset, includeEmpty })
   if (scheme) params.set("scheme", scheme)
   const url = `${API_BASE}/finance/products/paged?${params.toString()}`
 

@@ -31,9 +31,11 @@ export class FinanceController {
   async getProducts(
     @CurrentUser('userId') userId: string,
     @Query('scheme') scheme?: string,
+    @Query('includeEmpty') includeEmpty?: string,
   ) {
     const s = scheme === 'FBO' || scheme === 'FBS' ? scheme : undefined;
-    return this.financeService.getProductFinanceTable(userId, s);
+    const include = includeEmpty === '1' || includeEmpty === 'true';
+    return this.financeService.getProductFinanceTable(userId, s, include);
   }
 
   /**
@@ -46,12 +48,15 @@ export class FinanceController {
     @Query('scheme') scheme?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
+    @Query('includeEmpty') includeEmpty?: string,
   ) {
     const s = scheme === 'FBO' || scheme === 'FBS' ? scheme : undefined;
+    const include = includeEmpty === '1' || includeEmpty === 'true';
     return this.financeService.getProductFinanceTablePaged(userId, {
       scheme: s,
       limit: limit ? parseInt(limit, 10) : undefined,
       offset: offset ? parseInt(offset, 10) : undefined,
+      includeEmpty: include,
     });
   }
 

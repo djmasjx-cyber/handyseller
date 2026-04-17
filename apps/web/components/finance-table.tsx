@@ -308,6 +308,7 @@ export function FinanceTable({ scheme }: Props) {
   const [storageDays, setStorageDays] = useState(30)
   const [sortKey, setSortKey] = useState<FinanceSortKey | null>(null)
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc")
+  const [showEmptyRows, setShowEmptyRows] = useState(false)
 
   useEffect(() => { setMounted(true) }, [])
 
@@ -328,6 +329,7 @@ export function FinanceTable({ scheme }: Props) {
         scheme,
         limit: String(PAGE_SIZE),
         offset: String(targetOffset),
+        includeEmpty: showEmptyRows ? "1" : "0",
       })
       const r = await fetch(`/api/finance/products/paged?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -357,7 +359,7 @@ export function FinanceTable({ scheme }: Props) {
       setLoading(false)
       setLoadingMore(false)
     }
-  }, [token, scheme, router])
+  }, [token, scheme, router, showEmptyRows])
 
   useEffect(() => {
     if (mounted && token) {
@@ -491,6 +493,15 @@ export function FinanceTable({ scheme }: Props) {
           </p>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
+          <label className="inline-flex items-center gap-2 text-sm text-muted-foreground cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={showEmptyRows}
+              onChange={(e) => setShowEmptyRows(e.target.checked)}
+              className="h-4 w-4 rounded border-input"
+            />
+            Показывать товары без данных
+          </label>
           {/* Оборачиваемость — временно скрыта (нет синка цен с маркетов)
           {scheme === "FBO" && (
             <label className="flex items-center gap-2 text-sm text-muted-foreground">
