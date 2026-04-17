@@ -94,9 +94,10 @@ function MarketplaceCommissionColumns({
   // Хранение FBO: storageCostPerDay × оборачиваемость (дней)
   const storageTotal = isFBO ? block.storageCostPerDay * storageDays : 0
 
-  const totalWithStorage = block.totalFeeAmt + storageTotal
-  const isDeficit = price != null && price > 0 && price - totalWithStorage < 0
-  const margin = price != null && price > 0 ? price - totalWithStorage : null
+  // Ценообразование считаем без возвратов; возвраты анализируем отдельно по факту.
+  const totalWithoutReturns = block.totalFeeAmt - block.returnAmt + storageTotal
+  const isDeficit = price != null && price > 0 && price - totalWithoutReturns < 0
+  const margin = price != null && price > 0 ? price - totalWithoutReturns : null
   const marginPct = margin != null && price && price > 0 ? (margin / price) * 100 : null
 
   /* --- Временно скрыто: цена безубыточности ---
@@ -141,16 +142,14 @@ function MarketplaceCommissionColumns({
           )}
         </td>
       )}
-      {/* Возврат — скрыт, учтён в totalFeeAmt
-      <td className="px-2 py-2 text-right text-sm tabular-nums">{fmt(block.returnAmt)} ₽</td>
-      */}
+      {/* Возврат скрыт в ценообразовании */}
       {/* Итого */}
       <td
         className={`px-2 py-2 text-right text-sm font-semibold tabular-nums ${
           isDeficit ? "text-destructive" : "text-foreground"
         }`}
       >
-        {fmt(totalWithStorage)} ₽
+        {fmt(totalWithoutReturns)} ₽
       </td>
       {/* Маржа */}
       <td
@@ -402,8 +401,8 @@ export function FinanceTable({ scheme }: Props) {
     const col3 = getMpCol3Config(marketplace, block.scheme)
     const price = block.marketplacePrice > 0 ? block.marketplacePrice : null
     const storageTotal = isFBO ? block.storageCostPerDay * storageDays : 0
-    const totalWithStorage = block.totalFeeAmt + storageTotal
-    const margin = price != null && price > 0 ? price - totalWithStorage : null
+    const totalWithoutReturns = block.totalFeeAmt - block.returnAmt + storageTotal
+    const margin = price != null && price > 0 ? price - totalWithoutReturns : null
 
     switch (field) {
       case "price":
@@ -417,7 +416,7 @@ export function FinanceTable({ scheme }: Props) {
       case "storage":
         return storageTotal || null
       case "total":
-        return totalWithStorage
+        return totalWithoutReturns
       case "margin":
         return margin
       default:
@@ -656,9 +655,7 @@ export function FinanceTable({ scheme }: Props) {
                           </button>
                         </th>
                       )}
-                      {/* Столбец Возврат скрыт — учтён в «Итого»
-                      <th className="px-2 py-1.5 text-right font-medium">Возврат</th>
-                      */}
+                      {/* Возврат скрыт: считается на отдельной странице по факту */}
                       <th className="px-2 py-1.5 text-right font-medium">
                         <button
                           type="button"
