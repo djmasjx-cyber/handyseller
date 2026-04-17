@@ -6,7 +6,7 @@
 #     npx prisma migrate deploy --schema=apps/api/prisma/schema.prisma
 #
 # Вариант 2: При деплое — миграции выполняются автоматически при старте API.
-#   Dockerfile CMD: npx prisma migrate deploy && node dist/src/main.js
+#   Dockerfile CMD: npx prisma migrate deploy && node dist/apps/api/src/main.js
 
 set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
