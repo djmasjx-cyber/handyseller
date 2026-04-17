@@ -6,10 +6,12 @@ WORKDIR /app
 # Монорепо: lock-файл в корне
 COPY package.json package-lock.json ./
 COPY apps/api/package.json ./apps/api/
+COPY packages/tms-sdk/package.json ./packages/tms-sdk/
 COPY apps/api/prisma ./apps/api/prisma/
 RUN npm ci --workspace=api
 
 COPY apps/api ./apps/api
+COPY packages/tms-sdk ./packages/tms-sdk
 RUN npx prisma generate --schema=./apps/api/prisma/schema.prisma
 RUN npm run build --workspace=api
 
