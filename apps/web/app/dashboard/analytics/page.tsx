@@ -292,23 +292,24 @@ export default function AnalyticsPage() {
                     <Badge className={meta.color}>{meta.label}</Badge>
                     <div className="grid grid-cols-2 gap-3 text-sm">
                       <div>
-                        <p className="text-muted-foreground">Продажи</p>
-                        <p className="font-semibold">{(stat.salesRevenue ?? 0).toLocaleString("ru-RU")} ₽</p>
-                        <p className="text-xs text-muted-foreground">сумма заказов</p>
-                      </div>
-                      <div>
-                        <p className="text-muted-foreground">Выкуп</p>
-                        <p className="font-semibold">{(stat.revenue ?? 0).toLocaleString("ru-RU")} ₽</p>
-                        <p className="text-xs text-muted-foreground">сумма выкупленных</p>
-                      </div>
-                      <div>
                         <p className="text-muted-foreground">Заказы</p>
                         <p className="font-semibold">{stat.totalOrders ?? 0}</p>
                         <p className="text-xs text-muted-foreground">всего за месяц</p>
                       </div>
                       <div>
+                        <p className="text-muted-foreground">Выручка</p>
+                        <p className="font-semibold">{(stat.salesRevenue ?? 0).toLocaleString("ru-RU")} ₽</p>
+                        <p className="text-xs text-muted-foreground">сумма заказов</p>
+                      </div>
+                      <div>
                         <p className="text-muted-foreground">Выкуплено</p>
                         <p className="font-semibold text-green-600">{stat.delivered ?? 0}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Сумма выкупленных</p>
+                        <p className="font-semibold text-green-600">
+                          {(stat.revenue ?? 0).toLocaleString("ru-RU")} ₽
+                        </p>
                       </div>
                       <div>
                         <p className="text-muted-foreground">Отказы</p>
