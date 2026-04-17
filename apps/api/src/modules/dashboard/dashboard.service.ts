@@ -114,6 +114,8 @@ export class DashboardService {
         revenue: number;
         /** Продажи (все, кроме CANCELLED) */
         salesRevenue?: number;
+        /** Сумма отказов */
+        cancelledRevenue?: number;
         linkedProductsCount: number;
       }
     > = {};
@@ -131,6 +133,7 @@ export class DashboardService {
           cancelled: 0,
           revenue: 0,
           salesRevenue: 0,
+          cancelledRevenue: 0,
           linkedProductsCount: linkedStats.byMarketplace[key] ?? 0,
         };
       }
@@ -145,6 +148,7 @@ export class DashboardService {
           cancelled: 0,
           revenue: 0,
           salesRevenue: 0,
+          cancelledRevenue: 0,
           linkedProductsCount: linkedStats.byMarketplace?.[key] ?? 0,
         };
       }

@@ -923,6 +923,8 @@ export class MarketplacesService {
         revenue: number;
         /** Продажи (сумма всех заказов кроме CANCELLED). */
         salesRevenue: number;
+        /** Сумма отказов (CANCELLED + REFUSAL по новой модели). */
+        cancelledRevenue: number;
       }
     >
   > {
@@ -941,6 +943,7 @@ export class MarketplacesService {
         cancelled_count: bigint;
         revenue: string;
         sales_revenue: string;
+        cancelled_revenue: string;
       }>
     >`
       SELECT 
@@ -957,7 +960,16 @@ export class MarketplacesService {
           )
         ))::bigint as cancelled_count,
         COALESCE(SUM(total_amount) FILTER (WHERE status = 'DELIVERED'), 0)::text as revenue,
-        COALESCE(SUM(total_amount) FILTER (WHERE status <> 'CANCELLED'), 0)::text as sales_revenue
+        COALESCE(SUM(total_amount) FILTER (WHERE status <> 'CANCELLED'), 0)::text as sales_revenue,
+        COALESCE(SUM(total_amount) FILTER (WHERE status = 'CANCELLED' AND (
+          cancellation_kind = 'REFUSAL'
+          OR (
+            cancellation_kind IS NULL AND (
+              raw_status IS NULL
+              OR LOWER(TRIM(raw_status)) IN ('canceled_by_client','declined_by_client','reject','rejected','cancelled_by_client','customer_refused')
+            )
+          )
+        )), 0)::text as cancelled_revenue
       FROM "Order"
       WHERE user_id IN (${Prisma.join(ids)})
         AND created_at >= ${fromDate}
@@ -967,7 +979,7 @@ export class MarketplacesService {
 
     const result: Record<
       string,
-      { totalOrders: number; delivered: number; cancelled: number; revenue: number; salesRevenue: number }
+      { totalOrders: number; delivered: number; cancelled: number; revenue: number; salesRevenue: number; cancelledRevenue: number }
     > = {};
     for (const r of rows) {
       const key = r.marketplace.toLowerCase();
@@ -977,6 +989,7 @@ export class MarketplacesService {
         cancelled: Number(r.cancelled_count) || 0,
         revenue: Math.round(Number(r.revenue || 0) * 100) / 100,
         salesRevenue: Math.round(Number(r.sales_revenue || 0) * 100) / 100,
+        cancelledRevenue: Math.round(Number(r.cancelled_revenue || 0) * 100) / 100,
       };
     }
     return result;

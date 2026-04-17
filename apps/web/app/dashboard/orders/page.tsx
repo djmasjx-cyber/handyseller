@@ -19,6 +19,8 @@ interface Order {
   marketplace: string
   externalId: string
   status: string
+  statusView?: string
+  cancellationKind?: "CANCELLATION" | "REFUSAL" | null
   totalAmount: string | number
   warehouseName?: string | null
   rawStatus?: string | null
@@ -39,6 +41,7 @@ const STATUS_LABELS: Record<string, string> = {
   READY_FOR_PICKUP: "Готов к выдаче",
   DELIVERED: "Получен клиентом",
   CANCELLED: "Отменён",
+  REFUSAL: "Отказ",
 }
 
 /** Соответствие rawStatus WB → читаемый статус */
@@ -159,6 +162,12 @@ function holdRemaining(order: Order): string {
 }
 
 function formatStatus(order: Order): string {
+  if (order.statusView && STATUS_LABELS[order.statusView]) {
+    return STATUS_LABELS[order.statusView]
+  }
+  if (order.status === "CANCELLED" && order.cancellationKind === "REFUSAL") {
+    return "Отказ"
+  }
   if (
     order.marketplace === "OZON" &&
     order.status === "CANCELLED" &&

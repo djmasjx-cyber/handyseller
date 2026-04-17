@@ -261,11 +261,34 @@ export class OrdersService {
 
   private normalizeOrderForResponse<
     T extends {
+      status: OrderStatus;
+      cancellationKind?: OrderCancellationKind | null;
+      rawStatus?: string | null;
       cancellationReasonId?: bigint | null;
     },
-  >(order: T): T & { cancellationReasonId: string | null } {
+  >(order: T): T & { cancellationReasonId: string | null; statusView: string } {
+    const raw = (order.rawStatus ?? '').toLowerCase();
+    const isRefusalByRaw = [
+      'cancelled_by_client',
+      'canceled_by_client',
+      'declined_by_client',
+      'customer_refused',
+      'client_refused',
+      'client_not_come',
+      'not_accepted',
+      'not_accepted_by_client',
+      'cancelled_after_ship',
+      'cancelled_after_shipment',
+    ].includes(raw);
+    const statusView =
+      order.status === OrderStatus.CANCELLED &&
+      (order.cancellationKind === OrderCancellationKind.REFUSAL || isRefusalByRaw)
+        ? 'REFUSAL'
+        : order.status;
+
     return {
       ...order,
+      statusView,
       cancellationReasonId:
         order.cancellationReasonId != null ? order.cancellationReasonId.toString() : null,
     };

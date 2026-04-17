@@ -31,7 +31,7 @@ interface MarketplaceStats {
   cancelled: number
   revenue: number
   salesRevenue?: number
-  linkedProductsCount?: number
+  cancelledRevenue?: number
 }
 
 interface DashboardData {
@@ -316,8 +316,10 @@ export default function AnalyticsPage() {
                         <p className="text-xs text-muted-foreground">покупатель отказался</p>
                       </div>
                       <div>
-                        <p className="text-muted-foreground">Товаров</p>
-                        <p className="font-semibold">{stat.linkedProductsCount ?? 0}</p>
+                        <p className="text-muted-foreground">Сумма отказов</p>
+                        <p className="font-semibold text-red-600">
+                          {(stat.cancelledRevenue ?? 0).toLocaleString("ru-RU")} ₽
+                        </p>
                       </div>
                     </div>
                   </div>
