@@ -6,6 +6,16 @@ import { Loader2 } from "lucide-react"
 import { authFetch } from "@/lib/auth-fetch"
 import { AUTH_STORAGE_KEYS } from "@/lib/auth-storage"
 
+function formatApiError(data: unknown): string {
+  if (!data || typeof data !== "object") return "Не удалось сохранить подключение"
+  const o = data as Record<string, unknown>
+  if (typeof o.message === "string" && o.message.trim()) return o.message.trim()
+  if (Array.isArray(o.message) && o.message.length)
+    return o.message.map((x) => String(x)).join("; ")
+  if (typeof o.error === "string" && o.error.trim()) return o.error.trim()
+  return "Не удалось сохранить подключение"
+}
+
 type CarrierConnection = {
   id: string
   carrierCode: "MAJOR_EXPRESS"
@@ -67,7 +77,7 @@ export default function TmsSettingsPage() {
       })
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
-        throw new Error(data?.message ?? "Не удалось сохранить подключение")
+        throw new Error(formatApiError(data))
       }
       setLogin("")
       setPassword("")

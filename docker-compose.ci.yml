@@ -50,6 +50,8 @@ services:
       NODE_ENV: production
       PORT: "3001"
       HOSTNAME: "0.0.0.0"
+      # BFF (app/api/*) ходит в Nest из контейнера web: localhost:4000 — это сам web, не API.
+      API_URL: http://api:4000
       NODE_OPTIONS: "--max-old-space-size=256"
     ports:
       - "127.0.0.1:3001:3001"

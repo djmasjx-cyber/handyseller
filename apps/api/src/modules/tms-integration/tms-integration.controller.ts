@@ -13,11 +13,8 @@ import {
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { TmsIntegrationService } from './tms-integration.service';
-import type {
-  CarrierCode,
-  CarrierServiceType,
-  UpsertCarrierConnectionInput,
-} from '@handyseller/tms-sdk';
+import type { CarrierCode, CarrierServiceType } from '@handyseller/tms-sdk';
+import { UpsertCarrierConnectionDto } from './dto/upsert-carrier-connection.dto';
 
 @Controller('tms')
 @UseGuards(JwtAuthGuard)
@@ -42,7 +39,7 @@ export class TmsIntegrationController {
   @Post('carrier-connections')
   upsertCarrierConnection(
     @CurrentUser('userId') userId: string,
-    @Body() input: UpsertCarrierConnectionInput,
+    @Body() input: UpsertCarrierConnectionDto,
   ) {
     return this.tmsIntegrationService.upsertCarrierConnection(userId, input);
   }

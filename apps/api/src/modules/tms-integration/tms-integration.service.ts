@@ -146,8 +146,8 @@ export class TmsIntegrationService {
   ): Promise<CarrierConnectionRecord> {
     const carrierCode = input.carrierCode;
     const serviceType = input.serviceType ?? 'EXPRESS';
-    const login = input.login.trim();
-    const password = input.password.trim();
+    const login = (input.login ?? '').trim();
+    const password = (input.password ?? '').trim();
 
     if (!login || !password) {
       throw new BadRequestException('Укажите логин и пароль перевозчика.');
@@ -294,11 +294,23 @@ export class TmsIntegrationService {
   </soap:Body>
 </soap:Envelope>`,
     }).catch((error) => {
-      throw new BadRequestException(`Не удалось проверить Major Express: ${String(error)}`);
+      throw new BadRequestException(`Не удалось связаться с Major Express: ${String(error)}`);
     });
 
+    const text = await res.text();
     if (!res.ok) {
-      throw new BadRequestException('Major Express отклонил логин/пароль или сервис временно недоступен.');
+      throw new BadRequestException(
+        `Major Express ответил HTTP ${res.status}. Проверьте логин и пароль личного кабинета.`,
+      );
+    }
+    if (/<\s*(?:soap:)?Fault\b|<faultstring\b/i.test(text)) {
+      const m = text.match(/<(?:\w+:)?faultstring[^>]*>([^<]*)</i);
+      const detail = m?.[1]?.trim();
+      throw new BadRequestException(
+        detail
+          ? `Major Express: ${detail}`
+          : 'Major Express вернул ошибку SOAP. Проверьте логин и пароль.',
+      );
     }
   }
 }
