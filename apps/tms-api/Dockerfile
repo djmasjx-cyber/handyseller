@@ -24,4 +24,5 @@ COPY --from=builder /app/apps/tms-api/dist ./apps/tms-api/dist
 
 EXPOSE 4100
 
-CMD ["node", "apps/tms-api/dist/main.js"]
+# Nest emit в монорепо даёт вложенный путь (см. локальный `npm run build -w tms-api`).
+CMD ["node", "apps/tms-api/dist/apps/tms-api/src/main.js"]
