@@ -1,4 +1,4 @@
-# Для CI: образы из ghcr.io. IMAGE_API и IMAGE_WEB задаются при деплое.
+# Для CI: образы из ghcr.io. IMAGE_API, IMAGE_WEB, IMAGE_TMS_API задаются при деплое.
 # Сеть external — создаётся один раз, переиспользуется (деплой + watchdog без конфликтов).
 # Использование: IMAGE_API=... IMAGE_WEB=... docker compose -f docker-compose.ci.yml up -d
 
@@ -52,6 +52,7 @@ services:
       HOSTNAME: "0.0.0.0"
       # BFF (app/api/*) ходит в Nest из контейнера web: localhost:4000 — это сам web, не API.
       API_URL: http://api:4000
+      TMS_API_URL: http://tms-api:4100
       NODE_OPTIONS: "--max-old-space-size=256"
     ports:
       - "127.0.0.1:3001:3001"
@@ -61,6 +62,30 @@ services:
       timeout: 5s
       retries: 3
       start_period: 15s
+    networks:
+      - handyseller
+
+  tms-api:
+    image: ${IMAGE_TMS_API}
+    container_name: handyseller-tms-api
+    restart: unless-stopped
+    env_file: .env.production
+    environment:
+      NODE_ENV: production
+      PORT: "4100"
+      CORE_API_URL: http://api:4000
+      NODE_OPTIONS: "--max-old-space-size=256"
+    ports:
+      - "127.0.0.1:4100:4100"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:4100/health',(r)=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    depends_on:
+      api:
+        condition: service_healthy
     networks:
       - handyseller
 

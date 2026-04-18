@@ -156,6 +156,9 @@ export class TmsIntegrationService {
     if (carrierCode === 'MAJOR_EXPRESS') {
       await this.validateMajorCredentials(login, password);
     }
+    if (carrierCode === 'DELLIN') {
+      this.validateDellinCredentialsConfigured();
+    }
 
     const target =
       input.id != null
@@ -310,6 +313,15 @@ export class TmsIntegrationService {
         detail
           ? `Major Express: ${detail}`
           : 'Major Express вернул ошибку SOAP. Проверьте логин и пароль.',
+      );
+    }
+  }
+
+  private validateDellinCredentialsConfigured(): void {
+    // Для ДЛ дополнительно нужен appKey (хранится в env tms-api и не секрет клиента).
+    if (!process.env.DELLIN_APP_KEY?.trim()) {
+      throw new BadRequestException(
+        'Интеграция Деловых Линий не настроена: отсутствует DELLIN_APP_KEY в окружении.',
       );
     }
   }

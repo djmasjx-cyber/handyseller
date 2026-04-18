@@ -18,7 +18,7 @@ function formatApiError(data: unknown): string {
 
 type CarrierConnection = {
   id: string
-  carrierCode: "MAJOR_EXPRESS"
+  carrierCode: "MAJOR_EXPRESS" | "DELLIN"
   serviceType: "EXPRESS" | "LTL"
   accountLabel: string | null
   contractLabel: string | null
@@ -36,6 +36,7 @@ export default function TmsSettingsPage() {
   const [items, setItems] = useState<CarrierConnection[]>([])
   const [accountLabel, setAccountLabel] = useState("")
   const [contractLabel, setContractLabel] = useState("")
+  const [carrierCode, setCarrierCode] = useState<"MAJOR_EXPRESS" | "DELLIN">("MAJOR_EXPRESS")
   const [login, setLogin] = useState("")
   const [password, setPassword] = useState("")
 
@@ -66,7 +67,7 @@ export default function TmsSettingsPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          carrierCode: "MAJOR_EXPRESS",
+          carrierCode,
           serviceType: "EXPRESS",
           accountLabel,
           contractLabel,
@@ -121,12 +122,24 @@ export default function TmsSettingsPage() {
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle>Подключение Major Express</CardTitle>
+          <CardTitle>Подключение перевозчика</CardTitle>
           <CardDescription>
-            Подключите свою учётку ТК один раз, и дальше пользователь будет получать тарифы и сроки по своему договору в пару кликов.
+            Подключите учётку ТК один раз, и дальше пользователь будет получать тарифы и сроки по своему договору в пару кликов.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor="carrierCode">Перевозчик</Label>
+            <select
+              id="carrierCode"
+              value={carrierCode}
+              onChange={(e) => setCarrierCode(e.target.value as "MAJOR_EXPRESS" | "DELLIN")}
+              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+            >
+              <option value="MAJOR_EXPRESS">Major Express</option>
+              <option value="DELLIN">Деловые Линии</option>
+            </select>
+          </div>
           <div className="space-y-2">
             <Label htmlFor="accountLabel">Название учётки</Label>
             <Input id="accountLabel" value={accountLabel} onChange={(e) => setAccountLabel(e.target.value)} placeholder="Например, Основной договор" />
@@ -164,7 +177,7 @@ export default function TmsSettingsPage() {
             <div key={item.id} className="rounded-lg border p-4 space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <p className="font-medium">{item.accountLabel || "Major Express"}</p>
+                  <p className="font-medium">{item.accountLabel || (item.carrierCode === "DELLIN" ? "Деловые Линии" : "Major Express")}</p>
                   <p className="text-sm text-muted-foreground">
                     {item.contractLabel || "Без названия договора"} · {item.loginPreview || "логин скрыт"}
                   </p>

@@ -40,6 +40,7 @@ jobs:
       - run: npm ci
       - run: npx prisma generate --schema=./apps/api/prisma/schema.prisma
       - run: npm run build --workspace=api
+      - run: npm run build --workspace=tms-api
       - run: npm run build --workspace=web
 
   build-and-push:
@@ -48,6 +49,7 @@ jobs:
     outputs:
       image_api: ${{ steps.meta-api.outputs.tags }}
       image_web: ${{ steps.meta-web.outputs.tags }}
+      image_tms_api: ${{ steps.meta-tms-api.outputs.tags }}
 
     steps:
       - name: Checkout
@@ -80,6 +82,26 @@ jobs:
           push: true
           tags: ${{ steps.meta-api.outputs.tags }}
           labels: ${{ steps.meta-api.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Extract metadata for TMS API
+        id: meta-tms-api
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/handyseller-tms-api
+          tags: |
+            type=sha,prefix=
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' }}
+
+      - name: Build and push TMS API
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./apps/tms-api/Dockerfile
+          push: true
+          tags: ${{ steps.meta-tms-api.outputs.tags }}
+          labels: ${{ steps.meta-tms-api.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -195,17 +217,19 @@ jobs:
 
             IMAGE_API="ghcr.io/${{ github.repository_owner }}/handyseller-api:latest"
             IMAGE_WEB="ghcr.io/${{ github.repository_owner }}/handyseller-web:latest"
+            IMAGE_TMS_API="ghcr.io/${{ github.repository_owner }}/handyseller-tms-api:latest"
 
-            grep -v '^IMAGE_API=' .env.production | grep -v '^IMAGE_WEB=' > .env.production.tmp
+            grep -v '^IMAGE_API=' .env.production | grep -v '^IMAGE_WEB=' | grep -v '^IMAGE_TMS_API=' > .env.production.tmp
             echo "IMAGE_API=$IMAGE_API" >> .env.production.tmp
             echo "IMAGE_WEB=$IMAGE_WEB" >> .env.production.tmp
+            echo "IMAGE_TMS_API=$IMAGE_TMS_API" >> .env.production.tmp
             mv .env.production.tmp .env.production
 
             if [ -n "$CR_PAT" ]; then
               echo "$CR_PAT" | docker login ghcr.io -u ${{ github.repository_owner }} --password-stdin
             fi
 
-            export IMAGE_API IMAGE_WEB
+            export IMAGE_API IMAGE_WEB IMAGE_TMS_API
             chmod +x vm-watchdog.sh handyseller-start.sh 2>/dev/null || true
             DC="docker compose"
             command -v docker-compose >/dev/null 2>&1 && DC="docker-compose"
@@ -219,14 +243,14 @@ jobs:
 
             # 1. Перезапускаем только app-сервисы. Redis сохраняем, чтобы не зависеть
             # от Docker Hub на каждом деплое и не терять прогретый volume/image.
-            $DC -f docker-compose.ci.yml --env-file .env.production stop web api || true
-            docker rm -f handyseller-web handyseller-api 2>/dev/null || true
+            $DC -f docker-compose.ci.yml --env-file .env.production stop web api tms-api || true
+            docker rm -f handyseller-web handyseller-api handyseller-tms-api 2>/dev/null || true
 
             # 2. Освобождаем место под новый rollout, не трогая Redis.
             docker container prune -f
             docker builder prune -af || true
             docker images --format '{{.Repository}}:{{.Tag}} {{.ID}}' \
-              | awk '$1 ~ /^ghcr\.io\/djmasjx-cyber\/handyseller-(api|web):/ {print $2}' \
+              | awk '$1 ~ /^ghcr\.io\/djmasjx-cyber\/handyseller-(api|web|tms-api):/ {print $2}' \
               | sort -u \
               | xargs -r docker rmi -f || true
             docker image prune -f
@@ -239,7 +263,7 @@ jobs:
             echo "=== Pulling app images ==="
             for i in 1 2 3 4 5; do
               echo "Pull attempt ${i}/5"
-              if $DC -f docker-compose.ci.yml pull api web; then
+              if $DC -f docker-compose.ci.yml pull api web tms-api; then
                 break
               fi
               [ $i -eq 5 ] && { echo "Pull failed after 5 attempts"; exit 1; }
@@ -268,7 +292,7 @@ jobs:
             fi
 
             # 5. App-сервисы поднимаем без deps, чтобы compose не инициировал новый redis pull.
-            $DC -f docker-compose.ci.yml --env-file .env.production up -d --no-deps api web
+            $DC -f docker-compose.ci.yml --env-file .env.production up -d --no-deps api tms-api web
 
             trap - EXIT
             echo "*/2 * * * * root /opt/handyseller/vm-watchdog.sh" | sudo tee /etc/cron.d/handyseller-watchdog
@@ -303,6 +327,8 @@ jobs:
 
             echo "=== Verify Web ==="
             curl -sf --connect-timeout 5 http://127.0.0.1:3001/ >/dev/null || { echo "Web not responding"; docker logs handyseller-web --tail 30 2>&1; exit 1; }
+            echo "=== Verify TMS API ==="
+            curl -sf --connect-timeout 5 http://127.0.0.1:4100/health >/dev/null || { echo "TMS API not responding"; docker logs handyseller-tms-api --tail 60 2>&1; exit 1; }
 
             echo "Deploy complete: https://app.handyseller.ru"
           SSH

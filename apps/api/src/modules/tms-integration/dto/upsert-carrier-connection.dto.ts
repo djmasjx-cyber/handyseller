@@ -5,8 +5,8 @@ export class UpsertCarrierConnectionDto {
   @IsUUID()
   id?: string;
 
-  @IsIn(['MAJOR_EXPRESS'])
-  carrierCode!: 'MAJOR_EXPRESS';
+  @IsIn(['MAJOR_EXPRESS', 'DELLIN'])
+  carrierCode!: 'MAJOR_EXPRESS' | 'DELLIN';
 
   @IsOptional()
   @IsIn(['EXPRESS', 'LTL'])

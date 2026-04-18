@@ -431,6 +431,7 @@ model CarrierConnection {
 
 enum CarrierCode {
   MAJOR_EXPRESS
+  DELLIN
 }
 
 enum CarrierServiceType {

@@ -17,11 +17,16 @@ import type {
 } from '@handyseller/tms-sdk';
 import { buildMockCarrierAdapters } from './adapters/mock-carrier.adapters';
 import { MajorExpressAdapter } from './adapters/major-express.adapter';
+import { DellinAdapter } from './adapters/dellin.adapter';
 import type { CarrierAdapter } from './adapters/base-carrier.adapter';
 
 @Injectable()
 export class ShipmentsService {
-  private readonly adapters: CarrierAdapter[] = [new MajorExpressAdapter(), ...buildMockCarrierAdapters()];
+  private readonly adapters: CarrierAdapter[] = [
+    new MajorExpressAdapter(),
+    new DellinAdapter(),
+    ...buildMockCarrierAdapters(),
+  ];
   private readonly requests = new Map<string, ShipmentRequestRecord>();
   private readonly quotes = new Map<string, CarrierQuote[]>();
   private readonly shipments = new Map<string, ShipmentRecord>();

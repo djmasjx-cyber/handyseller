@@ -51,6 +51,7 @@ services:
       PORT: "3001"
       HOSTNAME: "0.0.0.0"
       API_URL: http://api:4000
+      TMS_API_URL: http://tms-api:4100
     ports:
       - "127.0.0.1:3001:3001"
     healthcheck:
@@ -59,6 +60,29 @@ services:
       timeout: 5s
       retries: 3
       start_period: 15s
+    networks:
+      - handyseller
+
+  tms-api:
+    image: handyseller-tms-api:latest
+    container_name: handyseller-tms-api
+    restart: unless-stopped
+    env_file: .env.production
+    environment:
+      NODE_ENV: production
+      PORT: "4100"
+      CORE_API_URL: http://api:4000
+    ports:
+      - "127.0.0.1:4100:4100"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:4100/health',(r)=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    depends_on:
+      api:
+        condition: service_healthy
     networks:
       - handyseller
 

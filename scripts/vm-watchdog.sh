@@ -16,6 +16,7 @@ cd "$DIR" 2>/dev/null || exit 0
 # IMAGE_* для docker-compose.ci.yml (если не заданы — prod-образы)
 export IMAGE_API="${IMAGE_API:-ghcr.io/djmasjx-cyber/handyseller-api:latest}"
 export IMAGE_WEB="${IMAGE_WEB:-ghcr.io/djmasjx-cyber/handyseller-web:latest}"
+export IMAGE_TMS_API="${IMAGE_TMS_API:-ghcr.io/djmasjx-cyber/handyseller-tms-api:latest}"
 [ -f "$ENV_FILE" ] && set -a && . "$ENV_FILE" 2>/dev/null && set +a
 
 need_restart=0
@@ -56,11 +57,17 @@ if ! curl -sf --connect-timeout 3 http://127.0.0.1:3001/ >/dev/null 2>&1; then
   need_restart=1
 fi
 
+# Проверка TMS API
+if ! curl -sf --connect-timeout 3 http://127.0.0.1:4100/health >/dev/null 2>&1; then
+  echo "$(date -Iseconds) [WATCHDOG] TMS API unhealthy, will restart"
+  need_restart=1
+fi
+
 if [ "$need_restart" = "1" ]; then
   echo "$(date -Iseconds) [WATCHDOG] Restarting stack..."
   docker network create handyseller_handyseller 2>/dev/null || true
   ensure_redis || true
-  docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --no-deps api web 2>/dev/null || true
+  docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --no-deps api tms-api web 2>/dev/null || true
   sleep 5
   sudo systemctl reload nginx 2>/dev/null || true
   echo "$(date -Iseconds) [WATCHDOG] Restart done"

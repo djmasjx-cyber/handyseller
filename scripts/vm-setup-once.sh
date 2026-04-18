@@ -36,6 +36,7 @@ fi
 echo "==> 4. Сохранение IMAGE_* в .env.production (для автозапуска)..."
 grep -q "IMAGE_API=" /opt/handyseller/.env.production 2>/dev/null || echo 'IMAGE_API=ghcr.io/djmasjx-cyber/handyseller-api:latest' >> /opt/handyseller/.env.production
 grep -q "IMAGE_WEB=" /opt/handyseller/.env.production 2>/dev/null || echo 'IMAGE_WEB=ghcr.io/djmasjx-cyber/handyseller-web:latest' >> /opt/handyseller/.env.production
+grep -q "IMAGE_TMS_API=" /opt/handyseller/.env.production 2>/dev/null || echo 'IMAGE_TMS_API=ghcr.io/djmasjx-cyber/handyseller-tms-api:latest' >> /opt/handyseller/.env.production
 
 echo "==> 5. Systemd — автозапуск при перезагрузке..."
 chmod +x /opt/handyseller/handyseller-start.sh
