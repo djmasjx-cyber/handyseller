@@ -50,6 +50,8 @@ sudo chmod 644 /etc/cron.d/handyseller-watchdog
 echo "==> 7. Nginx..."
 if sudo test -f /etc/letsencrypt/live/handyseller.ru/fullchain.pem 2>/dev/null; then
   sudo cp /opt/handyseller/nginx/handyseller-domain.conf /etc/nginx/sites-available/handyseller
+elif sudo test -f /etc/letsencrypt/live/app.handyseller.ru/fullchain.pem 2>/dev/null; then
+  sudo cp /opt/handyseller/nginx/handyseller-app-ssl.conf /etc/nginx/sites-available/handyseller
 elif [ -f /opt/handyseller/nginx/handyseller-bootstrap.conf ]; then
   sudo cp /opt/handyseller/nginx/handyseller-bootstrap.conf /etc/nginx/sites-available/handyseller
 else

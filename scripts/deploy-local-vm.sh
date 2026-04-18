@@ -32,7 +32,7 @@ echo "==> 2. Подготовка /opt/handyseller..."
 sudo mkdir -p /opt/handyseller
 sudo cp docker-compose.prod.yml /opt/handyseller/
 sudo mkdir -p /opt/handyseller/nginx
-sudo cp nginx/handyseller.conf nginx/handyseller-domain.conf nginx/handyseller-bootstrap.conf /opt/handyseller/nginx/ 2>/dev/null || true
+sudo cp nginx/*.conf /opt/handyseller/nginx/ 2>/dev/null || true
 sudo chown -R $(whoami):$(whoami) /opt/handyseller
 
 # Ключи (сохраняем между запусками)
@@ -96,6 +96,8 @@ docker exec handyseller-api node scripts/seed-database.js 2>/dev/null || true
 echo "==> 6. Nginx..."
 if sudo test -f /etc/letsencrypt/live/handyseller.ru/fullchain.pem 2>/dev/null; then
   sudo cp /opt/handyseller/nginx/handyseller-domain.conf /etc/nginx/sites-available/handyseller
+elif sudo test -f /etc/letsencrypt/live/app.handyseller.ru/fullchain.pem 2>/dev/null; then
+  sudo cp /opt/handyseller/nginx/handyseller-app-ssl.conf /etc/nginx/sites-available/handyseller
 elif [ -f /opt/handyseller/nginx/handyseller-bootstrap.conf ]; then
   sudo cp /opt/handyseller/nginx/handyseller-bootstrap.conf /etc/nginx/sites-available/handyseller
 else

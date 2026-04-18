@@ -53,6 +53,7 @@ cp docker-compose.prod.yml "$DEPLOY_DIR/handyseller/"
 mkdir -p "$DEPLOY_DIR/handyseller/nginx"
 cp nginx/handyseller.conf "$DEPLOY_DIR/handyseller/nginx/"
 cp nginx/handyseller-domain.conf "$DEPLOY_DIR/handyseller/nginx/" 2>/dev/null || true
+cp nginx/handyseller-app-ssl.conf "$DEPLOY_DIR/handyseller/nginx/" 2>/dev/null || true
 cp nginx/handyseller-bootstrap.conf "$DEPLOY_DIR/handyseller/nginx/" 2>/dev/null || true
 cp -r scripts "$DEPLOY_DIR/handyseller/"
 
@@ -169,6 +170,8 @@ if ! command -v nginx &>/dev/null; then
 fi
 if sudo test -f /etc/letsencrypt/live/handyseller.ru/fullchain.pem 2>/dev/null; then
   sudo cp /opt/handyseller/nginx/handyseller-domain.conf /etc/nginx/sites-available/handyseller
+elif sudo test -f /etc/letsencrypt/live/app.handyseller.ru/fullchain.pem 2>/dev/null; then
+  sudo cp /opt/handyseller/nginx/handyseller-app-ssl.conf /etc/nginx/sites-available/handyseller
 elif [ -f /opt/handyseller/nginx/handyseller-bootstrap.conf ]; then
   sudo cp /opt/handyseller/nginx/handyseller-bootstrap.conf /etc/nginx/sites-available/handyseller
 else

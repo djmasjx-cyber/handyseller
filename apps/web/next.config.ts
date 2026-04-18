@@ -23,7 +23,14 @@ const nextConfig: NextConfig = {
   // На деплое: Nginx проксирует /api -> NestJS. Локально: rewrite для dev.
   ...(isStandalone ? {} : {
     async rewrites() {
-      return [{ source: "/api/:path*", destination: `${apiBase}/api/:path*` }];
+      // Не проксировать /api/tms/* в Nest: эти пути обрабатывает Next BFF (app/api/tms/[...path]).
+      // Иначе POST /api/tms/core/carrier-connections уйдёт в Nest и вернёт Cannot POST (маршрута нет).
+      return [
+        {
+          source: "/api/:path((?!tms(?:/|$)).*)",
+          destination: `${apiBase}/api/:path`,
+        },
+      ];
     },
   }),
 };
