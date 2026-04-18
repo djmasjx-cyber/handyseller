@@ -39,6 +39,7 @@ export default function TmsSettingsPage() {
   const [carrierCode, setCarrierCode] = useState<"MAJOR_EXPRESS" | "DELLIN">("MAJOR_EXPRESS")
   const [login, setLogin] = useState("")
   const [password, setPassword] = useState("")
+  const [appKey, setAppKey] = useState("")
 
   const load = async () => {
     if (!token) return
@@ -71,6 +72,7 @@ export default function TmsSettingsPage() {
           serviceType: "EXPRESS",
           accountLabel,
           contractLabel,
+          ...(carrierCode === "DELLIN" && appKey.trim() ? { appKey: appKey.trim() } : {}),
           login,
           password,
           isDefault: true,
@@ -82,6 +84,7 @@ export default function TmsSettingsPage() {
       }
       setLogin("")
       setPassword("")
+      setAppKey("")
       await load()
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось сохранить подключение")
@@ -133,7 +136,10 @@ export default function TmsSettingsPage() {
             <select
               id="carrierCode"
               value={carrierCode}
-              onChange={(e) => setCarrierCode(e.target.value as "MAJOR_EXPRESS" | "DELLIN")}
+              onChange={(e) => {
+                setCarrierCode(e.target.value as "MAJOR_EXPRESS" | "DELLIN")
+                setAppKey("")
+              }}
               className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
             >
               <option value="MAJOR_EXPRESS">Major Express</option>
@@ -150,11 +156,37 @@ export default function TmsSettingsPage() {
           </div>
           <div className="space-y-2">
             <Label htmlFor="login">Логин</Label>
-            <Input id="login" value={login} onChange={(e) => setLogin(e.target.value)} placeholder="Логин Major Express" />
+            <Input
+              id="login"
+              value={login}
+              onChange={(e) => setLogin(e.target.value)}
+              placeholder={carrierCode === "DELLIN" ? "Телефон или логин из ЛК Деловых Линий" : "Логин Major Express"}
+            />
           </div>
+          {carrierCode === "DELLIN" ? (
+            <div className="space-y-2 md:col-span-2">
+              <Label htmlFor="appKey">Ключ приложения (appKey)</Label>
+              <Input
+                id="appKey"
+                value={appKey}
+                onChange={(e) => setAppKey(e.target.value)}
+                placeholder="Из раздела «Интеграция» в личном кабинете Деловых Линий"
+                autoComplete="off"
+              />
+              <p className="text-xs text-muted-foreground">
+                Ключ привязан к вашему договору с Деловыми Линиями и хранится в HandySeller в зашифрованном виде.
+              </p>
+            </div>
+          ) : null}
           <div className="space-y-2">
             <Label htmlFor="password">Пароль</Label>
-            <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Пароль Major Express" />
+            <Input
+              id="password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder={carrierCode === "DELLIN" ? "Пароль от ЛК Деловых Линий" : "Пароль Major Express"}
+            />
           </div>
           <div className="md:col-span-2 flex items-center gap-3">
             <Button onClick={save} disabled={saving || !login || !password}>

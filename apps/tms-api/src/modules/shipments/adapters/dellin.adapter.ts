@@ -46,7 +46,7 @@ export class DellinAdapter implements CarrierAdapter {
     const credentials = await this.loadCredentials(context);
     if (!credentials) return null;
 
-    const appKey = process.env.DELLIN_APP_KEY?.trim();
+    const appKey = (credentials.appKey ?? '').trim() || process.env.DELLIN_APP_KEY?.trim();
     if (!appKey) return null;
 
     const base = (process.env.DELLIN_API_BASE ?? 'https://api.dellin.ru').replace(/\/+$/, '');

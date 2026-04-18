@@ -22,6 +22,11 @@ export class UpsertCarrierConnectionDto {
   @MaxLength(500)
   contractLabel?: string;
 
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  appKey?: string;
+
   @IsString()
   @MinLength(1)
   @MaxLength(500)

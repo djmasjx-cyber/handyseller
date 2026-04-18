@@ -414,6 +414,8 @@ model CarrierConnection {
   serviceType     CarrierServiceType @default(EXPRESS) @map("service_type")
   accountLabel    String?            @map("account_label")
   contractLabel   String?            @map("contract_label")
+  /// Ключ приложения (например Деловые Линии appKey из ЛК), шифруется как login/password.
+  appKey          String?            @map("app_key") @db.Text
   login           String             @db.Text
   password        String             @db.Text
   isDefault       Boolean            @default(true) @map("is_default")

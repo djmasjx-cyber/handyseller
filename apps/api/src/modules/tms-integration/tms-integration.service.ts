@@ -156,9 +156,6 @@ export class TmsIntegrationService {
     if (carrierCode === 'MAJOR_EXPRESS') {
       await this.validateMajorCredentials(login, password);
     }
-    if (carrierCode === 'DELLIN') {
-      this.validateDellinCredentialsConfigured();
-    }
 
     const target =
       input.id != null
@@ -182,11 +179,26 @@ export class TmsIntegrationService {
       });
     }
 
+    let appKeyEncrypted: string | null = null;
+    if (carrierCode === 'DELLIN') {
+      const fromInput = (input.appKey ?? '').trim();
+      if (fromInput) {
+        appKeyEncrypted = this.crypto.encrypt(fromInput);
+      } else if (target?.appKey) {
+        appKeyEncrypted = target.appKey;
+      } else {
+        throw new BadRequestException(
+          'Для Деловых Линий укажите ключ приложения (appKey) из раздела интеграций личного кабинета.',
+        );
+      }
+    }
+
     const data = {
       carrierCode,
       serviceType,
       accountLabel: input.accountLabel?.trim() || null,
       contractLabel: input.contractLabel?.trim() || null,
+      appKey: carrierCode === 'DELLIN' ? appKeyEncrypted : null,
       login: this.crypto.encrypt(login),
       password: this.crypto.encrypt(password),
       isDefault: input.isDefault ?? true,
@@ -237,6 +249,7 @@ export class TmsIntegrationService {
       serviceType: connection.serviceType,
       accountLabel: connection.accountLabel,
       contractLabel: connection.contractLabel,
+      appKey: connection.appKey ? this.crypto.decrypt(connection.appKey) : null,
       login: this.crypto.decrypt(connection.login),
       password: this.crypto.decrypt(connection.password),
     };
@@ -317,12 +330,4 @@ export class TmsIntegrationService {
     }
   }
 
-  private validateDellinCredentialsConfigured(): void {
-    // Для ДЛ дополнительно нужен appKey (хранится в env tms-api и не секрет клиента).
-    if (!process.env.DELLIN_APP_KEY?.trim()) {
-      throw new BadRequestException(
-        'Интеграция Деловых Линий не настроена: отсутствует DELLIN_APP_KEY в окружении.',
-      );
-    }
-  }
 }

@@ -181,6 +181,8 @@ export interface UpsertCarrierConnectionInput {
   serviceType?: CarrierServiceType;
   accountLabel?: string;
   contractLabel?: string;
+  /** Ключ приложения (например Деловые Линии), опционально для ТК без отдельного appKey */
+  appKey?: string;
   login: string;
   password: string;
   isDefault?: boolean;
@@ -192,6 +194,8 @@ export interface InternalCarrierCredentials {
   serviceType: CarrierServiceType;
   accountLabel: string | null;
   contractLabel: string | null;
+  /** Расшифрованный appKey, если был сохранён (Деловые Линии и др.) */
+  appKey?: string | null;
   login: string;
   password: string;
 }
