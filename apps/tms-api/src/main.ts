@@ -1,5 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import helmet from 'helmet';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
@@ -13,10 +14,28 @@ async function bootstrap() {
     }),
   );
 
+  app.use(
+    helmet({
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+      contentSecurityPolicy: false,
+      xssFilter: true,
+      noSniff: true,
+      frameguard: { action: 'deny' },
+    }),
+  );
+
+  const corsOrigins =
+    process.env.CORS_ORIGIN?.split(',')
+      .map((s) => s.trim())
+      .filter(Boolean) ??
+    (process.env.NODE_ENV === 'production'
+      ? ['https://app.handyseller.ru', 'https://api.handyseller.ru']
+      : true);
+
   app.enableCors({
-    origin: true,
+    origin: corsOrigins,
     credentials: true,
-    methods: ['GET', 'POST', 'PATCH', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
   });
 

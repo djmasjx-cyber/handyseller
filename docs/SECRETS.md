@@ -36,6 +36,7 @@
 | Пароли пользователей | Хеш bcrypt (`password_hash`), никогда plain text |
 | Email, имя, телефон (PII) | Шифруются AES через `CryptoService` |
 | Маркетплейсы (API-ключи, токены) | Шифруются в `MarketplaceConnection` |
+| TMS внешние клиенты (`client_secret`) | В БД только **SHA-256** в `tms_m2m_client.secret_hash`; в открытом виде показывается один раз при создании |
 
 Продакшен использует **Yandex Managed PostgreSQL**; подключение только по TLS.
 
@@ -49,6 +50,7 @@
 - `JWT_SECRET` — ключ для JWT (минимум 32 символа)
 - `ENCRYPTION_KEY` — ключ AES для PII (минимум 32 символа)
 - `ADMIN_EMAIL`, `ADMIN_PASSWORD` — для seed
+- опционально: `TMS_M2M_TOKEN_EXPIRES_IN` — срок жизни M2M access token для внешних интеграций TMS (например `1h`)
 
 ### Деплой (`.env.secrets`)
 

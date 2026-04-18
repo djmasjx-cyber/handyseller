@@ -41,6 +41,29 @@ model User {
   reviews           Review[]
   organizationProfile OrganizationProfile?
   carrierConnections CarrierConnection[]
+  tmsM2mClients      TmsM2mClient[]
+}
+
+/// OAuth2-style M2M клиент для внешних систем (ERP, WMS): только хэш секрета, короткоживущие JWT через /api/tms/oauth/token.
+model TmsM2mClient {
+  id         String    @id @default(uuid())
+  userId     String    @map("user_id")
+  label      String?
+  /// Публичный client_id (UUID), не секрет.
+  publicId   String    @unique @map("public_id")
+  /// SHA-256(hex) полного client_secret — как refresh-токены.
+  secretHash String    @map("secret_hash")
+  /// JSON-массив строк областей: tms:read, tms:write
+  scopes     Json      @default("[\"tms:read\", \"tms:write\"]")
+  revokedAt  DateTime? @map("revoked_at")
+  lastUsedAt DateTime? @map("last_used_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("tms_m2m_client")
 }
 
 model RefreshToken {

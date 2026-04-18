@@ -17,7 +17,18 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     });
   }
 
-  async validate(payload: { sub: string; email: string; role?: string }) {
-    return { userId: payload.sub, email: payload.email, role: payload.role ?? 'USER' };
+  async validate(payload: {
+    sub: string;
+    email?: string;
+    role?: string;
+    /** M2M TMS токен — см. RejectTmsM2mJwtGuard на чувствительных маршрутах. */
+    typ?: string;
+  }) {
+    return {
+      userId: payload.sub,
+      email: payload.email ?? '',
+      role: payload.role ?? 'USER',
+      tokenTyp: payload.typ ?? 'user',
+    };
   }
 }

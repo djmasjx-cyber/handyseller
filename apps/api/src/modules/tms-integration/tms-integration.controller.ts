@@ -15,9 +15,10 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { TmsIntegrationService } from './tms-integration.service';
 import type { CarrierCode, CarrierServiceType } from '@handyseller/tms-sdk';
 import { UpsertCarrierConnectionDto } from './dto/upsert-carrier-connection.dto';
+import { RejectTmsM2mJwtGuard } from './guards/reject-tms-m2m-jwt.guard';
 
 @Controller('tms')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RejectTmsM2mJwtGuard)
 export class TmsIntegrationController {
   constructor(private readonly tmsIntegrationService: TmsIntegrationService) {}
 

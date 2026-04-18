@@ -10,22 +10,40 @@ function getToken(req: NextRequest): string | null {
   return null
 }
 
+/** Маршруты основного Nest API (учётки, OAuth, OpenAPI), остальное — tms-api. */
+function useCoreApi(path: string[]): boolean {
+  const head = path[0]
+  return head === "core" || head === "oauth" || head === "integration-clients" || head === "openapi.yaml"
+}
+
 function resolveTarget(req: NextRequest, path: string[]): string {
-  const [scope, ...rest] = path
-  const base = scope === "core" ? API_BASE : TMS_API_BASE
-  const suffix = scope === "core" ? rest.join("/") : path.join("/")
   const qs = req.nextUrl.searchParams.toString()
-  return `${base}/tms/${suffix}${qs ? `?${qs}` : ""}`
+  const q = qs ? `?${qs}` : ""
+  const [scope, ...rest] = path
+  if (scope === "core") {
+    return `${API_BASE}/tms/${rest.join("/")}${q}`
+  }
+  if (useCoreApi(path)) {
+    return `${API_BASE}/tms/${path.join("/")}${q}`
+  }
+  return `${TMS_API_BASE}/tms/${path.join("/")}${q}`
+}
+
+function isPublicOpenApiRoute(req: NextRequest, path: string[]): boolean {
+  return req.method === "GET" && path.length === 1 && path[0] === "openapi.yaml"
 }
 
 async function proxy(req: NextRequest, path: string[]) {
   const token = getToken(req)
-  if (!token) return NextResponse.json({ error: "Не авторизован" }, { status: 401 })
+  const publicSpec = isPublicOpenApiRoute(req, path)
+  if (!token && !publicSpec) {
+    return NextResponse.json({ error: "Не авторизован" }, { status: 401 })
+  }
 
   const init: RequestInit = {
     method: req.method,
     headers: {
-      Authorization: `Bearer ${token}`,
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       "Content-Type": req.headers.get("content-type") ?? "application/json",
     },
     cache: "no-store",

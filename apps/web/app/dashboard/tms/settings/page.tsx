@@ -28,6 +28,16 @@ type CarrierConnection = {
   lastError: string | null
 }
 
+type TmsIntegrationClient = {
+  id: string
+  publicId: string
+  label: string | null
+  scopes: string[]
+  revokedAt: string | null
+  lastUsedAt: string | null
+  createdAt: string
+}
+
 export default function TmsSettingsPage() {
   const token = typeof window !== "undefined" ? localStorage.getItem(AUTH_STORAGE_KEYS.accessToken) : null
   const [loading, setLoading] = useState(true)
@@ -40,6 +50,9 @@ export default function TmsSettingsPage() {
   const [login, setLogin] = useState("")
   const [password, setPassword] = useState("")
   const [appKey, setAppKey] = useState("")
+  const [m2mItems, setM2mItems] = useState<TmsIntegrationClient[]>([])
+  const [m2mLabel, setM2mLabel] = useState("")
+  const [m2mSecretOnce, setM2mSecretOnce] = useState<string | null>(null)
 
   const load = async () => {
     if (!token) return
@@ -52,9 +65,66 @@ export default function TmsSettingsPage() {
     setLoading(false)
   }
 
+  const loadM2m = async () => {
+    if (!token) return
+    const res = await authFetch("/api/tms/integration-clients", {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    const data = await res.json().catch(() => [])
+    setM2mItems(Array.isArray(data) ? data : [])
+  }
+
   useEffect(() => {
     load()
+    loadM2m()
   }, [token])
+
+  const createM2m = async () => {
+    if (!token) return
+    setSaving(true)
+    setError(null)
+    setM2mSecretOnce(null)
+    try {
+      const res = await authFetch("/api/tms/integration-clients", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ label: m2mLabel.trim() || undefined }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(formatApiError(data))
+      if (typeof data.client_secret === "string") setM2mSecretOnce(data.client_secret)
+      setM2mLabel("")
+      await loadM2m()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось создать клиента API")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const revokeM2m = async (id: string) => {
+    if (!token) return
+    setSaving(true)
+    setError(null)
+    try {
+      const res = await authFetch(`/api/tms/integration-clients/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(formatApiError(data))
+      }
+      await loadM2m()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось отозвать доступ")
+    } finally {
+      setSaving(false)
+    }
+  }
 
   const save = async () => {
     if (!token) return
@@ -194,6 +264,70 @@ export default function TmsSettingsPage() {
               Сохранить и проверить
             </Button>
             {error ? <p className="text-sm text-destructive">{error}</p> : null}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Внешние системы (API TMS)</CardTitle>
+          <CardDescription>
+            Для ERP, WMS и собственных сервисов: OAuth2 client credentials, короткоживущие токены, секрет хранится
+            только в виде хэша. Подробности — в{" "}
+            <a className="underline" href="/api/tms/openapi.yaml" target="_blank" rel="noreferrer">
+              OpenAPI (YAML)
+            </a>
+            .
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {m2mSecretOnce ? (
+            <div className="rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-sm">
+              <p className="font-medium text-amber-900 dark:text-amber-100">Сохраните client_secret сейчас</p>
+              <p className="mt-1 break-all font-mono text-xs">{m2mSecretOnce}</p>
+              <p className="mt-2 text-muted-foreground">Он больше не будет показан.</p>
+            </div>
+          ) : null}
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="space-y-2 min-w-[200px] flex-1">
+              <Label htmlFor="m2mLabel">Название интеграции</Label>
+              <Input
+                id="m2mLabel"
+                value={m2mLabel}
+                onChange={(e) => setM2mLabel(e.target.value)}
+                placeholder="Например, ERP МойСклад"
+              />
+            </div>
+            <Button type="button" onClick={createM2m} disabled={saving}>
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Создать клиента"}
+            </Button>
+          </div>
+          <div className="space-y-2">
+            {m2mItems.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Пока нет зарегистрированных API-клиентов.</p>
+            ) : (
+              m2mItems.map((c) => (
+                <div key={c.id} className="rounded-lg border p-3 flex flex-wrap justify-between gap-2 text-sm">
+                  <div>
+                    <p className="font-medium">{c.label || "Без названия"}</p>
+                    <p className="text-muted-foreground font-mono text-xs">client_id: {c.publicId}</p>
+                    <p className="text-xs text-muted-foreground">scopes: {c.scopes.join(", ")}</p>
+                    {c.revokedAt ? (
+                      <p className="text-xs text-destructive">Отозван: {new Date(c.revokedAt).toLocaleString("ru-RU")}</p>
+                    ) : c.lastUsedAt ? (
+                      <p className="text-xs text-muted-foreground">
+                        Последний обмен токена: {new Date(c.lastUsedAt).toLocaleString("ru-RU")}
+                      </p>
+                    ) : null}
+                  </div>
+                  {!c.revokedAt ? (
+                    <Button type="button" variant="outline" size="sm" onClick={() => revokeM2m(c.id)} disabled={saving}>
+                      Отозвать
+                    </Button>
+                  ) : null}
+                </div>
+              ))
+            )}
           </div>
         </CardContent>
       </Card>

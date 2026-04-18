@@ -2,10 +2,12 @@ import { Body, Controller, Get, Headers, Param, Post, UseGuards } from '@nestjs/
 import type { CreateShipmentRequestInput } from '@handyseller/tms-sdk';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
+import { TmsAccess } from '../auth/tms-access.metadata';
+import { TmsScopeGuard } from '../auth/tms-scope.guard';
 import { ShipmentsService } from './shipments.service';
 
 @Controller('tms')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, TmsScopeGuard)
 export class ShipmentsController {
   constructor(private readonly shipmentsService: ShipmentsService) {}
 
@@ -39,6 +41,7 @@ export class ShipmentsController {
   }
 
   @Post('shipment-requests')
+  @TmsAccess('write')
   createFromCoreOrder(
     @CurrentUser('userId') userId: string,
     @Body() input: CreateShipmentRequestInput,
@@ -54,6 +57,7 @@ export class ShipmentsController {
   }
 
   @Post('shipment-requests/:id/quotes/refresh')
+  @TmsAccess('write')
   refreshQuotes(
     @CurrentUser('userId') userId: string,
     @Headers('authorization') authorization: string | undefined,
@@ -64,6 +68,7 @@ export class ShipmentsController {
   }
 
   @Post('shipment-requests/:id/select-quote')
+  @TmsAccess('write')
   selectQuote(
     @CurrentUser('userId') userId: string,
     @Param('id') requestId: string,
