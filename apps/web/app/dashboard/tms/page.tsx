@@ -246,6 +246,10 @@ export default function TmsDashboardPage() {
     }
   }
 
+  const handleCreateShipmentRequestClick = () => {
+    void createShipmentRequest()
+  }
+
   useEffect(() => {
     if (!autoQuote || autoQuoteTriggeredRef.current) return
     if (!selectedOrder || submitting) return
@@ -388,7 +392,7 @@ export default function TmsDashboardPage() {
                   </div>
                 </div>
 
-                <Button onClick={createShipmentRequest} disabled={submitting}>
+                <Button onClick={handleCreateShipmentRequestClick} disabled={submitting}>
                   {submitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                   Получить варианты
                 </Button>
