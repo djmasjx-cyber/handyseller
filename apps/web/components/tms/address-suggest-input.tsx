@@ -71,7 +71,7 @@ export function AddressSuggestInput({
     setLoading(true)
     setApiHint(null)
     try {
-      const res = await fetch("/api/address-suggest", {
+      const res = await fetch("/api/tms/address-suggest", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query: t }),
@@ -86,6 +86,9 @@ export function AddressSuggestInput({
       } else if (data.error === "dadata_http") {
         setApiHint("DaData временно недоступен или отказала в доступе.")
       }
+    } catch {
+      setItems([])
+      setApiHint("Не удалось получить подсказки адреса. Проверьте доступность /api/tms/address-suggest.")
     } finally {
       setLoading(false)
     }

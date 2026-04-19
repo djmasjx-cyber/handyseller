@@ -11,7 +11,7 @@
 ### DaData (подсказки адресов в web)
 
 - Ключ и секрет задаются **только** в переменных окружения процесса Next.js (`DADATA_TOKEN` или `DADATA_API_KEY`, опционально `DADATA_SECRET`).
-- Запрос к DaData выполняется **на сервере** в `apps/web/app/api/address-suggest/route.ts`; клиент ходит только на свой `/api/address-suggest`.
+- Запрос к DaData выполняется **на сервере** в `apps/web/app/api/tms/address-suggest/route.ts`; клиент ходит только на `/api/tms/address-suggest`.
 - **Продакшен:** добавьте строки в `/opt/handyseller/.env.production` или в `/opt/handyseller/.env.extra` (он подмешивается при деплое в `.env.production`), затем `docker compose ... up -d`. В `docker-compose.ci.yml` / `docker-compose.prod.yml` для сервиса `web` пробрасываются только эти три имени — без дублирования секретов в образе.
 
 ---

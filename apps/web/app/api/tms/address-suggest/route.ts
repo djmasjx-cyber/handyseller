@@ -16,7 +16,7 @@ function resolveDadataKeys(): { token: string | null; secret: string | null } {
   return { token, secret }
 }
 
-/** Подсказки адресов (РФ и др.) через DaData REST API. Ключи только на сервере. */
+/** Подсказки адресов для TMS через DaData REST API. Ключи только на сервере. */
 export async function POST(req: NextRequest) {
   let body: { query?: string } = {}
   try {
@@ -44,10 +44,7 @@ export async function POST(req: NextRequest) {
       Accept: "application/json",
       Authorization: `Token ${token}`,
     }
-    // Пара «ключ + секрет» из личного кабинета DaData (часто требуется для платных тарифов).
-    if (secret) {
-      headers["X-Secret"] = secret
-    }
+    if (secret) headers["X-Secret"] = secret
 
     const res = await fetch(DADATA_URL, {
       method: "POST",
@@ -73,13 +70,12 @@ export async function POST(req: NextRequest) {
         configured: true,
         error: "dadata_http",
         status: res.status,
-        // Не отдаём ключи; короткая подсказка для админа в логах/сети.
         detail: res.status === 401 || res.status === 403 ? "Проверьте DADATA_TOKEN и при необходимости DADATA_SECRET" : detail,
       })
     }
 
     let data: {
-      suggestions?: Array<{ value?: string; unrestricted_value?: string; data?: { qc?: number } }>
+      suggestions?: Array<{ value?: string; unrestricted_value?: string }>
     }
     try {
       data = JSON.parse(rawText) as typeof data
