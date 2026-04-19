@@ -52,6 +52,9 @@ services:
       HOSTNAME: "0.0.0.0"
       API_URL: http://api:4000
       TMS_API_URL: http://tms-api:4100
+      DADATA_TOKEN: ${DADATA_TOKEN:-}
+      DADATA_API_KEY: ${DADATA_API_KEY:-}
+      DADATA_SECRET: ${DADATA_SECRET:-}
     ports:
       - "127.0.0.1:3001:3001"
     healthcheck:

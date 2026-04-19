@@ -63,6 +63,10 @@ chmod 600 /opt/handyseller/.env.production $KEY_FILE $JWT_FILE
 [ -n "$VTB_MODE" ]          && echo "VTB_MODE=$VTB_MODE" >> /opt/handyseller/.env.production
 [ -n "$RESEND_API_KEY" ]    && echo "RESEND_API_KEY=$RESEND_API_KEY" >> /opt/handyseller/.env.production
 [ -n "$EMAIL_FROM" ]        && echo "EMAIL_FROM=$EMAIL_FROM" >> /opt/handyseller/.env.production
+# DaData (подсказки адреса в web): из .env.secrets, без попадания в git
+DADATA_VAL="${DADATA_TOKEN:-${DADATA_API_KEY:-}}"
+[ -n "$DADATA_VAL" ]        && echo "DADATA_TOKEN=$DADATA_VAL" >> /opt/handyseller/.env.production
+[ -n "$DADATA_SECRET" ]     && echo "DADATA_SECRET=$DADATA_SECRET" >> /opt/handyseller/.env.production
 
 echo "==> 3. Остановка старых процессов..."
 sudo fuser -k 3000/tcp 2>/dev/null || true

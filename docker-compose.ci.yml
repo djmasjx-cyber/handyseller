@@ -54,6 +54,11 @@ services:
       API_URL: http://api:4000
       TMS_API_URL: http://tms-api:4100
       NODE_OPTIONS: "--max-old-space-size=256"
+      # DaData: только серверный Route Handler `/api/address-suggest`, в браузер не попадает.
+      # Значения из `--env-file .env.production` (или `.env.extra`, см. docs/SECRETS.md).
+      DADATA_TOKEN: ${DADATA_TOKEN:-}
+      DADATA_API_KEY: ${DADATA_API_KEY:-}
+      DADATA_SECRET: ${DADATA_SECRET:-}
     ports:
       - "127.0.0.1:3001:3001"
     healthcheck:
