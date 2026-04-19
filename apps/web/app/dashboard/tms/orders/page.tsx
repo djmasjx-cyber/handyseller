@@ -158,11 +158,11 @@ export default function TmsOrdersPage() {
                     <div className="flex flex-wrap gap-2">
                       {item.requestId ? (
                         <Button asChild size="sm" variant="outline">
-                          <Link href="/dashboard/tms/requests">Открыть расчет</Link>
+                          <Link href={`/dashboard/tms/requests?requestId=${encodeURIComponent(item.requestId)}`}>Открыть расчет</Link>
                         </Button>
                       ) : (
                         <Button asChild size="sm">
-                          <Link href="/dashboard/tms">Получить варианты</Link>
+                          <Link href={`/dashboard/tms?orderId=${encodeURIComponent(item.id)}`}>Получить варианты</Link>
                         </Button>
                       )}
                       {item.shipmentId ? (

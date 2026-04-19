@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
+import { useSearchParams } from "next/navigation"
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Badge, Input, Label } from "@handyseller/ui"
 import { Loader2, Truck, Network, Route, PackageCheck, CircleDollarSign } from "lucide-react"
 import { authFetch } from "@/lib/auth-fetch"
@@ -112,6 +113,7 @@ function requestStatusLabel(value: string) {
 }
 
 export default function TmsDashboardPage() {
+  const searchParams = useSearchParams()
   const token = typeof window !== "undefined" ? localStorage.getItem(AUTH_STORAGE_KEYS.accessToken) : null
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
@@ -131,6 +133,7 @@ export default function TmsDashboardPage() {
     () => candidateOrders.find((item) => item.id === selectedOrderId) ?? null,
     [candidateOrders, selectedOrderId],
   )
+  const orderIdFromQuery = searchParams.get("orderId")
 
   const loadData = useCallback(async () => {
     if (!token) return
@@ -185,6 +188,12 @@ export default function TmsDashboardPage() {
     setOriginLabel(selectedOrder.warehouseName ?? "")
     setDestinationLabel(`${selectedOrder.marketplace} / заказ ${selectedOrder.externalId}`)
   }, [selectedOrder])
+
+  useEffect(() => {
+    if (!orderIdFromQuery || !candidateOrders.length) return
+    const exists = candidateOrders.some((order) => order.id === orderIdFromQuery)
+    if (exists) setSelectedOrderId(orderIdFromQuery)
+  }, [orderIdFromQuery, candidateOrders])
 
   const toggleFlag = (flag: ServiceFlag) => {
     setFlags((prev) => (prev.includes(flag) ? prev.filter((item) => item !== flag) : [...prev, flag]))
