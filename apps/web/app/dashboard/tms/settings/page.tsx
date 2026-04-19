@@ -53,6 +53,8 @@ export default function TmsSettingsPage() {
   const [m2mItems, setM2mItems] = useState<TmsIntegrationClient[]>([])
   const [m2mLabel, setM2mLabel] = useState("")
   const [m2mSecretOnce, setM2mSecretOnce] = useState<string | null>(null)
+  const activeConnections = items.filter((item) => !item.lastError).length
+  const problematicConnections = items.filter((item) => Boolean(item.lastError)).length
 
   const load = async () => {
     if (!token) return
@@ -335,8 +337,20 @@ export default function TmsSettingsPage() {
       <Card>
         <CardHeader>
           <CardTitle>Подключенные учётки</CardTitle>
+          <CardDescription>
+            Статус активности рассчитывается по последней проверке: если есть ошибка, подключение требует внимания.
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="outline">Всего: {items.length}</Badge>
+            <Badge className="bg-emerald-600 hover:bg-emerald-600">Активно: {activeConnections}</Badge>
+            {problematicConnections > 0 ? (
+              <Badge variant="destructive">Проблем: {problematicConnections}</Badge>
+            ) : (
+              <Badge variant="secondary">Проблем нет</Badge>
+            )}
+          </div>
           {items.length === 0 ? (
             <p className="text-sm text-muted-foreground">Пока нет подключенных учёток перевозчиков.</p>
           ) : items.map((item) => (
@@ -351,6 +365,11 @@ export default function TmsSettingsPage() {
                 <div className="flex flex-wrap gap-2">
                   {item.isDefault ? <Badge>По умолчанию</Badge> : null}
                   <Badge variant="outline">{item.serviceType}</Badge>
+                  {item.lastError ? (
+                    <Badge variant="destructive">Требует внимания</Badge>
+                  ) : (
+                    <Badge className="bg-emerald-600 hover:bg-emerald-600">Активно</Badge>
+                  )}
                 </div>
               </div>
               <p className="text-xs text-muted-foreground">
