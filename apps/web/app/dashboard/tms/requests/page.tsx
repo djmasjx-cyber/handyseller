@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { useSearchParams } from "next/navigation"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import {
   Badge,
   Button,
@@ -17,12 +17,21 @@ import { Loader2 } from "lucide-react"
 import { authFetch } from "@/lib/auth-fetch"
 import { AUTH_STORAGE_KEYS } from "@/lib/auth-storage"
 
+type LogisticsScenario = "MARKETPLACE_RC" | "CARRIER_DELIVERY"
+
 type ShipmentRequest = {
   id: string
   status: string
   selectedQuoteId?: string
   createdAt: string
-  snapshot: { coreOrderNumber: string; marketplace: string }
+  snapshot: {
+    coreOrderNumber: string
+    marketplace: string
+    /** Сценарий из core: маркетплейс до РЦ vs доставка через ТК (клиент / ручной канал). */
+    logisticsScenario?: LogisticsScenario
+    /** Зарезервировано: перемещения между филиалами (появится в API заказа). */
+    tmsWorkType?: "CUSTOMER_DELIVERY" | "INTERNAL_TRANSFER"
+  }
   draft: { originLabel: string; destinationLabel: string; serviceFlags: string[] }
 }
 
@@ -100,7 +109,19 @@ function minFinite(values: number[]): number | null {
 
 type SortMode = "newest" | "cheapest_lane" | "fastest_lane" | `carrier:${string}`
 
+/** Очереди работы логиста: одна матрица, разные «входные» потоки заказов. */
+type WorkQueueKey = "all" | "MARKETPLACE_RC" | "CARRIER_DELIVERY" | "INTERNAL_TRANSFER"
+
+function workQueueFromSearchParam(raw: string | null): WorkQueueKey {
+  if (raw === "rc" || raw === "MARKETPLACE_RC") return "MARKETPLACE_RC"
+  if (raw === "tk" || raw === "CARRIER_DELIVERY") return "CARRIER_DELIVERY"
+  if (raw === "internal" || raw === "INTERNAL_TRANSFER") return "INTERNAL_TRANSFER"
+  return "all"
+}
+
 export default function TmsRequestsPage() {
+  const router = useRouter()
+  const pathname = usePathname()
   const searchParams = useSearchParams()
   const token = typeof window !== "undefined" ? localStorage.getItem(AUTH_STORAGE_KEYS.accessToken) : null
   const [items, setItems] = useState<ShipmentRequest[]>([])
@@ -112,24 +133,40 @@ export default function TmsRequestsPage() {
   const [search, setSearch] = useState("")
   const [sortMode, setSortMode] = useState<SortMode>("newest")
   const requestIdFromQuery = searchParams.get("requestId")
+  const workQueue = workQueueFromSearchParam(searchParams.get("queue"))
 
-  const loadAll = useCallback(async () => {
-    if (!token) return
-    setError(null)
-    const headers = { Authorization: `Bearer ${token}` }
-    const r = await authFetch("/api/tms/shipment-requests", { headers })
-    const data = r.ok ? await r.json() : []
-    const requests = Array.isArray(data) ? data : []
-    setItems(requests)
-    const quoteEntries = await Promise.all(
-      requests.map(async (request: ShipmentRequest) => {
-        const res = await authFetch(`/api/tms/shipment-requests/${request.id}/quotes`, { headers })
-        const quotes = await res.json().catch(() => [])
-        return [request.id, Array.isArray(quotes) ? quotes : []] as const
-      }),
-    )
-    setQuotesByRequest(Object.fromEntries(quoteEntries))
-  }, [token])
+  const setWorkQueue = (key: WorkQueueKey) => {
+    const next = new URLSearchParams(searchParams.toString())
+    if (key === "all") next.delete("queue")
+    else next.set("queue", key === "MARKETPLACE_RC" ? "rc" : key === "CARRIER_DELIVERY" ? "tk" : "internal")
+    const qs = next.toString()
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
+  }
+
+  const loadAll = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      if (!token) return
+      if (!opts?.silent) setError(null)
+      const headers = { Authorization: `Bearer ${token}` }
+      try {
+        const r = await authFetch("/api/tms/shipment-requests", { headers })
+        const data = r.ok ? await r.json() : []
+        const requests = Array.isArray(data) ? data : []
+        setItems(requests)
+        const quoteEntries = await Promise.all(
+          requests.map(async (request: ShipmentRequest) => {
+            const res = await authFetch(`/api/tms/shipment-requests/${request.id}/quotes`, { headers })
+            const quotes = await res.json().catch(() => [])
+            return [request.id, Array.isArray(quotes) ? quotes : []] as const
+          }),
+        )
+        setQuotesByRequest(Object.fromEntries(quoteEntries))
+      } catch {
+        if (!opts?.silent) setError("Не удалось загрузить расчеты и тарифы")
+      }
+    },
+    [token],
+  )
 
   useEffect(() => {
     if (!token) {
@@ -137,9 +174,19 @@ export default function TmsRequestsPage() {
       return
     }
     setLoading(true)
-    loadAll()
-      .catch(() => setError("Не удалось загрузить расчеты и тарифы"))
-      .finally(() => setLoading(false))
+    void loadAll().finally(() => setLoading(false))
+  }, [token, loadAll])
+
+  /** Приток новых заявок без WebSocket: тихое обновление, пока вкладка видима. */
+  useEffect(() => {
+    if (!token) return
+    const tick = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        void loadAll({ silent: true })
+      }
+    }
+    const id = window.setInterval(tick, 30_000)
+    return () => window.clearInterval(id)
   }, [token, loadAll])
 
   const carrierColumns = useMemo(() => collectCarrierColumns(quotesByRequest), [quotesByRequest])
@@ -159,6 +206,14 @@ export default function TmsRequestsPage() {
             .toLowerCase()
           return blob.includes(q)
         })
+
+    if (workQueue === "MARKETPLACE_RC") {
+      rows = rows.filter((item) => item.snapshot.logisticsScenario === "MARKETPLACE_RC")
+    } else if (workQueue === "CARRIER_DELIVERY") {
+      rows = rows.filter((item) => item.snapshot.logisticsScenario === "CARRIER_DELIVERY")
+    } else if (workQueue === "INTERNAL_TRANSFER") {
+      rows = rows.filter((item) => item.snapshot.tmsWorkType === "INTERNAL_TRANSFER")
+    }
 
     const quotesFor = (id: string) => quotesByRequest[id] ?? []
 
@@ -203,7 +258,7 @@ export default function TmsRequestsPage() {
 
     rows.sort(cmpCreated)
     return rows
-  }, [items, quotesByRequest, search, sortMode])
+  }, [items, quotesByRequest, search, sortMode, workQueue])
 
   const refreshQuotes = async (requestId: string) => {
     if (!token) return
@@ -252,7 +307,7 @@ export default function TmsRequestsPage() {
         const data = await res.json().catch(() => ({}))
         throw new Error(typeof data?.message === "string" ? data.message : "Не удалось выбрать тариф")
       }
-      await loadAll()
+      await loadAll({ silent: true })
     } catch (e) {
       setError(e instanceof Error ? e.message : "Не удалось выбрать тариф")
     } finally {
@@ -273,12 +328,41 @@ export default function TmsRequestsPage() {
       <CardHeader>
         <CardTitle>Сравнение тарифов</CardTitle>
         <CardDescription>
-          Строки — заявки, колонки — перевозчики; в ячейке цена и срок. Сортировка и поиск по заказу/адресу; клик по
-          ячейке подтверждает тариф (rate shopping в одном экране).
+          Строки — заявки, колонки — перевозчики; в ячейке цена и срок. Очереди по типу потока (маркетплейс / ТК);
+          список обновляется каждые 30 с, пока вкладка открыта. Клик по ячейке — выбор тарифа.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
+
+        {items.length > 0 ? (
+          <div className="flex flex-wrap gap-2 border-b pb-3">
+            {(
+              [
+                ["all", "Все потоки"],
+                ["MARKETPLACE_RC", "Маркетплейс → РЦ"],
+                ["CARRIER_DELIVERY", "Клиенты (ТК / ручной)"],
+                ["INTERNAL_TRANSFER", "Между филиалами"],
+              ] as const
+            ).map(([key, label]) => (
+              <Button
+                key={key}
+                type="button"
+                size="sm"
+                variant={workQueue === key ? "default" : "outline"}
+                disabled={key === "INTERNAL_TRANSFER"}
+                title={
+                  key === "INTERNAL_TRANSFER"
+                    ? "Нужно поле типа заказа в core; см. дорожную карту в описании задачи"
+                    : undefined
+                }
+                onClick={() => setWorkQueue(key)}
+              >
+                {label}
+              </Button>
+            ))}
+          </div>
+        ) : null}
 
         {items.length > 0 ? (
           <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
@@ -333,6 +417,16 @@ export default function TmsRequestsPage() {
                 </tr>
               </thead>
               <tbody>
+                {sortedRows.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={6 + carrierColumns.length}
+                      className="px-3 py-8 text-center text-muted-foreground"
+                    >
+                      В этой очереди сейчас нет заявок. Смените фильтр или снимите поиск.
+                    </td>
+                  </tr>
+                ) : null}
                 {sortedRows.map((item) => {
                   const quotes = quotesByRequest[item.id] ?? []
                   const highlight = item.id === requestIdFromQuery
