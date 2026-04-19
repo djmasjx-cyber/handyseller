@@ -18,11 +18,19 @@ type CandidateOrder = {
   tmsStatus: string
   totalAmount: number
   warehouseName?: string | null
+  /** Адрес доставки из core (ручные/TMS заказы) — обязателен для расчёта тарифов у ТК. */
+  deliveryAddressLabel?: string | null
   logisticsScenario: "MARKETPLACE_RC" | "CARRIER_DELIVERY"
   createdAt: string
   requestId?: string
   shipmentId?: string
   items: Array<{ title: string; quantity: number }>
+}
+
+/** Служебная подпись вместо адреса (раньше подставлялась в «Точка Б» по ошибке). */
+function looksLikeOrderReferenceDestination(value: string): boolean {
+  const t = value.trim()
+  return t.length > 0 && /\/\s*заказ\s+/i.test(t)
 }
 
 type Overview = {
@@ -103,7 +111,7 @@ function tmsStatusLabel(value: string) {
 function requestStatusLabel(value: string) {
   switch (value) {
     case "DRAFT":
-      return "Черновик"
+      return "Тарифы не получены"
     case "QUOTED":
       return "Варианты получены"
     case "BOOKED":
@@ -190,7 +198,7 @@ export default function TmsDashboardPage() {
   useEffect(() => {
     if (!selectedOrder) return
     setOriginLabel(selectedOrder.warehouseName ?? "")
-    setDestinationLabel(`${selectedOrder.marketplace} / заказ ${selectedOrder.externalId}`)
+    setDestinationLabel(selectedOrder.deliveryAddressLabel?.trim() ?? "")
   }, [selectedOrder])
 
   useEffect(() => {
@@ -214,7 +222,24 @@ export default function TmsDashboardPage() {
         const data = await snapshotRes.json().catch(() => ({}))
         throw new Error(data?.message ?? "Не удалось собрать данные заказа для расчёта")
       }
-      const snapshot = await snapshotRes.json()
+      const snapshot = await snapshotRes.json() as {
+        destinationLabel?: string | null
+        originLabel?: string | null
+      }
+      const snapDest = (snapshot.destinationLabel ?? "").trim()
+      const orderDest = (selectedOrder.deliveryAddressLabel ?? "").trim()
+      const typedDest = destinationLabel.trim()
+      const destinationResolved =
+        typedDest && !looksLikeOrderReferenceDestination(typedDest)
+          ? typedDest
+          : snapDest || orderDest || typedDest
+
+      if (!destinationResolved || looksLikeOrderReferenceDestination(destinationResolved)) {
+        throw new Error(
+          "Укажите адрес доставки в поле «Точка Б» (город или полный адрес). Служебная строка вида «MANUAL / заказ …» не подходит для калькуляторов перевозчиков.",
+        )
+      }
+
       const res = await authFetch("/api/tms/shipment-requests", {
         method: "POST",
         headers,
@@ -222,7 +247,7 @@ export default function TmsDashboardPage() {
           snapshot,
           draft: {
             originLabel: originLabel.trim() || selectedOrder.warehouseName || "Склад не указан",
-            destinationLabel: destinationLabel.trim() || `${selectedOrder.marketplace} / заказ ${selectedOrder.externalId}`,
+            destinationLabel: destinationResolved,
             serviceFlags: flags,
           },
         }),

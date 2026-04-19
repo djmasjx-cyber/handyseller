@@ -27,7 +27,7 @@ type Quote = {
 function requestStatusLabel(value: string) {
   switch (value) {
     case "DRAFT":
-      return "Черновик"
+      return "Тарифы не получены"
     case "QUOTED":
       return "Варианты получены"
     case "BOOKED":
@@ -84,8 +84,13 @@ export default function TmsRequestsPage() {
         throw new Error(typeof data?.message === "string" ? data.message : "Не удалось обновить тарифы")
       }
       const nextQuotes = await res.json().catch(() => [])
-      setQuotesByRequest((prev) => ({ ...prev, [requestId]: Array.isArray(nextQuotes) ? nextQuotes : [] }))
-      setItems((prev) => prev.map((item) => (item.id === requestId ? { ...item, status: "QUOTED" } : item)))
+      const list = Array.isArray(nextQuotes) ? nextQuotes : []
+      setQuotesByRequest((prev) => ({ ...prev, [requestId]: list }))
+      setItems((prev) =>
+        prev.map((item) =>
+          item.id === requestId ? { ...item, status: list.length > 0 ? "QUOTED" : "DRAFT" } : item,
+        ),
+      )
     } catch (e) {
       setError(e instanceof Error ? e.message : "Не удалось обновить тарифы")
     } finally {

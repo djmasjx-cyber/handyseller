@@ -166,7 +166,7 @@ export class ShipmentsService {
 
     const quotes = rankQuotes(successfulQuotes);
 
-    request.status = 'QUOTED';
+    request.status = quotes.length > 0 ? 'QUOTED' : 'DRAFT';
     request.updatedAt = new Date().toISOString();
     this.requests.set(requestId, request);
     this.quotes.set(requestId, quotes);
