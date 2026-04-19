@@ -9,14 +9,10 @@ import type {
 } from '@handyseller/tms-sdk';
 import type { CarrierAdapter, CarrierQuoteContext } from './base-carrier.adapter';
 
-type DellinCalcResponse = {
-  price?: number | string;
-  term?: number | string;
-  data?: {
-    price?: number | string;
-    term?: number | string;
-  };
-};
+/** Публичный калькулятор ДЛ: https://api.dellin.ru/v1/public/calculator.json (см. dev.dellin.ru, примеры интеграций). */
+const DELLIN_PUBLIC_CALCULATOR_PATH = '/v1/public/calculator';
+/** Поиск КЛАДР для сопоставления строки адреса с кодом населённого пункта. */
+const DELLIN_PUBLIC_KLADR_PATH = '/v2/public/kladr';
 
 function asNumber(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -25,6 +21,111 @@ function asNumber(value: unknown): number | null {
     return Number.isFinite(n) ? n : null;
   }
   return null;
+}
+
+function dellinJsonUrl(base: string, path: string): string {
+  const p = path.startsWith('/') ? path : `/${path}`;
+  return `${base}${p}.json`;
+}
+
+function stripPostalPrefix(value: string): string {
+  return value.replace(/^\s*\d{6}\s*,?\s*/u, '').trim();
+}
+
+/** Варианты строки для поиска по КЛАДР (от более информативных к более коротким). */
+function kladrSearchVariants(label: string | null | undefined): string[] {
+  if (!label) return [];
+  let s = label.replace(/\s+/g, ' ').trim();
+  if (!s) return [];
+
+  const out: string[] = [];
+  const push = (x: string) => {
+    const t = stripPostalPrefix(x).replace(/\s+/g, ' ').trim();
+    if (t.length >= 2 && !out.includes(t)) out.push(t);
+  };
+
+  if (/MANUAL/i.test(s)) {
+    const before = s.split(/MANUAL/i)[0]?.replace(/[/\s,-]+$/u, '').trim();
+    if (before) push(before);
+  }
+
+  if (s.includes('->')) {
+    for (const part of s.split('->')) push(part);
+  }
+
+  push(s);
+
+  for (const part of s.split(',').map((p) => p.trim())) {
+    if (part) push(part);
+  }
+
+  const cityInG = /(?:г\.?|город)\s*([А-Яа-яЁё0-9\-. ]{1,80})/giu;
+  let m: RegExpExecArray | null;
+  while ((m = cityInG.exec(s)) != null) {
+    push(m[1].trim());
+  }
+
+  const settlement =
+    /(?:деревня|д\.?|посёлок|пгт\.?|село|с\.)\s*([А-Яа-яЁё0-9\-. ]{1,80})/giu;
+  while ((m = settlement.exec(s)) != null) {
+    push(m[1].trim());
+  }
+
+  return out;
+}
+
+function parseKladrFirstCode(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const root = payload as Record<string, unknown>;
+  const citiesRaw =
+    (root.cities as unknown) ??
+    ((root.data as Record<string, unknown> | undefined)?.cities as unknown) ??
+    ((root.data as Record<string, unknown> | undefined)?.city as unknown);
+  const cities = Array.isArray(citiesRaw) ? citiesRaw : citiesRaw ? [citiesRaw] : [];
+  for (const item of cities) {
+    if (!item || typeof item !== 'object') continue;
+    const o = item as Record<string, unknown>;
+    const code = o.code ?? o.aString ?? o.cityUID ?? o.uid ?? o.kladrCode;
+    if (typeof code === 'string' && /^\d{10,}/u.test(code.replace(/\s/g, ''))) {
+      return code.replace(/\s/g, '');
+    }
+    if (typeof code === 'number' && String(code).length >= 10) {
+      return String(code);
+    }
+  }
+  return null;
+}
+
+function parsePublicCalculator(
+  payload: unknown,
+): { priceRub: number; etaDays: number; insuranceRub: number | null } | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const root = payload as Record<string, unknown>;
+
+  if (root.errors) {
+    return null;
+  }
+
+  const priceRub = asNumber(root.price);
+  if (!priceRub || priceRub <= 0) {
+    return null;
+  }
+
+  const insuranceRub = asNumber(root.insurance ?? root.insurancePrice ?? root.insuranceCost);
+
+  const time = root.time as Record<string, unknown> | undefined;
+  let etaDays = 2;
+  if (time) {
+    const std = asNumber(time.standard ?? time.value ?? time.days);
+    if (std != null && std > 0) {
+      etaDays = Math.max(1, Math.round(std));
+    } else if (typeof time.nominative === 'string') {
+      const digits = time.nominative.match(/\d+/u);
+      if (digits) etaDays = Math.max(1, parseInt(digits[0], 10));
+    }
+  }
+
+  return { priceRub, etaDays, insuranceRub: insuranceRub && insuranceRub > 0 ? insuranceRub : null };
 }
 
 export class DellinAdapter implements CarrierAdapter {
@@ -58,59 +159,92 @@ export class DellinAdapter implements CarrierAdapter {
     }
 
     const base = (process.env.DELLIN_API_BASE ?? 'https://api.dellin.ru').replace(/\/+$/, '');
-    const endpoint = process.env.DELLIN_CALC_PATH?.trim() || '/v2/calculator.json';
 
-    // Минимальный payload калькулятора. Структура поддерживается через env endpoint/path.
-    const body = {
+    const originLabel = input.draft.originLabel || input.snapshot.originLabel;
+    const destLabel = input.draft.destinationLabel || input.snapshot.destinationLabel;
+
+    const defaultDerivalKladr = process.env.DELLIN_DEFAULT_DERIVAL_KLADR?.trim();
+    const originCode =
+      (await this.resolveKladrCode(base, appKey, kladrSearchVariants(originLabel), requestId)) ??
+      defaultDerivalKladr ??
+      (await this.resolveKladrCode(base, appKey, ['Москва'], requestId));
+
+    const destCode = await this.resolveKladrCode(base, appKey, kladrSearchVariants(destLabel), requestId);
+
+    if (!originCode || !destCode) {
+      this.logger.warn(
+        `Dellin quote skipped: KLADR resolution failed; requestId=${requestId}; originResolved=${Boolean(
+          originCode,
+        )}; destResolved=${Boolean(destCode)}`,
+      );
+      return null;
+    }
+
+    const cargo = input.snapshot.cargo;
+    const weightKg = Math.max(cargo.weightGrams / 1000, 0.01);
+    const volM3 = Math.max(
+      ((cargo.lengthMm ?? 300) / 1000) * ((cargo.widthMm ?? 210) / 1000) * ((cargo.heightMm ?? 500) / 1000),
+      0.0001,
+    );
+    const statedValue = Math.max(cargo.declaredValueRub, 1);
+
+    const derivalDoor = process.env.DELLIN_DERIVAL_DOOR === '1' || process.env.DELLIN_DERIVAL_DOOR === 'true';
+    const arrivalDoor =
+      process.env.DELLIN_ARRIVAL_DOOR === '0' || process.env.DELLIN_ARRIVAL_DOOR === 'false' ? false : true;
+
+    const calcBody: Record<string, unknown> = {
       appkey: appKey,
-      delivery: {
-        derival: { address: { search: input.draft.originLabel || input.snapshot.originLabel || 'Москва' } },
-        arrival: {
-          address: { search: input.draft.destinationLabel || input.snapshot.destinationLabel || 'Санкт-Петербург' },
-        },
-      },
-      cargo: {
-        quantity: Math.max(input.snapshot.cargo.places, 1),
-        totalWeight: Math.max(input.snapshot.cargo.weightGrams / 1000, 0.1),
-        totalVolume:
-          Math.max(
-            (input.snapshot.cargo.lengthMm ?? 100) *
-              (input.snapshot.cargo.widthMm ?? 100) *
-              (input.snapshot.cargo.heightMm ?? 100),
-            1,
-          ) / 1_000_000_000,
-      },
-      auth: {
-        login: credentials.login,
-        password: credentials.password,
-      },
+      derivalPoint: originCode,
+      arrivalPoint: destCode,
+      derivalDoor,
+      arrivalDoor,
+      sizedVolume: Number(volM3.toFixed(4)),
+      sizedWeight: Number(weightKg.toFixed(3)),
+      statedValue,
     };
 
-    const res = await fetch(`${base}${endpoint}`, {
+    const lenM = Math.max((cargo.lengthMm ?? 0) / 1000, 0.01);
+    const widM = Math.max((cargo.widthMm ?? 0) / 1000, 0.01);
+    const hgtM = Math.max((cargo.heightMm ?? 0) / 1000, 0.01);
+    if (cargo.lengthMm && cargo.widthMm && cargo.heightMm) {
+      calcBody.length = Number(lenM.toFixed(3));
+      calcBody.width = Number(widM.toFixed(3));
+      calcBody.height = Number(hgtM.toFixed(3));
+    }
+
+    const calcUrl = dellinJsonUrl(base, DELLIN_PUBLIC_CALCULATOR_PATH);
+    const res = await fetch(calcUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-AppKey': appKey },
-      body: JSON.stringify(body),
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify(calcBody),
       cache: 'no-store',
     }).catch(() => null);
 
     if (!res?.ok) {
       this.logger.warn(
-        `Dellin calculator HTTP failed: status=${res?.status ?? 'n/a'}; url=${base}${endpoint}; requestId=${requestId}`,
+        `Dellin calculator HTTP failed: status=${res?.status ?? 'n/a'}; url=${calcUrl}; requestId=${requestId}`,
       );
       return null;
     }
-    const data = (await res.json().catch(() => null)) as DellinCalcResponse | null;
+
+    const data = (await res.json().catch(() => null)) as Record<string, unknown> | null;
     if (!data) {
       this.logger.warn(`Dellin calculator JSON parse failed; requestId=${requestId}`);
       return null;
     }
 
-    const priceRub = asNumber(data.data?.price ?? data.price);
-    const etaDays = asNumber(data.data?.term ?? data.term);
-    if (!priceRub || priceRub <= 0) {
-      this.logger.warn(`Dellin calculator returned no price; requestId=${requestId}`);
+    const parsed = parsePublicCalculator(data);
+    if (!parsed) {
+      const errSnippet = JSON.stringify(data).slice(0, 500);
+      this.logger.warn(`Dellin calculator returned no price; requestId=${requestId}; body=${errSnippet}`);
       return null;
     }
+
+    const { priceRub, etaDays, insuranceRub } = parsed;
+    const insNote = insuranceRub != null ? ` · страховка ~${insuranceRub} ₽` : '';
+    const serviceFlags = input.draft.serviceFlags.filter((flag) =>
+      this.descriptor.supportedFlags.includes(flag),
+    );
 
     return {
       id: `${requestId}:${this.descriptor.id}`,
@@ -119,11 +253,9 @@ export class DellinAdapter implements CarrierAdapter {
       carrierName: this.descriptor.name,
       mode: this.descriptor.modes[0],
       priceRub,
-      etaDays: Math.max(Math.round(etaDays ?? 2), 1),
-      serviceFlags: input.draft.serviceFlags.filter((flag) =>
-        this.descriptor.supportedFlags.includes(flag),
-      ),
-      notes: `${credentials.accountLabel ?? 'Договор клиента'} · тариф по API Деловых Линий`,
+      etaDays,
+      serviceFlags,
+      notes: `${credentials.accountLabel ?? 'Договор'} · КЛАДР ${originCode.slice(0, 13)}…→${destCode.slice(0, 13)}… · оценка ${statedValue} ₽${insNote}`,
       score: Math.round((100000 / Math.max(priceRub, 1)) * 100) / 100,
     };
   }
@@ -151,6 +283,37 @@ export class DellinAdapter implements CarrierAdapter {
         },
       ],
     };
+  }
+
+  private async resolveKladrCode(
+    base: string,
+    appKey: string,
+    variants: string[],
+    requestId: string,
+  ): Promise<string | null> {
+    const url = dellinJsonUrl(base, DELLIN_PUBLIC_KLADR_PATH);
+    for (const q of variants) {
+      if (!q) continue;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ appkey: appKey, q, limit: 8 }),
+        cache: 'no-store',
+      }).catch(() => null);
+      if (!res?.ok) {
+        this.logger.warn(`Dellin kladr HTTP failed: status=${res?.status ?? 'n/a'}; q="${q.slice(0, 80)}"`);
+        continue;
+      }
+      const data = await res.json().catch(() => null);
+      const code = parseKladrFirstCode(data);
+      if (code) {
+        return code;
+      }
+      this.logger.warn(
+        `Dellin kladr no code for q="${q.slice(0, 120)}"; requestId=${requestId}; snippet=${JSON.stringify(data).slice(0, 280)}`,
+      );
+    }
+    return null;
   }
 
   private async loadCredentials(

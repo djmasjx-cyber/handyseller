@@ -30,15 +30,61 @@ function extractTag(xml: string, tag: string): string | null {
   return match?.[1]?.trim() ?? null;
 }
 
+function stripPostalPrefix(value: string): string {
+  return value.replace(/^\s*\d{6}\s*,?\s*/u, '').trim();
+}
+
 function normalizeCityName(value: string): string {
-  return value
+  return stripPostalPrefix(value)
     .toLowerCase()
     .replace(/ё/g, 'е')
     .replace(/\([^)]*\)/g, ' ')
     .replace(/[^a-zа-я0-9]+/gi, ' ')
-    .replace(/\b(г|город|область|край|республика|рц|сц|склад|заказ|order)\b/gi, ' ')
+    .replace(/\b(г|город|область|край|республика|рц|сц|склад|заказ|order|manual)\b/gi, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+/** Несколько вариантов названия для сопоставления со справочником городов Major (полный адрес часто не совпадает с Name в справочнике). */
+function extractMajorCityCandidates(label: string | null | undefined): string[] {
+  if (!label) return [];
+  let s = label.replace(/\s+/g, ' ').trim();
+  if (!s) return [];
+
+  const out: string[] = [];
+  const push = (x: string) => {
+    const t = stripPostalPrefix(x).replace(/\s+/g, ' ').trim();
+    if (t.length >= 2 && !out.includes(t)) out.push(t);
+  };
+
+  if (/MANUAL/i.test(s)) {
+    const before = s.split(/MANUAL/i)[0]?.replace(/[/\s,-]+$/u, '').trim();
+    if (before) push(before);
+  }
+
+  if (s.includes('->')) {
+    for (const part of s.split('->')) push(part);
+  }
+
+  push(s);
+
+  for (const part of s.split(',').map((p) => p.trim())) {
+    if (part) push(part);
+  }
+
+  const cityInG = /(?:г\.?|город)\s*([А-Яа-яЁё0-9\-. ]{1,80})/giu;
+  let m: RegExpExecArray | null;
+  while ((m = cityInG.exec(s)) != null) {
+    push(m[1].trim());
+  }
+
+  const settlement =
+    /(?:деревня|д\.?|посёлок|пгт\.?|село|с\.)\s*([А-Яа-яЁё0-9\-. ]{1,80})/giu;
+  while ((m = settlement.exec(s)) != null) {
+    push(m[1].trim());
+  }
+
+  return out;
 }
 
 export class MajorExpressAdapter implements CarrierAdapter {
@@ -77,7 +123,11 @@ export class MajorExpressAdapter implements CarrierAdapter {
       this.logger.warn(
         `Major quote skipped: city resolution failed; requestId=${requestId}; origin="${String(
           input.draft.originLabel || input.snapshot.originLabel,
-        )}"; destination="${String(input.draft.destinationLabel || input.snapshot.destinationLabel)}"`,
+        )}"; destination="${String(input.draft.destinationLabel || input.snapshot.destinationLabel)}"; triedOrigin=${JSON.stringify(
+          extractMajorCityCandidates(input.draft.originLabel || input.snapshot.originLabel),
+        )}; triedDest=${JSON.stringify(
+          extractMajorCityCandidates(input.draft.destinationLabel || input.snapshot.destinationLabel),
+        )}`,
       );
       return null;
     }
@@ -103,7 +153,7 @@ export class MajorExpressAdapter implements CarrierAdapter {
       priceRub: result.tariff + result.insurance,
       etaDays: result.deliveryTime,
       serviceFlags,
-      notes: `${credentials.accountLabel ?? 'Клиентский договор'} · ${shipperCity.name} -> ${consigneeCity.name}`,
+      notes: `${credentials.accountLabel ?? 'Клиентский договор'} · ${shipperCity.name} -> ${consigneeCity.name} · тариф ${result.tariff} ₽ + страх. ${result.insurance} ₽`,
       score: Math.round((100000 / Math.max(result.tariff + result.insurance, 1)) * 100) / 100,
     };
   }
@@ -201,20 +251,26 @@ export class MajorExpressAdapter implements CarrierAdapter {
   }
 
   private async resolveCityCode(label: string | null | undefined): Promise<MajorCity | null> {
-    if (!label) {
-      return null;
-    }
-    const normalized = normalizeCityName(label);
-    if (!normalized) {
+    const candidates = extractMajorCityCandidates(label);
+    if (candidates.length === 0) {
       return null;
     }
     const cities = await this.getCities();
-    return (
-      cities.find((item) => item.normalizedName === normalized) ??
-      cities.find((item) => normalized.includes(item.normalizedName)) ??
-      cities.find((item) => item.normalizedName.includes(normalized)) ??
-      null
-    );
+    for (const candidate of candidates) {
+      const normalized = normalizeCityName(candidate);
+      if (!normalized) {
+        continue;
+      }
+      const hit =
+        cities.find((item) => item.normalizedName === normalized) ??
+        cities.find((item) => normalized.includes(item.normalizedName) && item.normalizedName.length >= 4) ??
+        cities.find((item) => item.normalizedName.includes(normalized) && normalized.length >= 4) ??
+        null;
+      if (hit) {
+        return hit;
+      }
+    }
+    return null;
   }
 
   private async callCalculator(
