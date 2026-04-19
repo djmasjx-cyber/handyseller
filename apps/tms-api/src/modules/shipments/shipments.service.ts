@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { rankQuotes } from '@handyseller/tms-domain';
 import type {
   CarrierDescriptor,
@@ -22,6 +22,7 @@ import type { CarrierAdapter } from './adapters/base-carrier.adapter';
 
 @Injectable()
 export class ShipmentsService {
+  private readonly logger = new Logger(ShipmentsService.name);
   private readonly adapters: CarrierAdapter[] = [
     new MajorExpressAdapter(),
     new DellinAdapter(),
@@ -131,22 +132,33 @@ export class ShipmentsService {
     authToken?: string | null,
   ): Promise<CarrierQuote[]> {
     const request = this.getRequestOrThrow(userId, requestId);
-    const quotes = rankQuotes(
-      (
-        await Promise.all(
-          this.adapters.map((adapter) =>
-            adapter.quote(
-              {
-                snapshot: request.snapshot,
-                draft: request.draft,
-              },
-              requestId,
-              { userId, authToken },
-            ),
-          ),
-        )
-      ).filter((item): item is CarrierQuote => Boolean(item)),
+    const quoteResults = await Promise.allSettled(
+      this.adapters.map((adapter) =>
+        adapter.quote(
+          {
+            snapshot: request.snapshot,
+            draft: request.draft,
+          },
+          requestId,
+          { userId, authToken },
+        ),
+      ),
     );
+
+    const successfulQuotes: CarrierQuote[] = [];
+    for (let i = 0; i < quoteResults.length; i += 1) {
+      const result = quoteResults[i];
+      if (result.status === 'fulfilled') {
+        if (result.value) successfulQuotes.push(result.value);
+        continue;
+      }
+      const adapter = this.adapters[i];
+      this.logger.warn(
+        `Quote adapter failed: ${adapter?.descriptor?.id ?? 'unknown'}; requestId=${requestId}; reason=${String(result.reason)}`,
+      );
+    }
+
+    const quotes = rankQuotes(successfulQuotes);
 
     request.status = 'QUOTED';
     request.updatedAt = new Date().toISOString();
