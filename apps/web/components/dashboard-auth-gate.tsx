@@ -331,7 +331,7 @@ export function DashboardAuthGate({ children }: { children: ReactNode }) {
                     {[
                       ["/dashboard/tms", "Дашборд"],
                       ["/dashboard/tms/orders", "Заказы клиентов"],
-                      ["/dashboard/tms/requests", "Заявки"],
+                      ["/dashboard/tms/requests", "Сравнение тарифов"],
                       ["/dashboard/tms/shipments", "Отгрузки"],
                       ["/dashboard/tms/tracking", "Трекинг"],
                       ["/dashboard/tms/carriers", "Перевозчики"],
@@ -551,8 +551,8 @@ export function DashboardAuthGate({ children }: { children: ReactNode }) {
                     <>
                       {[
                         ["/dashboard/tms", "Дашборд"],
-                      ["/dashboard/tms/orders", "Заказы клиентов"],
-                        ["/dashboard/tms/requests", "Заявки"],
+                        ["/dashboard/tms/orders", "Заказы клиентов"],
+                        ["/dashboard/tms/requests", "Сравнение тарифов"],
                         ["/dashboard/tms/shipments", "Отгрузки"],
                         ["/dashboard/tms/tracking", "Трекинг"],
                         ["/dashboard/tms/carriers", "Перевозчики"],
