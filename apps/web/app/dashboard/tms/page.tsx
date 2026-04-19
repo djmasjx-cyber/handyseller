@@ -1,12 +1,13 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { useRouter } from "next/navigation"
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Badge, Input, Label } from "@handyseller/ui"
 import { Loader2, Truck, Network, Route, PackageCheck, CircleDollarSign } from "lucide-react"
 import { authFetch } from "@/lib/auth-fetch"
 import { AUTH_STORAGE_KEYS } from "@/lib/auth-storage"
+import { looksLikeOrderReferenceDestination } from "@/lib/tms-create-request-from-order"
 
 type ServiceFlag = "EXPRESS" | "HAZMAT" | "CONSOLIDATED" | "AIR" | "OVERSIZED"
 
@@ -25,12 +26,6 @@ type CandidateOrder = {
   requestId?: string
   shipmentId?: string
   items: Array<{ title: string; quantity: number }>
-}
-
-/** Служебная подпись вместо адреса (раньше подставлялась в «Точка Б» по ошибке). */
-function looksLikeOrderReferenceDestination(value: string): boolean {
-  const t = value.trim()
-  return t.length > 0 && /\/\s*заказ\s+/i.test(t)
 }
 
 type Overview = {
@@ -138,14 +133,19 @@ export default function TmsDashboardPage() {
   const [destinationLabel, setDestinationLabel] = useState("")
   const [flags, setFlags] = useState<ServiceFlag[]>([])
   const [error, setError] = useState<string | null>(null)
-  const autoQuoteTriggeredRef = useRef(false)
 
   const selectedOrder = useMemo(
     () => candidateOrders.find((item) => item.id === selectedOrderId) ?? null,
     [candidateOrders, selectedOrderId],
   )
   const orderIdFromQuery = searchParams.get("orderId")
-  const autoQuote = searchParams.get("autoQuote") === "1"
+
+  /** Старые ссылки ?orderId=&autoQuote=1 — сразу на матрицу тарифов, без шага через этот дашборд. */
+  useEffect(() => {
+    const oid = searchParams.get("orderId")
+    if (searchParams.get("autoQuote") !== "1" || !oid) return
+    router.replace(`/dashboard/tms/requests?${searchParams.toString()}`)
+  }, [router, searchParams])
 
   const loadData = useCallback(async () => {
     if (!token) return
@@ -211,7 +211,7 @@ export default function TmsDashboardPage() {
     setFlags((prev) => (prev.includes(flag) ? prev.filter((item) => item !== flag) : [...prev, flag]))
   }
 
-  const createShipmentRequest = async (options?: { redirectToRequest?: boolean }) => {
+  const createShipmentRequest = async () => {
     if (!token || !selectedOrder) return
     setSubmitting(true)
     setError(null)
@@ -256,13 +256,9 @@ export default function TmsDashboardPage() {
         const data = await res.json().catch(() => ({}))
         throw new Error(data?.message ?? "Не удалось создать заявку")
       }
-      const created = await res.json().catch(() => ({} as { request?: { id?: string } }))
+      await res.json().catch(() => null)
       setSelectedOrderId(null)
       setFlags([])
-      if (options?.redirectToRequest && created?.request?.id) {
-        router.push(`/dashboard/tms/requests?requestId=${encodeURIComponent(created.request.id)}`)
-        return
-      }
       await loadData()
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось получить варианты")
@@ -274,21 +270,6 @@ export default function TmsDashboardPage() {
   const handleCreateShipmentRequestClick = () => {
     void createShipmentRequest()
   }
-
-  useEffect(() => {
-    if (!autoQuote || autoQuoteTriggeredRef.current) return
-    if (!selectedOrder || submitting) return
-
-    // Если расчет уже есть — сразу открываем его.
-    if (selectedOrder.requestId) {
-      autoQuoteTriggeredRef.current = true
-      router.push(`/dashboard/tms/requests?requestId=${encodeURIComponent(selectedOrder.requestId)}`)
-      return
-    }
-
-    autoQuoteTriggeredRef.current = true
-    void createShipmentRequest({ redirectToRequest: true })
-  }, [autoQuote, selectedOrder, submitting, router])
 
   const selectQuote = async (requestId: string, quoteId: string) => {
     if (!token) return

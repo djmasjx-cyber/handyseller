@@ -8,6 +8,7 @@ import { Loader2, PackagePlus } from "lucide-react"
 import { authFetch } from "@/lib/auth-fetch"
 import { AUTH_STORAGE_KEYS } from "@/lib/auth-storage"
 import { TmsEstimateOrderModal } from "@/components/tms/tms-estimate-order-modal"
+import { isTmsMpMarketplace } from "@/lib/tms-mp-marketplaces"
 
 type ClientOrder = {
   id: string
@@ -61,7 +62,8 @@ export default function TmsOrdersPage() {
     try {
       const r = await authFetch("/api/tms/client-orders", { headers: { Authorization: `Bearer ${token}` } })
       const data = r.ok ? await r.json() : []
-      setItems(Array.isArray(data) ? data : [])
+      const all = Array.isArray(data) ? (data as ClientOrder[]) : []
+      setItems(all.filter((o) => !isTmsMpMarketplace(o.marketplace)))
     } finally {
       setLoading(false)
     }
@@ -86,7 +88,7 @@ export default function TmsOrdersPage() {
         onClose={() => setEstimateOpen(false)}
         onCreated={() => {
           void load()
-          router.push("/dashboard/tms")
+          router.push("/dashboard/tms/requests")
         }}
       />
 
@@ -94,10 +96,17 @@ export default function TmsOrdersPage() {
         <Card className="border-primary/15 shadow-sm">
           <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div className="space-y-1">
-              <CardTitle className="text-xl">Заказы клиентов</CardTitle>
+              <CardTitle className="text-xl">Заказы вне маркетплейсов</CardTitle>
               <CardDescription>
-                Заказы из HandySeller и ручные заявки для расчёта доставки. Для быстрой оценки тарифов Major / Деловых Линий
-                создайте заказ с маршрутом и габаритами — затем на главной TMS нажмите «Получить варианты».
+                Ручные заявки, Авито и прочие каналы (без WB, Ozon, Яндекс — они на странице{" "}
+                <Link href="/dashboard/tms/marketplace-orders" className="text-primary underline-offset-2 hover:underline">
+                  Заказы МП
+                </Link>
+                ). Кнопка «Получить варианты» сразу открывает{" "}
+                <Link href="/dashboard/tms/requests" className="text-primary underline-offset-2 hover:underline">
+                  сравнение тарифов
+                </Link>{" "}
+                без лишних переходов; тот же URL можно выставлять по событию или из ИИ.
               </CardDescription>
             </div>
             <Button type="button" className="shrink-0 gap-2" onClick={() => setEstimateOpen(true)}>
@@ -109,7 +118,11 @@ export default function TmsOrdersPage() {
             {items.length === 0 ? (
               <div className="rounded-lg border border-dashed bg-muted/30 p-8 text-center">
                 <p className="text-sm text-muted-foreground mb-4">
-                  Пока нет заказов. Создайте ручной заказ для просчёта перевозки или дождитесь заказов из маркетплейсов.
+                  Пока нет таких заказов. Создайте ручной заказ для просчёта или откройте{" "}
+                  <Link href="/dashboard/tms/marketplace-orders" className="text-primary underline-offset-2 hover:underline">
+                    заказы маркетплейсов
+                  </Link>
+                  .
                 </p>
                 <Button type="button" onClick={() => setEstimateOpen(true)} className="gap-2">
                   <PackagePlus className="h-4 w-4" />
@@ -162,7 +175,9 @@ export default function TmsOrdersPage() {
                         </Button>
                       ) : (
                         <Button asChild size="sm">
-                          <Link href={`/dashboard/tms?orderId=${encodeURIComponent(item.id)}&autoQuote=1`}>Получить варианты</Link>
+                          <Link href={`/dashboard/tms/requests?orderId=${encodeURIComponent(item.id)}&autoQuote=1`}>
+                            Получить варианты
+                          </Link>
                         </Button>
                       )}
                       {item.shipmentId ? (

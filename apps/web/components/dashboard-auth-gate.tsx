@@ -306,7 +306,7 @@ export function DashboardAuthGate({ children }: { children: ReactNode }) {
                   className={`w-full flex items-center px-3 py-3 rounded-md min-h-[44px] touch-manipulation ${isOnTms ? "text-primary bg-primary/10 font-medium" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
                 >
                   <Link
-                    href="/dashboard/tms"
+                    href="/dashboard/tms/requests"
                     onClick={() => {
                       setTmsExpanded(true)
                       setMenuOpen(false)
@@ -329,9 +329,10 @@ export function DashboardAuthGate({ children }: { children: ReactNode }) {
                 {tmsExpanded && (
                   <>
                     {[
-                      ["/dashboard/tms", "Дашборд"],
-                      ["/dashboard/tms/orders", "Заказы клиентов"],
                       ["/dashboard/tms/requests", "Сравнение тарифов"],
+                      ["/dashboard/tms/marketplace-orders", "Заказы МП"],
+                      ["/dashboard/tms/orders", "Заказы вне МП"],
+                      ["/dashboard/tms", "Дашборд"],
                       ["/dashboard/tms/shipments", "Отгрузки"],
                       ["/dashboard/tms/tracking", "Трекинг"],
                       ["/dashboard/tms/carriers", "Перевозчики"],
@@ -530,7 +531,7 @@ export function DashboardAuthGate({ children }: { children: ReactNode }) {
                     className={`w-full flex items-center px-3 py-2 rounded-md ${isOnTms ? "text-primary bg-primary/10 font-medium" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
                   >
                     <Link
-                      href="/dashboard/tms"
+                      href="/dashboard/tms/requests"
                       onClick={() => setTmsExpanded(true)}
                       className="flex items-center space-x-3 flex-1 text-left"
                     >
@@ -550,9 +551,10 @@ export function DashboardAuthGate({ children }: { children: ReactNode }) {
                   {tmsExpanded && (
                     <>
                       {[
-                        ["/dashboard/tms", "Дашборд"],
-                        ["/dashboard/tms/orders", "Заказы клиентов"],
                         ["/dashboard/tms/requests", "Сравнение тарифов"],
+                        ["/dashboard/tms/marketplace-orders", "Заказы МП"],
+                        ["/dashboard/tms/orders", "Заказы вне МП"],
+                        ["/dashboard/tms", "Дашборд"],
                         ["/dashboard/tms/shipments", "Отгрузки"],
                         ["/dashboard/tms/tracking", "Трекинг"],
                         ["/dashboard/tms/carriers", "Перевозчики"],

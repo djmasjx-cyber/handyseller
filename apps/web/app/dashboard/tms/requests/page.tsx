@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import {
   Badge,
@@ -16,6 +16,7 @@ import {
 import { Loader2 } from "lucide-react"
 import { authFetch } from "@/lib/auth-fetch"
 import { AUTH_STORAGE_KEYS } from "@/lib/auth-storage"
+import { createTmsShipmentRequestFromOrder } from "@/lib/tms-create-request-from-order"
 
 type LogisticsScenario = "MARKETPLACE_RC" | "CARRIER_DELIVERY"
 
@@ -133,6 +134,9 @@ export default function TmsRequestsPage() {
   const [search, setSearch] = useState("")
   const [sortMode, setSortMode] = useState<SortMode>("newest")
   const requestIdFromQuery = searchParams.get("requestId")
+  const orderIdFromQuery = searchParams.get("orderId")
+  const autoQuote = searchParams.get("autoQuote") === "1"
+  const autoQuoteTriggeredRef = useRef(false)
   const workQueue = workQueueFromSearchParam(searchParams.get("queue"))
 
   const setWorkQueue = (key: WorkQueueKey) => {
@@ -188,6 +192,58 @@ export default function TmsRequestsPage() {
     const id = window.setInterval(tick, 30_000)
     return () => window.clearInterval(id)
   }, [token, loadAll])
+
+  /**
+   * Авто-создание заявки и расчёт сразу на этой странице (без перехода на дашборд TMS).
+   * Ссылка: ?orderId=…&autoQuote=1 — заложено под события/ИИ: тот же URL может выставляться извне.
+   */
+  useEffect(() => {
+    if (!token || !orderIdFromQuery || !autoQuote) return
+    if (autoQuoteTriggeredRef.current) return
+    autoQuoteTriggeredRef.current = true
+
+    const run = async () => {
+      type Row = {
+        id: string
+        externalId: string
+        marketplace: string
+        warehouseName?: string | null
+        deliveryAddressLabel?: string | null
+        requestId?: string
+      }
+      const headers = { Authorization: `Bearer ${token}` }
+      const r = await authFetch("/api/tms/client-orders", { headers })
+      const data = r.ok ? await r.json() : []
+      const orders = Array.isArray(data) ? (data as Row[]) : []
+      const order = orders.find((o) => o.id === orderIdFromQuery)
+      if (!order) {
+        setError("Заказ не найден в списке клиентских заказов.")
+        return
+      }
+
+      const nextQs = new URLSearchParams(searchParams.toString())
+      nextQs.delete("orderId")
+      nextQs.delete("autoQuote")
+
+      if (order.requestId) {
+        nextQs.set("requestId", order.requestId)
+        router.replace(`${pathname}?${nextQs.toString()}`, { scroll: false })
+        await loadAll({ silent: true })
+        return
+      }
+
+      try {
+        const { requestId } = await createTmsShipmentRequestFromOrder(token, order)
+        nextQs.set("requestId", requestId)
+        router.replace(`${pathname}?${nextQs.toString()}`, { scroll: false })
+        await loadAll({ silent: true })
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Не удалось создать заявку")
+      }
+    }
+
+    void run()
+  }, [token, orderIdFromQuery, autoQuote, pathname, router, searchParams, loadAll])
 
   const carrierColumns = useMemo(() => collectCarrierColumns(quotesByRequest), [quotesByRequest])
 
