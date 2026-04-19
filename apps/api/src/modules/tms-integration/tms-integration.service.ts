@@ -1,6 +1,10 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { OrderStatus } from '@prisma/client';
+import { randomBytes } from 'crypto';
 import { PrismaService } from '../../common/database/prisma.service';
 import { CryptoService } from '../../common/crypto/crypto.service';
+import { SalesSourcesService } from '../sales-sources/sales-sources.service';
+import { CreateTmsEstimateOrderDto } from './dto/create-tms-estimate-order.dto';
 import type {
   CarrierCode,
   CarrierConnectionRecord,
@@ -17,6 +21,7 @@ export class TmsIntegrationService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly crypto: CryptoService,
+    private readonly salesSources: SalesSourcesService,
   ) {}
 
   async listOrderCandidates(userId: string): Promise<ClientOrderRecord[]> {
@@ -33,6 +38,7 @@ export class TmsIntegrationService {
         status: true,
         totalAmount: true,
         warehouseName: true,
+        deliveryAddressLabel: true,
         createdAt: true,
         items: {
           include: {
@@ -54,6 +60,7 @@ export class TmsIntegrationService {
       status: order.status,
       totalAmount: Number(order.totalAmount),
       warehouseName: order.warehouseName,
+      deliveryAddressLabel: order.deliveryAddressLabel,
       createdAt: order.createdAt.toISOString(),
       logisticsScenario: this.resolveLogisticsScenario(order.marketplace),
       items: order.items.map((item) => ({
@@ -105,6 +112,18 @@ export class TmsIntegrationService {
       0,
     );
 
+    const cargoOv = this.parseTmsCargoOverride(order.tmsCargoOverride);
+    const weightGrams = cargoOv?.weightGrams ?? totalWeightGrams;
+    const widthMm = cargoOv?.widthMm ?? (maxWidthMm || null);
+    const lengthMm = cargoOv?.lengthMm ?? (maxLengthMm || null);
+    const heightMm = cargoOv?.heightMm ?? (totalHeightMm || null);
+    const places = cargoOv?.places ?? Math.max(order.items.length, 1);
+    const declaredValueRub = cargoOv?.declaredValueRub ?? Number(order.totalAmount);
+
+    const destinationLabel =
+      order.deliveryAddressLabel?.trim() ||
+      (order.marketplace === 'MANUAL' ? 'Ручной канал' : `${order.marketplace} order`);
+
     return {
       sourceSystem: 'HANDYSELLER_CORE',
       userId,
@@ -114,14 +133,14 @@ export class TmsIntegrationService {
       logisticsScenario: this.resolveLogisticsScenario(order.marketplace),
       createdAt: order.createdAt.toISOString(),
       originLabel: order.warehouseName ?? null,
-      destinationLabel: order.marketplace === 'MANUAL' ? 'Ручной канал' : `${order.marketplace} order`,
+      destinationLabel,
       cargo: {
-        weightGrams: totalWeightGrams,
-        widthMm: maxWidthMm || null,
-        lengthMm: maxLengthMm || null,
-        heightMm: totalHeightMm || null,
-        places: Math.max(order.items.length, 1),
-        declaredValueRub: Number(order.totalAmount),
+        weightGrams,
+        widthMm,
+        lengthMm,
+        heightMm,
+        places,
+        declaredValueRub,
       },
       itemSummary: order.items.map((item) => ({
         productId: item.product?.id ?? null,
@@ -253,6 +272,123 @@ export class TmsIntegrationService {
       login: this.crypto.decrypt(connection.login),
       password: this.crypto.decrypt(connection.password),
     };
+  }
+
+  async createTmsEstimateOrder(userId: string, dto: CreateTmsEstimateOrderDto) {
+    const origin = dto.originAddress.trim();
+    const dest = dto.destinationAddress.trim();
+    const ext =
+      dto.externalId?.trim() ||
+      `TMS-${randomBytes(4).toString('hex').toUpperCase()}`;
+
+    const existing = await this.prisma.order.findUnique({
+      where: {
+        userId_marketplace_externalId: {
+          userId,
+          marketplace: 'MANUAL',
+          externalId: ext,
+        },
+      },
+    });
+    if (existing) {
+      throw new BadRequestException(`Заказ с номером «${ext}» уже существует`);
+    }
+
+    const src = await this.salesSources.upsert(
+      userId,
+      (dto.salesSource?.trim() || 'Оценка перевозки').slice(0, 120),
+    );
+
+    const weightGrams = Math.round(dto.weightKg * 1000);
+    const lengthMm = Math.round(dto.lengthCm * 10);
+    const widthMm = Math.round(dto.widthCm * 10);
+    const heightMm = Math.round(dto.heightCm * 10);
+    const places = dto.places ?? 1;
+    const declaredValueRub = Math.round(Number(dto.declaredValueRub));
+
+    const tmsCargoOverride = {
+      weightGrams,
+      lengthMm,
+      widthMm,
+      heightMm,
+      places,
+      declaredValueRub,
+    };
+
+    const productId = await this.getOrCreateTmsEstimateProduct(userId);
+    const price = Math.max(declaredValueRub, 0);
+
+    const order = await this.prisma.$transaction(async (tx) => {
+      const o = await tx.order.create({
+        data: {
+          userId,
+          marketplace: 'MANUAL',
+          externalId: ext,
+          status: OrderStatus.NEW,
+          totalAmount: price,
+          warehouseName: origin,
+          deliveryAddressLabel: dest,
+          salesSource: src.name,
+          tmsCargoOverride,
+        },
+      });
+      await tx.orderItem.create({
+        data: {
+          orderId: o.id,
+          productId,
+          quantity: 1,
+          price,
+        },
+      });
+      return o;
+    });
+
+    return this.prisma.order.findUnique({
+      where: { id: order.id },
+      include: { items: { include: { product: true } } },
+    });
+  }
+
+  private parseTmsCargoOverride(raw: unknown): {
+    weightGrams?: number;
+    lengthMm?: number;
+    widthMm?: number;
+    heightMm?: number;
+    places?: number;
+    declaredValueRub?: number;
+  } | null {
+    if (raw == null || typeof raw !== 'object') return null;
+    const o = raw as Record<string, unknown>;
+    const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+    return {
+      weightGrams: num(o.weightGrams),
+      lengthMm: num(o.lengthMm),
+      widthMm: num(o.widthMm),
+      heightMm: num(o.heightMm),
+      places: num(o.places),
+      declaredValueRub: num(o.declaredValueRub),
+    };
+  }
+
+  private async getOrCreateTmsEstimateProduct(userId: string): Promise<string> {
+    const article = '__TMS_ESTIMATE__';
+    const found = await this.prisma.product.findFirst({
+      where: { userId, article },
+    });
+    if (found) return found.id;
+    const p = await this.prisma.product.create({
+      data: {
+        userId,
+        title: 'TMS · груз для оценки',
+        article,
+        cost: 0,
+        weight: 1000,
+        length: 100,
+        width: 100,
+        height: 100,
+      },
+    });
+    return p.id;
   }
 
   private resolveLogisticsScenario(marketplace: string): OrderLogisticsScenario {

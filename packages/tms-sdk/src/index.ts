@@ -67,6 +67,8 @@ export interface ClientOrderRecord {
   status: string;
   totalAmount: number;
   warehouseName?: string | null;
+  /** Текст адреса доставки (ручные/TMS заказы). */
+  deliveryAddressLabel?: string | null;
   createdAt: string;
   logisticsScenario: OrderLogisticsScenario;
   items: Array<{ title: string; quantity: number }>;

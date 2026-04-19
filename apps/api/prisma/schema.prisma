@@ -500,6 +500,10 @@ model Order {
 
   /// Источник продажи для ручных заказов (MANUAL): "Авито", "Инстаграм" и т.д.
   salesSource String?  @map("sales_source")
+  /// Адрес доставки (текст), в т.ч. для TMS ручной оценки.
+  deliveryAddressLabel String? @map("delivery_address_label") @db.Text
+  /// Параметры груза для TMS (ручная оценка): JSON { weightGrams, lengthMm, widthMm, heightMm, places, declaredValueRub }.
+  tmsCargoOverride     Json?   @map("tms_cargo_override")
   /// FBO: товар со склада маркетплейса (WB: DBW, Ozon: FBO) — не списывать остаток «Мой склад»
   isFbo       Boolean? @map("is_fbo")
 

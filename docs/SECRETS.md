@@ -51,6 +51,7 @@
 - `ENCRYPTION_KEY` — ключ AES для PII (минимум 32 символа)
 - `ADMIN_EMAIL`, `ADMIN_PASSWORD` — для seed
 - опционально: `TMS_M2M_TOKEN_EXPIRES_IN` — срок жизни M2M access token для внешних интеграций TMS (например `1h`)
+- опционально (контейнер **web**): `DADATA_TOKEN` — подсказки адресов на странице TMS «Заказы клиентов» (API DaData, ключ не уходит в браузер)
 
 ### Деплой (`.env.secrets`)
 

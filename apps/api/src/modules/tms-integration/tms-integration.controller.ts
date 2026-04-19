@@ -15,6 +15,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { TmsIntegrationService } from './tms-integration.service';
 import type { CarrierCode, CarrierServiceType } from '@handyseller/tms-sdk';
 import { UpsertCarrierConnectionDto } from './dto/upsert-carrier-connection.dto';
+import { CreateTmsEstimateOrderDto } from './dto/create-tms-estimate-order.dto';
 import { RejectTmsM2mJwtGuard } from './guards/reject-tms-m2m-jwt.guard';
 
 @Controller('tms')
@@ -30,6 +31,15 @@ export class TmsIntegrationController {
   @Get('orders/:id/snapshot')
   snapshot(@CurrentUser('userId') userId: string, @Param('id') orderId: string) {
     return this.tmsIntegrationService.buildOrderSnapshot(userId, orderId);
+  }
+
+  /** Ручной заказ MANUAL для оценки доставки (груз + адреса). */
+  @Post('orders/tms-estimate')
+  createTmsEstimate(
+    @CurrentUser('userId') userId: string,
+    @Body() dto: CreateTmsEstimateOrderDto,
+  ) {
+    return this.tmsIntegrationService.createTmsEstimateOrder(userId, dto);
   }
 
   @Get('carrier-connections')
