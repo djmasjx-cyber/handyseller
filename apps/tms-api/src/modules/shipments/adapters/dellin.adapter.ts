@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import type {
   CarrierDescriptor,
   CarrierQuote,
@@ -27,6 +28,7 @@ function asNumber(value: unknown): number | null {
 }
 
 export class DellinAdapter implements CarrierAdapter {
+  private readonly logger = new Logger(DellinAdapter.name);
   readonly descriptor: CarrierDescriptor = {
     id: 'dellin',
     code: 'DELLIN',
@@ -43,11 +45,17 @@ export class DellinAdapter implements CarrierAdapter {
     requestId: string,
     context: CarrierQuoteContext,
   ): Promise<CarrierQuote | null> {
-    const credentials = await this.loadCredentials(context);
-    if (!credentials) return null;
+    const credentials = await this.loadCredentials(context, requestId);
+    if (!credentials) {
+      this.logger.warn(`Dellin quote skipped: missing credentials context; requestId=${requestId}`);
+      return null;
+    }
 
     const appKey = (credentials.appKey ?? '').trim() || process.env.DELLIN_APP_KEY?.trim();
-    if (!appKey) return null;
+    if (!appKey) {
+      this.logger.warn(`Dellin quote skipped: missing appKey; requestId=${requestId}`);
+      return null;
+    }
 
     const base = (process.env.DELLIN_API_BASE ?? 'https://api.dellin.ru').replace(/\/+$/, '');
     const endpoint = process.env.DELLIN_CALC_PATH?.trim() || '/v2/calculator.json';
@@ -85,13 +93,24 @@ export class DellinAdapter implements CarrierAdapter {
       cache: 'no-store',
     }).catch(() => null);
 
-    if (!res?.ok) return null;
+    if (!res?.ok) {
+      this.logger.warn(
+        `Dellin calculator HTTP failed: status=${res?.status ?? 'n/a'}; url=${base}${endpoint}; requestId=${requestId}`,
+      );
+      return null;
+    }
     const data = (await res.json().catch(() => null)) as DellinCalcResponse | null;
-    if (!data) return null;
+    if (!data) {
+      this.logger.warn(`Dellin calculator JSON parse failed; requestId=${requestId}`);
+      return null;
+    }
 
     const priceRub = asNumber(data.data?.price ?? data.price);
     const etaDays = asNumber(data.data?.term ?? data.term);
-    if (!priceRub || priceRub <= 0) return null;
+    if (!priceRub || priceRub <= 0) {
+      this.logger.warn(`Dellin calculator returned no price; requestId=${requestId}`);
+      return null;
+    }
 
     return {
       id: `${requestId}:${this.descriptor.id}`,
@@ -136,6 +155,7 @@ export class DellinAdapter implements CarrierAdapter {
 
   private async loadCredentials(
     context: CarrierQuoteContext,
+    requestId: string,
   ): Promise<InternalCarrierCredentials | null> {
     if (!context.authToken) return null;
 
@@ -149,8 +169,13 @@ export class DellinAdapter implements CarrierAdapter {
         'x-tms-internal-key': internalKey,
       },
       cache: 'no-store',
-    });
-    if (!res.ok) return null;
+    }).catch(() => null);
+    if (!res?.ok) {
+      this.logger.warn(
+        `Dellin credentials fetch failed: status=${res?.status ?? 'n/a'}; coreBase=${coreBase}; requestId=${requestId}`,
+      );
+      return null;
+    }
     return (await res.json()) as InternalCarrierCredentials;
   }
 }

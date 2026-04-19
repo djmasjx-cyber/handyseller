@@ -23,11 +23,7 @@ import type { CarrierAdapter } from './adapters/base-carrier.adapter';
 @Injectable()
 export class ShipmentsService {
   private readonly logger = new Logger(ShipmentsService.name);
-  private readonly adapters: CarrierAdapter[] = [
-    new MajorExpressAdapter(),
-    new DellinAdapter(),
-    ...buildMockCarrierAdapters(),
-  ];
+  private readonly adapters: CarrierAdapter[] = ShipmentsService.buildCarrierAdapters();
   private readonly requests = new Map<string, ShipmentRequestRecord>();
   private readonly quotes = new Map<string, CarrierQuote[]>();
   private readonly shipments = new Map<string, ShipmentRecord>();
@@ -52,6 +48,16 @@ export class ShipmentsService {
 
   listCarriers(): CarrierDescriptor[] {
     return this.adapters.map((adapter) => adapter.descriptor);
+  }
+
+  private static buildCarrierAdapters(): CarrierAdapter[] {
+    const real: CarrierAdapter[] = [new MajorExpressAdapter(), new DellinAdapter()];
+    const includeMocks =
+      process.env.TMS_INCLUDE_MOCK_CARRIERS === '1' ||
+      process.env.TMS_INCLUDE_MOCK_CARRIERS === 'true' ||
+      (process.env.NODE_ENV !== 'production' && process.env.TMS_INCLUDE_MOCK_CARRIERS !== '0');
+
+    return includeMocks ? [...real, ...buildMockCarrierAdapters()] : real;
   }
 
   listRequests(userId: string): ShipmentRequestRecord[] {

@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import type {
   CarrierDescriptor,
   CarrierQuote,
@@ -41,6 +42,7 @@ function normalizeCityName(value: string): string {
 }
 
 export class MajorExpressAdapter implements CarrierAdapter {
+  private readonly logger = new Logger(MajorExpressAdapter.name);
   readonly descriptor: CarrierDescriptor = {
     id: 'major-express',
     code: 'MAJOR_EXPRESS',
@@ -62,6 +64,7 @@ export class MajorExpressAdapter implements CarrierAdapter {
   ): Promise<CarrierQuote | null> {
     const credentials = await this.loadCredentials(context);
     if (!credentials) {
+      this.logger.warn(`Major quote skipped: missing credentials context; requestId=${requestId}`);
       return null;
     }
 
@@ -71,11 +74,19 @@ export class MajorExpressAdapter implements CarrierAdapter {
     ]);
 
     if (!shipperCity || !consigneeCity) {
+      this.logger.warn(
+        `Major quote skipped: city resolution failed; requestId=${requestId}; origin="${String(
+          input.draft.originLabel || input.snapshot.originLabel,
+        )}"; destination="${String(input.draft.destinationLabel || input.snapshot.destinationLabel)}"`,
+      );
       return null;
     }
 
     const result = await this.callCalculator(input, credentials, shipperCity.code, consigneeCity.code);
     if (!result) {
+      this.logger.warn(
+        `Major quote skipped: calculator returned empty; requestId=${requestId}; shipperCity=${shipperCity.code}; consigneeCity=${consigneeCity.code}`,
+      );
       return null;
     }
 
@@ -144,9 +155,12 @@ export class MajorExpressAdapter implements CarrierAdapter {
         },
         cache: 'no-store',
       },
-    );
+    ).catch(() => null);
 
-    if (!res.ok) {
+    if (!res?.ok) {
+      this.logger.warn(
+        `Major credentials fetch failed: status=${res?.status ?? 'n/a'}; coreBase=${coreBase}`,
+      );
       return null;
     }
 
@@ -161,9 +175,11 @@ export class MajorExpressAdapter implements CarrierAdapter {
 
     const res = await fetch('https://ltl-ws.major-express.ru/ed.asmx/dict_Cities', {
       cache: 'no-store',
-    });
-    if (!res.ok) {
-      throw new Error('Major Express city dictionary is unavailable');
+    }).catch(() => null);
+    if (!res?.ok) {
+      // Не валим весь расчёт: без справочника городов Major просто не даст тариф в этом запросе.
+      this.logger.warn(`Major city dictionary fetch failed: status=${res?.status ?? 'n/a'}`);
+      return this.cityCache ?? [];
     }
     const xml = await res.text();
     const items = [...xml.matchAll(/<EDCity>([\s\S]*?)<\/EDCity>/g)].map((match) => {
@@ -226,9 +242,10 @@ export class MajorExpressAdapter implements CarrierAdapter {
         SOAPAction: soapAction,
       },
       body,
-    });
+    }).catch(() => null);
 
-    if (!res.ok) {
+    if (!res?.ok) {
+      this.logger.warn(`Major calculator HTTP failed: status=${res?.status ?? 'n/a'}; soapAction=${soapAction}`);
       return null;
     }
 
@@ -236,6 +253,7 @@ export class MajorExpressAdapter implements CarrierAdapter {
     if (hasDimensions) {
       const resultCode = Number(extractTag(xml, 'Code') ?? 0);
       if (resultCode !== 0) {
+        this.logger.warn(`Major calculator1 returned error code=${resultCode}`);
         return null;
       }
       const calc = extractTag(xml, 'CalculatorResult');
