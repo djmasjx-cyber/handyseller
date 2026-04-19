@@ -1,7 +1,8 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
+import { useRouter } from "next/navigation"
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Badge, Input, Label } from "@handyseller/ui"
 import { Loader2, Truck, Network, Route, PackageCheck, CircleDollarSign } from "lucide-react"
 import { authFetch } from "@/lib/auth-fetch"
@@ -113,6 +114,7 @@ function requestStatusLabel(value: string) {
 }
 
 export default function TmsDashboardPage() {
+  const router = useRouter()
   const searchParams = useSearchParams()
   const token = typeof window !== "undefined" ? localStorage.getItem(AUTH_STORAGE_KEYS.accessToken) : null
   const [loading, setLoading] = useState(true)
@@ -128,12 +130,14 @@ export default function TmsDashboardPage() {
   const [destinationLabel, setDestinationLabel] = useState("")
   const [flags, setFlags] = useState<ServiceFlag[]>([])
   const [error, setError] = useState<string | null>(null)
+  const autoQuoteTriggeredRef = useRef(false)
 
   const selectedOrder = useMemo(
     () => candidateOrders.find((item) => item.id === selectedOrderId) ?? null,
     [candidateOrders, selectedOrderId],
   )
   const orderIdFromQuery = searchParams.get("orderId")
+  const autoQuote = searchParams.get("autoQuote") === "1"
 
   const loadData = useCallback(async () => {
     if (!token) return
@@ -199,13 +203,17 @@ export default function TmsDashboardPage() {
     setFlags((prev) => (prev.includes(flag) ? prev.filter((item) => item !== flag) : [...prev, flag]))
   }
 
-  const createShipmentRequest = async () => {
+  const createShipmentRequest = async (options?: { redirectToRequest?: boolean }) => {
     if (!token || !selectedOrder) return
     setSubmitting(true)
     setError(null)
     try {
       const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }
       const snapshotRes = await authFetch(`/api/tms/core/orders/${selectedOrder.id}/snapshot`, { headers })
+      if (!snapshotRes.ok) {
+        const data = await snapshotRes.json().catch(() => ({}))
+        throw new Error(data?.message ?? "Не удалось собрать данные заказа для расчёта")
+      }
       const snapshot = await snapshotRes.json()
       const res = await authFetch("/api/tms/shipment-requests", {
         method: "POST",
@@ -223,8 +231,13 @@ export default function TmsDashboardPage() {
         const data = await res.json().catch(() => ({}))
         throw new Error(data?.message ?? "Не удалось создать заявку")
       }
+      const created = await res.json().catch(() => ({} as { request?: { id?: string } }))
       setSelectedOrderId(null)
       setFlags([])
+      if (options?.redirectToRequest && created?.request?.id) {
+        router.push(`/dashboard/tms/requests?requestId=${encodeURIComponent(created.request.id)}`)
+        return
+      }
       await loadData()
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось получить варианты")
@@ -232,6 +245,21 @@ export default function TmsDashboardPage() {
       setSubmitting(false)
     }
   }
+
+  useEffect(() => {
+    if (!autoQuote || autoQuoteTriggeredRef.current) return
+    if (!selectedOrder || submitting) return
+
+    // Если расчет уже есть — сразу открываем его.
+    if (selectedOrder.requestId) {
+      autoQuoteTriggeredRef.current = true
+      router.push(`/dashboard/tms/requests?requestId=${encodeURIComponent(selectedOrder.requestId)}`)
+      return
+    }
+
+    autoQuoteTriggeredRef.current = true
+    void createShipmentRequest({ redirectToRequest: true })
+  }, [autoQuote, selectedOrder, submitting, router])
 
   const selectQuote = async (requestId: string, quoteId: string) => {
     if (!token) return

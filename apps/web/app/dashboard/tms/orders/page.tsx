@@ -162,7 +162,7 @@ export default function TmsOrdersPage() {
                         </Button>
                       ) : (
                         <Button asChild size="sm">
-                          <Link href={`/dashboard/tms?orderId=${encodeURIComponent(item.id)}`}>Получить варианты</Link>
+                          <Link href={`/dashboard/tms?orderId=${encodeURIComponent(item.id)}&autoQuote=1`}>Получить варианты</Link>
                         </Button>
                       )}
                       {item.shipmentId ? (
