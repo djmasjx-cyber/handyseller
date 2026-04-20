@@ -10,6 +10,8 @@ type Shipment = {
   id: string
   carrierName: string
   trackingNumber: string
+  carrierOrderNumber?: string
+  carrierOrderReference?: string
   status: string
   priceRub: number
   etaDays: number
@@ -178,6 +180,11 @@ export default function TmsShipmentsPage() {
                 >
                   Трек: {item.trackingNumber}
                 </button>
+                {item.carrierOrderReference ? (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    CDEK UUID: {item.carrierOrderReference}
+                  </p>
+                ) : null}
               </div>
               <Badge variant="outline">{item.status}</Badge>
             </div>

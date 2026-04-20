@@ -150,6 +150,8 @@ export interface ShipmentRecord {
   carrierId: string;
   carrierName: string;
   trackingNumber: string;
+  carrierOrderNumber?: string;
+  carrierOrderReference?: string;
   status: ShipmentStatus;
   priceRub: number;
   etaDays: number;

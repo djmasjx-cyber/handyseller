@@ -92,15 +92,21 @@ function normalizeCdekOrderResponse(payload: CdekOrderLookupResponse | null): Cd
   return payload;
 }
 
-function buildCdekPrintMarker(kind: 'orders' | 'barcodes', uuid: string): string {
-  return `cdek-print:${kind}:${uuid}`;
-}
-
 function parseCdekPrintMarker(content: string): { kind: 'orders' | 'barcodes'; uuid: string } | null {
   const m = /^cdek-print:(orders|barcodes):([0-9a-f-]{8,})$/i.exec(content.trim());
   if (!m) return null;
   const kind = m[1] === 'barcodes' ? 'barcodes' : 'orders';
   return { kind, uuid: m[2] };
+}
+
+function buildCdekDocumentMarker(type: 'waybill' | 'label', orderUuid: string): string {
+  return `cdek-doc:${type}:${orderUuid}`;
+}
+
+function parseCdekDocumentMarker(content: string): { type: 'waybill' | 'label'; orderUuid: string } | null {
+  const m = /^cdek-doc:(waybill|label):([0-9a-f-]{8,})$/i.exec(content.trim());
+  if (!m) return null;
+  return { type: m[1] === 'label' ? 'label' : 'waybill', orderUuid: m[2] };
 }
 
 export class CdekAdapter implements CarrierAdapter {
@@ -359,7 +365,12 @@ export class CdekAdapter implements CarrierAdapter {
       resolved?.entity?.number?.trim() ||
       createData?.entity?.cdek_number?.trim() ||
       createData?.entity?.number?.trim() ||
-      orderNumber;
+      '';
+    if (!acceptedUuid || !cdekNumber) {
+      throw new Error(
+        `CDEK booking failed: order accepted but CDEK number is not ready (uuid=${acceptedUuid ?? 'n/a'})`,
+      );
+    }
 
     return {
       shipment: {
@@ -367,6 +378,8 @@ export class CdekAdapter implements CarrierAdapter {
         carrierId: quote.carrierId,
         carrierName: quote.carrierName,
         trackingNumber: cdekNumber,
+        carrierOrderNumber: cdekNumber,
+        carrierOrderReference: acceptedUuid,
         status: 'CONFIRMED',
         priceRub: quote.priceRub,
         etaDays: quote.etaDays,
@@ -381,7 +394,7 @@ export class CdekAdapter implements CarrierAdapter {
           occurredAt: new Date().toISOString(),
         },
       ],
-      documents: acceptedUuid ? await this.createPrintForms(base, token, acceptedUuid, quote.requestId) : undefined,
+      documents: this.createDocumentStubs(acceptedUuid),
     };
   }
 
@@ -390,14 +403,6 @@ export class CdekAdapter implements CarrierAdapter {
     context,
     shipment,
   }: CarrierDocumentDownloadInput): Promise<{ content: Buffer; mimeType: string; fileName: string }> {
-    const marker = parseCdekPrintMarker(document.content ?? '');
-    if (!marker) {
-      return {
-        content: Buffer.from(document.content ?? '', 'utf-8'),
-        mimeType: 'text/plain; charset=utf-8',
-        fileName: `${shipment.trackingNumber || shipment.id}-${document.type.toLowerCase()}.txt`,
-      };
-    }
     const credentials = await this.loadCredentials(context, shipment.requestId);
     if (!credentials) {
       throw new Error('CDEK document download failed: missing credentials');
@@ -407,8 +412,34 @@ export class CdekAdapter implements CarrierAdapter {
       throw new Error('CDEK document download failed: auth error');
     }
     const base = (process.env.CDEK_API_BASE ?? 'https://api.cdek.ru').replace(/\/+$/, '');
-    const endpoint = marker.kind === 'orders' ? 'orders' : 'barcodes';
-    const res = await fetch(`${base}/v2/print/${endpoint}/${marker.uuid}.pdf`, {
+    const stub = parseCdekDocumentMarker(document.content ?? '');
+    if (stub) {
+      const endpoint = stub.type === 'waybill' ? 'orders' : 'barcodes';
+      const printUuid = await this.requestPrintJobWithRetries(base, token, endpoint, stub.orderUuid);
+      if (!printUuid) {
+        throw new Error(`CDEK document download failed: ${endpoint} print uuid not ready`);
+      }
+      return this.downloadPrintPdf(base, token, endpoint, printUuid, shipment);
+    }
+    const marker = parseCdekPrintMarker(document.content ?? '');
+    if (marker) {
+      return this.downloadPrintPdf(base, token, marker.kind, marker.uuid, shipment);
+    }
+    return {
+      content: Buffer.from(document.content ?? '', 'utf-8'),
+      mimeType: 'text/plain; charset=utf-8',
+      fileName: `${shipment.trackingNumber || shipment.id}-${document.type.toLowerCase()}.txt`,
+    };
+  }
+
+  private async downloadPrintPdf(
+    base: string,
+    token: string,
+    endpoint: 'orders' | 'barcodes',
+    printUuid: string,
+    shipment: ShipmentRecord,
+  ): Promise<{ content: Buffer; mimeType: string; fileName: string }> {
+    const res = await fetch(`${base}/v2/print/${endpoint}/${printUuid}.pdf`, {
       headers: {
         Authorization: `Bearer ${token}`,
         Accept: 'application/pdf',
@@ -426,13 +457,52 @@ export class CdekAdapter implements CarrierAdapter {
     };
   }
 
+  private async requestPrintJobWithRetries(
+    base: string,
+    token: string,
+    endpoint: 'orders' | 'barcodes',
+    orderUuid: string,
+  ): Promise<string | null> {
+    for (let i = 0; i < 4; i += 1) {
+      const printUuid = await this.requestPrintJob(
+        base,
+        token,
+        endpoint === 'orders' ? '/v2/print/orders' : '/v2/print/barcodes',
+        {
+          orders: [{ order_uuid: orderUuid }],
+          copy_count: 1,
+        },
+      );
+      if (printUuid) return printUuid;
+      await new Promise((resolve) => setTimeout(resolve, 900));
+    }
+    return null;
+  }
+
+  private createDocumentStubs(
+    orderUuid: string,
+  ): Array<{ type: 'WAYBILL' | 'LABEL' | 'INVOICE'; title: string; content: string }> {
+    return [
+      {
+        type: 'WAYBILL',
+        title: 'Транспортная накладная (CDEK)',
+        content: buildCdekDocumentMarker('waybill', orderUuid),
+      },
+      {
+        type: 'LABEL',
+        title: 'Отгрузочный ярлык (CDEK)',
+        content: buildCdekDocumentMarker('label', orderUuid),
+      },
+    ];
+  }
+
   private async fetchOrderWithRetries(
     base: string,
     token: string,
     uuid: string,
     requestId: string,
   ): Promise<CdekOrderResponse | null> {
-    for (let i = 0; i < 3; i += 1) {
+    for (let i = 0; i < 8; i += 1) {
       const order = await this.fetchOrderByUuid(base, token, uuid);
       if (order?.entity?.cdek_number) return order;
       if (order?.requests?.some((r) => r.state === 'INVALID')) {
@@ -441,7 +511,7 @@ export class CdekAdapter implements CarrierAdapter {
         );
         return order;
       }
-      await new Promise((resolve) => setTimeout(resolve, 1200));
+      await new Promise((resolve) => setTimeout(resolve, 1500));
     }
     return await this.fetchOrderByUuid(base, token, uuid);
   }
@@ -459,45 +529,6 @@ export class CdekAdapter implements CarrierAdapter {
     if (!res?.ok) return null;
     const data = (await res.json().catch(() => null)) as CdekOrderLookupResponse | null;
     return normalizeCdekOrderResponse(data);
-  }
-
-  private async createPrintForms(
-    base: string,
-    token: string,
-    orderUuid: string,
-    requestId: string,
-  ): Promise<Array<{ type: 'WAYBILL' | 'LABEL' | 'INVOICE'; title: string; content: string }>> {
-    const docs: Array<{ type: 'WAYBILL' | 'LABEL' | 'INVOICE'; title: string; content: string }> = [];
-
-    const orderPrintUuid = await this.requestPrintJob(base, token, '/v2/print/orders', {
-      orders: [{ order_uuid: orderUuid }],
-      copy_count: 1,
-    });
-    if (orderPrintUuid) {
-      docs.push({
-        type: 'WAYBILL',
-        title: 'Транспортная накладная (CDEK)',
-        content: buildCdekPrintMarker('orders', orderPrintUuid),
-      });
-    } else {
-      this.logger.warn(`[cdek-booking] print order form not ready requestId=${requestId} orderUuid=${orderUuid}`);
-    }
-
-    const barcodePrintUuid = await this.requestPrintJob(base, token, '/v2/print/barcodes', {
-      orders: [{ order_uuid: orderUuid }],
-      copy_count: 1,
-    });
-    if (barcodePrintUuid) {
-      docs.push({
-        type: 'LABEL',
-        title: 'Отгрузочный ярлык (CDEK)',
-        content: buildCdekPrintMarker('barcodes', barcodePrintUuid),
-      });
-    } else {
-      this.logger.warn(`[cdek-booking] print barcode not ready requestId=${requestId} orderUuid=${orderUuid}`);
-    }
-
-    return docs;
   }
 
   private async requestPrintJob(
