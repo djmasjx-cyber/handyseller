@@ -87,6 +87,19 @@ function cdekResponseErrorMessage(response: CdekOrderResponse | null): string | 
   return messages.join('; ');
 }
 
+/** Состояния заявки в ответе CDEK v2 (см. apidoc.cdek.ru, раздел «Заказы»). */
+function cdekRequestStates(response: CdekOrderResponse | null): string[] {
+  return (response?.requests ?? [])
+    .map((r) => (typeof r.state === 'string' ? r.state.trim() : ''))
+    .filter(Boolean);
+}
+
+/** Известные «плохие» состояния заявки (кроме INVALID — оно обрабатывается отдельно). */
+function hasCdekHardFailureRequestState(response: CdekOrderResponse | null): boolean {
+  const bad = new Set(['FAILED', 'REJECTED', 'CANCELLED', 'ERROR']);
+  return cdekRequestStates(response).some((s) => bad.has(s.toUpperCase()));
+}
+
 function normalizeCdekOrderResponse(payload: CdekOrderLookupResponse | null): CdekOrderResponse | null {
   if (!payload) return null;
   if (Array.isArray(payload)) return payload[0] ?? null;
@@ -301,6 +314,12 @@ export class CdekAdapter implements CarrierAdapter {
               amount: 1,
             },
           ];
+    const itemsTotalWeightGrams = packageItems.reduce((sum, it) => sum + it.weight * it.amount, 0);
+    const packageWeightGrams = Math.max(
+      Math.round(cargo.weightGrams || 100),
+      100,
+      itemsTotalWeightGrams,
+    );
     const fromCode = await this.resolveCityCode(base, token, fromAddress);
     const toCode = await this.resolveCityCode(base, token, toAddress);
     if (!fromCode || !toCode) {
@@ -327,7 +346,7 @@ export class CdekAdapter implements CarrierAdapter {
         {
           number: '1',
           comment: packageItems[0]?.name || 'Груз',
-          weight: Math.max(Math.round(cargo.weightGrams || 100), 100),
+          weight: packageWeightGrams,
           length: Math.max(Math.round((cargo.lengthMm ?? 100) / 10), 1),
           width: Math.max(Math.round((cargo.widthMm ?? 100) / 10), 1),
           height: Math.max(Math.round((cargo.heightMm ?? 100) / 10), 1),
@@ -336,7 +355,7 @@ export class CdekAdapter implements CarrierAdapter {
       ],
     };
     this.logger.log(
-      `[cdek-booking] request send requestId=${quote.requestId} number=${orderNumber} tariff=${tariffCode}`,
+      `[cdek-booking] base=${base} request send requestId=${quote.requestId} number=${orderNumber} tariff=${tariffCode} packageWeightG=${packageWeightGrams}`,
     );
     const createRes = await fetch(`${base}/v2/orders`, {
       method: 'POST',
@@ -352,12 +371,20 @@ export class CdekAdapter implements CarrierAdapter {
       (await createRes?.json().catch(() => null)) as CdekOrderLookupResponse | null,
     );
     this.logger.log(
-      `[cdek-booking] response requestId=${quote.requestId} status=${createRes?.status ?? 'n/a'} body=${JSON.stringify(createData ?? {}).slice(0, 1200)}`,
+      `[cdek-booking] response requestId=${quote.requestId} status=${createRes?.status ?? 'n/a'} states=${JSON.stringify(
+        cdekRequestStates(createData),
+      )} body=${JSON.stringify(createData ?? {}).slice(0, 1200)}`,
     );
     const cdekErrorMessage = cdekResponseErrorMessage(createData);
     if (!createRes?.ok || isCdekRequestInvalid(createData)) {
       throw new Error(
         `CDEK booking failed: ${cdekErrorMessage || `HTTP ${createRes?.status ?? 'n/a'}`}`,
+      );
+    }
+    if (hasCdekHardFailureRequestState(createData)) {
+      const states = cdekRequestStates(createData).join(', ');
+      throw new Error(
+        `CDEK booking failed: заявка отклонена (состояния: ${states || 'n/a'}). ${cdekErrorMessage || ''}`.trim(),
       );
     }
     const acceptedUuid = createData?.entity?.uuid?.trim() || null;
@@ -587,15 +614,17 @@ export class CdekAdapter implements CarrierAdapter {
   }
 
   private async fetchOrderByUuid(base: string, token: string, uuid: string): Promise<CdekOrderResponse | null> {
-    const url = new URL('/v2/orders', base);
-    url.searchParams.set('uuid', uuid);
-    const res = await fetch(url.toString(), {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: 'application/json',
-      },
-      cache: 'no-store',
-    }).catch(() => null);
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/json',
+    };
+    const pathUrl = `${base}/v2/orders/${encodeURIComponent(uuid)}`;
+    let res = await fetch(pathUrl, { headers, cache: 'no-store' }).catch(() => null);
+    if (res?.status === 404) {
+      const legacyUrl = new URL('/v2/orders', base);
+      legacyUrl.searchParams.set('uuid', uuid);
+      res = await fetch(legacyUrl.toString(), { headers, cache: 'no-store' }).catch(() => null);
+    }
     if (!res?.ok) return null;
     const data = (await res.json().catch(() => null)) as CdekOrderLookupResponse | null;
     return normalizeCdekOrderResponse(data);
@@ -668,11 +697,25 @@ export class CdekAdapter implements CarrierAdapter {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
     }).catch(() => null);
+    const data = (await res?.json().catch(() => ({}))) as Record<string, unknown>;
     if (!res?.ok) {
-      this.logger.warn(`CDEK auth failed: status=${res?.status ?? 'n/a'}; requestId=${requestId}`);
+      const hint =
+        typeof data.error_description === 'string'
+          ? data.error_description
+          : typeof data.error === 'string'
+            ? data.error
+            : '';
+      this.logger.warn(
+        `CDEK auth failed: status=${res?.status ?? 'n/a'}; requestId=${requestId}; base=${base}; detail=${hint || JSON.stringify(data).slice(0, 400)}`,
+      );
       return null;
     }
-    const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-    return typeof data.access_token === 'string' ? data.access_token : null;
+    if (typeof data.access_token !== 'string') {
+      this.logger.warn(
+        `CDEK auth failed: no access_token in body; requestId=${requestId}; base=${base}; body=${JSON.stringify(data).slice(0, 400)}`,
+      );
+      return null;
+    }
+    return data.access_token;
   }
 }
