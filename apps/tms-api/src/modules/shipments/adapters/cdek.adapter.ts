@@ -313,6 +313,7 @@ export class CdekAdapter implements CarrierAdapter {
       comment: input.draft.notes?.slice(0, 255) || 'Создано из Handyseller TMS',
       sender: {
         name: shipperName,
+        company: shipperName,
         phones: [{ number: shipperPhone }],
       },
       recipient: {
@@ -324,6 +325,7 @@ export class CdekAdapter implements CarrierAdapter {
       packages: [
         {
           number: '1',
+          comment: packageItems[0]?.name || 'Груз',
           weight: Math.max(Math.round(cargo.weightGrams || 100), 100),
           length: Math.max(Math.round((cargo.lengthMm ?? 100) / 10), 1),
           width: Math.max(Math.round((cargo.widthMm ?? 100) / 10), 1),
