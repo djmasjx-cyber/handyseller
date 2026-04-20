@@ -24,6 +24,11 @@ export interface CarrierDocumentDownloadInput {
   context: CarrierQuoteContext;
 }
 
+export interface CarrierShipmentRefreshInput {
+  shipment: ShipmentRecord;
+  context: CarrierQuoteContext;
+}
+
 export interface CarrierAdapter {
   readonly descriptor: CarrierDescriptor;
   quote(
@@ -39,4 +44,13 @@ export interface CarrierAdapter {
   downloadDocument?(
     payload: CarrierDocumentDownloadInput,
   ): Promise<{ content: Buffer; mimeType: string; fileName: string }>;
+  refreshShipment?(
+    payload: CarrierShipmentRefreshInput,
+  ): Promise<{
+    shipmentPatch: Partial<
+      Pick<ShipmentRecord, 'trackingNumber' | 'carrierOrderNumber' | 'carrierOrderReference' | 'status'>
+    >;
+    tracking?: Array<Omit<TrackingEventRecord, 'id'>>;
+    documents?: Array<Pick<ShipmentDocumentRecord, 'type' | 'title' | 'content'>>;
+  }>;
 }

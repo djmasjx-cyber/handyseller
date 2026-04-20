@@ -12,6 +12,7 @@ import type {
   CarrierBookInput,
   CarrierDocumentDownloadInput,
   CarrierQuoteContext,
+  CarrierShipmentRefreshInput,
 } from './base-carrier.adapter';
 
 type CdekTariff = {
@@ -360,40 +361,45 @@ export class CdekAdapter implements CarrierAdapter {
       );
     }
     const acceptedUuid = createData?.entity?.uuid?.trim() || null;
+    if (!acceptedUuid) {
+      throw new Error('CDEK booking failed: response does not contain order uuid');
+    }
     const resolved = acceptedUuid
       ? await this.fetchOrderWithRetries(base, token, acceptedUuid, quote.requestId)
       : null;
+    if (isCdekRequestInvalid(resolved)) {
+      const details = cdekResponseErrorMessage(resolved);
+      throw new Error(`CDEK booking failed: ${details || 'request became INVALID after ACCEPTED'}`);
+    }
     const cdekNumber =
       resolved?.entity?.cdek_number?.trim() ||
       resolved?.entity?.number?.trim() ||
       createData?.entity?.cdek_number?.trim() ||
       createData?.entity?.number?.trim() ||
       '';
-    if (!acceptedUuid || !cdekNumber) {
-      throw new Error(
-        `CDEK booking failed: order accepted but CDEK number is not ready (uuid=${acceptedUuid ?? 'n/a'})`,
-      );
-    }
+    const isNumberReady = Boolean(cdekNumber);
+    const pendingTracking = `CDEK-PENDING-${acceptedUuid.slice(0, 8).toUpperCase()}`;
+    const trackingNumber = isNumberReady ? cdekNumber : pendingTracking;
 
     return {
       shipment: {
         requestId: quote.requestId,
         carrierId: quote.carrierId,
         carrierName: quote.carrierName,
-        trackingNumber: cdekNumber,
-        carrierOrderNumber: cdekNumber,
+        trackingNumber,
+        carrierOrderNumber: isNumberReady ? cdekNumber : undefined,
         carrierOrderReference: acceptedUuid,
-        status: 'CONFIRMED',
+        status: isNumberReady ? 'CONFIRMED' : 'CREATED',
         priceRub: quote.priceRub,
         etaDays: quote.etaDays,
       },
       tracking: [
         {
           shipmentId: '',
-          status: 'CONFIRMED',
-          description: acceptedUuid
+          status: isNumberReady ? 'CONFIRMED' : 'CREATED',
+          description: isNumberReady
             ? `Заявка принята CDEK (${acceptedUuid}). Номер: ${cdekNumber}`
-            : `Заявка создана в CDEK: ${cdekNumber}`,
+            : `Заявка принята CDEK (${acceptedUuid}). Номер CDEK еще не присвоен, повторите проверку позже.`,
           occurredAt: new Date().toISOString(),
         },
       ],
@@ -432,6 +438,67 @@ export class CdekAdapter implements CarrierAdapter {
       content: Buffer.from(document.content ?? '', 'utf-8'),
       mimeType: 'text/plain; charset=utf-8',
       fileName: `${shipment.trackingNumber || shipment.id}-${document.type.toLowerCase()}.txt`,
+    };
+  }
+
+  async refreshShipment({
+    shipment,
+    context,
+  }: CarrierShipmentRefreshInput): Promise<{
+    shipmentPatch: Partial<
+      Pick<ShipmentRecord, 'trackingNumber' | 'carrierOrderNumber' | 'carrierOrderReference' | 'status'>
+    >;
+    tracking?: Array<Omit<TrackingEventRecord, 'id'>>;
+    documents?: Array<{ type: 'WAYBILL' | 'LABEL' | 'INVOICE'; title: string; content: string }>;
+  }> {
+    const orderUuid = shipment.carrierOrderReference?.trim();
+    if (!orderUuid) {
+      throw new Error('CDEK refresh failed: missing carrier order uuid');
+    }
+    const credentials = await this.loadCredentials(context, shipment.requestId);
+    if (!credentials) {
+      throw new Error('CDEK refresh failed: missing credentials');
+    }
+    const token = await this.getAccessToken(credentials, shipment.requestId);
+    if (!token) {
+      throw new Error('CDEK refresh failed: auth error');
+    }
+    const base = (process.env.CDEK_API_BASE ?? 'https://api.cdek.ru').replace(/\/+$/, '');
+    const order = await this.fetchOrderByUuid(base, token, orderUuid);
+    if (!order) {
+      throw new Error(`CDEK refresh failed: order not found by uuid ${orderUuid}`);
+    }
+    if (isCdekRequestInvalid(order)) {
+      const details = cdekResponseErrorMessage(order);
+      throw new Error(`CDEK refresh failed: ${details || 'request is INVALID'}`);
+    }
+    const cdekNumber =
+      order.entity?.cdek_number?.trim() || order.entity?.number?.trim() || shipment.carrierOrderNumber?.trim() || '';
+    if (!cdekNumber) {
+      return {
+        shipmentPatch: {
+          status: 'CREATED',
+          carrierOrderReference: orderUuid,
+          trackingNumber: shipment.trackingNumber,
+        },
+      };
+    }
+    return {
+      shipmentPatch: {
+        status: 'CONFIRMED',
+        carrierOrderReference: orderUuid,
+        trackingNumber: cdekNumber,
+        carrierOrderNumber: cdekNumber,
+      },
+      tracking: [
+        {
+          shipmentId: '',
+          status: 'CONFIRMED',
+          description: `CDEK присвоил номер отправления: ${cdekNumber}`,
+          occurredAt: new Date().toISOString(),
+        },
+      ],
+      documents: this.createDocumentStubs(orderUuid),
     };
   }
 
@@ -505,7 +572,7 @@ export class CdekAdapter implements CarrierAdapter {
     uuid: string,
     requestId: string,
   ): Promise<CdekOrderResponse | null> {
-    for (let i = 0; i < 8; i += 1) {
+    for (let i = 0; i < 12; i += 1) {
       const order = await this.fetchOrderByUuid(base, token, uuid);
       if (order?.entity?.cdek_number) return order;
       if (order?.requests?.some((r) => r.state === 'INVALID')) {
@@ -514,7 +581,7 @@ export class CdekAdapter implements CarrierAdapter {
         );
         return order;
       }
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await new Promise((resolve) => setTimeout(resolve, 2000));
     }
     return await this.fetchOrderByUuid(base, token, uuid);
   }

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle, Badge, Button } from "@handyseller/ui"
 import { Loader2 } from "lucide-react"
 import { authFetch } from "@/lib/auth-fetch"
+import { extractApiError, normalizeMessageLines } from "@/lib/api-error"
 import { AUTH_STORAGE_KEYS } from "@/lib/auth-storage"
 
 type Shipment = {
@@ -39,17 +40,59 @@ export default function TmsShipmentsPage() {
   const [trackingByShipment, setTrackingByShipment] = useState<Record<string, TrackingEvent[]>>({})
   const [expandedTrackingId, setExpandedTrackingId] = useState<string | null>(null)
   const [loadingTrackingId, setLoadingTrackingId] = useState<string | null>(null)
+  const [refreshingShipmentId, setRefreshingShipmentId] = useState<string | null>(null)
   const [trackingError, setTrackingError] = useState<string | null>(null)
+  const [trackingErrorDetails, setTrackingErrorDetails] = useState<string[]>([])
+  const refreshShipment = async (shipmentId: string) => {
+    if (!token) return
+    setRefreshingShipmentId(shipmentId)
+    setTrackingError(null)
+    setTrackingErrorDetails([])
+    try {
+      const headers = { Authorization: `Bearer ${token}` }
+      const res = await authFetch(`/api/tms/shipments/${shipmentId}/refresh`, {
+        method: "POST",
+        headers,
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        const parsed = extractApiError(data, "Не удалось обновить статус отгрузки")
+        throw new Error([parsed.message, ...parsed.details].join("\n"))
+      }
+      const [shipmentsRes, docsRes, trackingRes] = await Promise.all([
+        authFetch("/api/tms/shipments", { headers }),
+        authFetch(`/api/tms/shipments/${shipmentId}/documents`, { headers }),
+        authFetch(`/api/tms/shipments/${shipmentId}/tracking`, { headers }),
+      ])
+      const shipmentsData = await shipmentsRes.json().catch(() => [])
+      const docsData = await docsRes.json().catch(() => [])
+      const trackingData = await trackingRes.json().catch(() => [])
+      if (Array.isArray(shipmentsData)) setItems(shipmentsData)
+      if (Array.isArray(docsData)) setDocumentsByShipment((prev) => ({ ...prev, [shipmentId]: docsData }))
+      if (Array.isArray(trackingData)) setTrackingByShipment((prev) => ({ ...prev, [shipmentId]: trackingData }))
+    } catch (e) {
+      const lines = normalizeMessageLines(e instanceof Error ? e.message.split("\n") : [])
+      setTrackingError(lines[0] ?? "Не удалось обновить статус отгрузки")
+      setTrackingErrorDetails(lines.slice(1))
+    } finally {
+      setRefreshingShipmentId(null)
+    }
+  }
+
   const [loading, setLoading] = useState(true)
 
   const openDocument = async (shipmentId: string, doc: ShipmentDocument, print: boolean) => {
     if (!token) return
+    setTrackingError(null)
+    setTrackingErrorDetails([])
     try {
       const res = await authFetch(`/api/tms/shipments/${shipmentId}/documents/${doc.id}/file`, {
         headers: { Authorization: `Bearer ${token}` },
       })
       if (!res.ok) {
-        throw new Error("Не удалось получить документ")
+        const data = await res.json().catch(() => ({}))
+        const parsed = extractApiError(data, "Не удалось получить документ")
+        throw new Error([parsed.message, ...parsed.details].join("\n"))
       }
       const blob = await res.blob()
       const objectUrl = URL.createObjectURL(blob)
@@ -66,7 +109,10 @@ export default function TmsShipmentsPage() {
       } else {
         setTimeout(() => URL.revokeObjectURL(objectUrl), 10000)
       }
-    } catch {
+    } catch (e) {
+      const lines = normalizeMessageLines(e instanceof Error ? e.message.split("\n") : [])
+      setTrackingError(lines[0] ?? "Не удалось получить документ")
+      setTrackingErrorDetails(lines.slice(1))
       const w = window.open("", "_blank", "noopener,noreferrer")
       if (!w) return
       const title = doc.title || "Документ"
@@ -120,16 +166,20 @@ export default function TmsShipmentsPage() {
 
     setLoadingTrackingId(shipmentId)
     setTrackingError(null)
+    setTrackingErrorDetails([])
     try {
       const headers = { Authorization: `Bearer ${token}` }
       const res = await authFetch(`/api/tms/shipments/${shipmentId}/tracking`, { headers })
       const data = await res.json().catch(() => [])
       if (!res.ok) {
-        throw new Error("Не удалось загрузить трекинг")
+        const parsed = extractApiError(data, "Не удалось загрузить трекинг")
+        throw new Error([parsed.message, ...parsed.details].join("\n"))
       }
       setTrackingByShipment((prev) => ({ ...prev, [shipmentId]: Array.isArray(data) ? data : [] }))
     } catch (e) {
-      setTrackingError(e instanceof Error ? e.message : "Не удалось загрузить трекинг")
+      const lines = normalizeMessageLines(e instanceof Error ? e.message.split("\n") : [])
+      setTrackingError(lines[0] ?? "Не удалось загрузить трекинг")
+      setTrackingErrorDetails(lines.slice(1))
     } finally {
       setLoadingTrackingId(null)
     }
@@ -163,6 +213,18 @@ export default function TmsShipmentsPage() {
         <CardTitle>Отгрузки</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
+        {trackingError ? (
+          <div className="space-y-1">
+            <p className="text-sm text-destructive">{trackingError}</p>
+            {trackingErrorDetails.length > 0 ? (
+              <ul className="list-disc pl-5 text-xs text-destructive/90">
+                {trackingErrorDetails.map((line, idx) => (
+                  <li key={`${line}-${idx}`}>{line}</li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
         {items.length === 0 ? (
           <p className="text-sm text-muted-foreground">
             Отгрузок пока нет. Подтвердите выбранный тариф на странице сравнения, чтобы оформить перевозку и получить
@@ -182,9 +244,21 @@ export default function TmsShipmentsPage() {
                 </button>
                 {item.carrierOrderReference ? (
                   <p className="text-xs text-muted-foreground mt-1">
-                    CDEK UUID: {item.carrierOrderReference}
+                    Внешний ID перевозчика: {item.carrierOrderReference}
                   </p>
                 ) : null}
+                <div className="mt-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void refreshShipment(item.id)}
+                    disabled={refreshingShipmentId === item.id}
+                  >
+                    {refreshingShipmentId === item.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                    {item.trackingNumber.startsWith("CDEK-PENDING-") ? "Обновить номер CDEK" : "Обновить статус ТК"}
+                  </Button>
+                </div>
               </div>
               <Badge variant="outline">{item.status}</Badge>
             </div>
@@ -197,7 +271,16 @@ export default function TmsShipmentsPage() {
                     Загружаем статусы перевозчика...
                   </div>
                 ) : trackingError ? (
-                  <p className="text-sm text-destructive">{trackingError}</p>
+                  <div className="space-y-1">
+                    <p className="text-sm text-destructive">{trackingError}</p>
+                    {trackingErrorDetails.length > 0 ? (
+                      <ul className="list-disc pl-5 text-xs text-destructive/90">
+                        {trackingErrorDetails.map((line, idx) => (
+                          <li key={`${line}-${idx}`}>{line}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </div>
                 ) : (trackingByShipment[item.id] ?? []).length === 0 ? (
                   <p className="text-sm text-muted-foreground">События трекинга пока не поступили.</p>
                 ) : (

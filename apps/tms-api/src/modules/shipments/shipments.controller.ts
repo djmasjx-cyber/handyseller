@@ -104,6 +104,17 @@ export class ShipmentsController {
     return this.shipmentsService.getDocuments(userId, shipmentId);
   }
 
+  @Post('shipments/:id/refresh')
+  @TmsAccess('write')
+  refreshShipment(
+    @CurrentUser('userId') userId: string,
+    @Param('id') shipmentId: string,
+    @Headers('authorization') authorization?: string,
+  ) {
+    const authToken = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
+    return this.shipmentsService.refreshShipment(userId, shipmentId, authToken);
+  }
+
   @Get('shipments/:shipmentId/documents/:documentId/file')
   async downloadDocument(
     @CurrentUser('userId') userId: string,

@@ -1,13 +1,21 @@
 import { Logger } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import type {
   CarrierDescriptor,
   CarrierQuote,
   CreateShipmentRequestInput,
   InternalCarrierCredentials,
+  ShipmentDocumentRecord,
   ShipmentRecord,
   TrackingEventRecord,
 } from '@handyseller/tms-sdk';
-import type { CarrierAdapter, CarrierBookInput, CarrierQuoteContext } from './base-carrier.adapter';
+import type {
+  CarrierAdapter,
+  CarrierBookInput,
+  CarrierDocumentDownloadInput,
+  CarrierQuoteContext,
+  CarrierShipmentRefreshInput,
+} from './base-carrier.adapter';
 
 type MajorCity = {
   code: number;
@@ -43,6 +51,16 @@ function extractFirstNumberTag(xml: string, tags: string[]): number {
     if (n > 0) return n;
   }
   return 0;
+}
+
+function parseMajorError(xml: string): string | null {
+  const fault = extractTag(xml, 'faultstring');
+  if (fault?.trim()) return fault.trim();
+  const error = extractTag(xml, 'Error');
+  if (error?.trim()) return error.trim();
+  const message = extractTag(xml, 'Message');
+  if (message?.trim()) return message.trim();
+  return null;
 }
 
 function stripPostalPrefix(value: string): string {
@@ -111,7 +129,7 @@ export class MajorExpressAdapter implements CarrierAdapter {
     modes: ['ROAD', 'COURIER'],
     supportedFlags: ['EXPRESS', 'CONSOLIDATED'],
     supportsTracking: true,
-    supportsBooking: false,
+    supportsBooking: true,
     requiresCredentials: true,
   };
 
@@ -184,28 +202,154 @@ export class MajorExpressAdapter implements CarrierAdapter {
     }];
   }
 
-  async book({ quote }: CarrierBookInput): Promise<{
+  async book({ quote, input, context }: CarrierBookInput): Promise<{
     shipment: Omit<ShipmentRecord, 'id' | 'userId' | 'createdAt'>;
     tracking: Array<Omit<TrackingEventRecord, 'id'>>;
+    documents?: Array<Pick<ShipmentDocumentRecord, 'type' | 'title' | 'content'>>;
   }> {
+    const credentials = await this.loadCredentials(context);
+    if (!credentials) {
+      throw new Error('Major booking failed: missing credentials');
+    }
+    const requiredErrors = this.requiredBookingFields(input);
+    if (requiredErrors.length > 0) {
+      throw new Error(
+        `Major booking failed: заполните обязательные поля (${requiredErrors.join(', ')}) в заказе для оценки доставки`,
+      );
+    }
+    const [shipperCity, consigneeCity] = await Promise.all([
+      this.resolveCityCode(input.draft.originLabel || input.snapshot.originLabel),
+      this.resolveCityCode(input.draft.destinationLabel || input.snapshot.destinationLabel),
+    ]);
+    if (!shipperCity || !consigneeCity) {
+      throw new Error('Major booking failed: не удалось определить коды городов отправителя/получателя');
+    }
+    const intervalId = await this.getOrderIntervalId(credentials);
+    const created = await this.createOrder({
+      quote,
+      input,
+      credentials,
+      shipperCityCode: shipperCity.code,
+      consigneeCityCode: consigneeCity.code,
+      orderIntervalId: intervalId,
+    });
+    const orderId = created.orderId;
+    const waybills = created.waybillNumber ? [created.waybillNumber] : await this.getOrderWaybills(credentials, orderId);
+    const waybillNumber = waybills[0]?.trim() || '';
+    const trackingNumber = waybillNumber || `MAJOR-ORDER-${orderId}`;
+    const docs = waybillNumber ? this.createDocumentStubs(waybillNumber) : [];
+
     return {
       shipment: {
         requestId: quote.requestId,
         carrierId: quote.carrierId,
         carrierName: quote.carrierName,
-        trackingNumber: `MAJOR-PENDING-${Date.now().toString().slice(-6)}`,
-        status: 'CREATED',
+        trackingNumber,
+        carrierOrderReference: String(orderId),
+        carrierOrderNumber: waybillNumber || undefined,
+        status: waybillNumber ? 'CONFIRMED' : 'CREATED',
         priceRub: quote.priceRub,
         etaDays: quote.etaDays,
       },
       tracking: [
         {
           shipmentId: '',
-          status: 'CREATED',
-          description: 'Тариф Major Express выбран. Бронирование выполняется следующим шагом.',
+          status: waybillNumber ? 'CONFIRMED' : 'CREATED',
+          description: waybillNumber
+            ? `Major заказ создан: ${orderId}, накладная: ${waybillNumber}`
+            : `Major заказ создан: ${orderId}, накладная формируется`,
           occurredAt: new Date().toISOString(),
         },
       ],
+      documents: docs,
+    };
+  }
+
+  async downloadDocument({
+    shipment,
+    document,
+    context,
+  }: CarrierDocumentDownloadInput): Promise<{ content: Buffer; mimeType: string; fileName: string }> {
+    const content = (document.content ?? '').trim();
+    const [prefix, kind, wb] = content.split(':');
+    if (prefix !== 'major-doc' || !kind || !wb) {
+      return {
+        content: Buffer.from(document.content ?? '', 'utf-8'),
+        mimeType: 'text/plain; charset=utf-8',
+        fileName: `${shipment.trackingNumber || shipment.id}-${document.type.toLowerCase()}.txt`,
+      };
+    }
+    const credentials = await this.loadCredentials(context);
+    if (!credentials) {
+      throw new Error('Major document download failed: missing credentials');
+    }
+    if (kind === 'waybill') {
+      const pdf = await this.getWaybillPdf(credentials, wb);
+      return {
+        content: pdf,
+        mimeType: 'application/pdf',
+        fileName: `${wb}-major-waybill.pdf`,
+      };
+    }
+    if (kind === 'label') {
+      const pdf = await this.getStickerPdf(credentials, wb);
+      return {
+        content: pdf,
+        mimeType: 'application/pdf',
+        fileName: `${wb}-major-label.pdf`,
+      };
+    }
+    return {
+      content: Buffer.from(document.content ?? '', 'utf-8'),
+      mimeType: 'text/plain; charset=utf-8',
+      fileName: `${shipment.trackingNumber || shipment.id}-${document.type.toLowerCase()}.txt`,
+    };
+  }
+
+  async refreshShipment({
+    shipment,
+    context,
+  }: CarrierShipmentRefreshInput): Promise<{
+    shipmentPatch: Partial<
+      Pick<ShipmentRecord, 'trackingNumber' | 'carrierOrderNumber' | 'carrierOrderReference' | 'status'>
+    >;
+    tracking?: Array<Omit<TrackingEventRecord, 'id'>>;
+    documents?: Array<Pick<ShipmentDocumentRecord, 'type' | 'title' | 'content'>>;
+  }> {
+    const orderIdRaw = shipment.carrierOrderReference?.trim();
+    const orderId = Number(orderIdRaw);
+    if (!orderIdRaw || !Number.isInteger(orderId) || orderId <= 0) {
+      throw new Error('Major refresh failed: missing order id');
+    }
+    const credentials = await this.loadCredentials(context);
+    if (!credentials) {
+      throw new Error('Major refresh failed: missing credentials');
+    }
+    const waybills = await this.getOrderWaybills(credentials, orderId);
+    const waybillNumber = waybills[0]?.trim() || shipment.carrierOrderNumber?.trim() || '';
+    const orderStatusCode = await this.getOrderStatus(credentials, orderId);
+    const status = this.mapMajorOrderStatus(orderStatusCode, waybillNumber);
+    const trackingNumber = waybillNumber || shipment.trackingNumber;
+    const tracking = waybillNumber
+      ? await this.getWaybillHistory(credentials, waybillNumber)
+      : [
+          {
+            shipmentId: '',
+            status,
+            description: `Major заказ ${orderId}: статус ${orderStatusCode}`,
+            occurredAt: new Date().toISOString(),
+          },
+        ];
+
+    return {
+      shipmentPatch: {
+        carrierOrderReference: String(orderId),
+        carrierOrderNumber: waybillNumber || undefined,
+        trackingNumber,
+        status,
+      },
+      tracking,
+      documents: waybillNumber ? this.createDocumentStubs(waybillNumber) : undefined,
     };
   }
 
@@ -370,6 +514,307 @@ export class MajorExpressAdapter implements CarrierAdapter {
       total,
       deliveryTime: Math.max(1, Math.round(extractFirstNumberTag(calc, ['DeliveryTime', 'Days']))),
     };
+  }
+
+  private requiredBookingFields(input: CreateShipmentRequestInput): string[] {
+    const shipperName = input.snapshot.contacts?.shipper?.name?.trim() || '';
+    const shipperPhone = input.snapshot.contacts?.shipper?.phone?.trim() || '';
+    const recipientName = input.snapshot.contacts?.recipient?.name?.trim() || '';
+    const recipientPhone = input.snapshot.contacts?.recipient?.phone?.trim() || '';
+    const fromAddress = (input.draft.originLabel || input.snapshot.originLabel || '').trim();
+    const toAddress = (input.draft.destinationLabel || input.snapshot.destinationLabel || '').trim();
+    const description = input.snapshot.itemSummary[0]?.title?.trim() || '';
+    const missing: string[] = [];
+    if (!shipperName) missing.push('имя/название отправителя');
+    if (!shipperPhone) missing.push('телефон отправителя');
+    if (!recipientName) missing.push('имя/название получателя');
+    if (!recipientPhone) missing.push('телефон получателя');
+    if (!fromAddress) missing.push('адрес отправителя');
+    if (!toAddress) missing.push('адрес получателя');
+    if (!description) missing.push('описание груза');
+    return missing;
+  }
+
+  private async majorSoapRequest(credentials: InternalCarrierCredentials, action: string, body: string): Promise<string> {
+    const endpoint = 'https://ed.major-express.ru/edclients2.asmx';
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${Buffer.from(`${credentials.login}:${credentials.password}`).toString('base64')}`,
+        'Content-Type': 'text/xml; charset=utf-8',
+        SOAPAction: `"http://ltl-ws.major-express.ru/edclients/${action}"`,
+      },
+      body,
+    }).catch(() => null);
+    if (!res?.ok) {
+      throw new Error(`Major ${action} failed: HTTP ${res?.status ?? 'n/a'}`);
+    }
+    const xml = await res.text();
+    const err = parseMajorError(xml);
+    if (err) {
+      throw new Error(`Major ${action} failed: ${err}`);
+    }
+    return xml;
+  }
+
+  private async getOrderIntervalId(credentials: InternalCarrierCredentials): Promise<number> {
+    const xml = await this.majorSoapRequest(
+      credentials,
+      'dict_OrderIntervals',
+      `<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Body>
+    <dict_OrderIntervals xmlns="http://ltl-ws.major-express.ru/edclients/">
+      <IsOrderUrgent>false</IsOrderUrgent>
+    </dict_OrderIntervals>
+  </soap:Body>
+</soap:Envelope>`,
+    );
+    const firstId = Number(extractTag(xml, 'ID') ?? 0);
+    if (!Number.isInteger(firstId) || firstId <= 0) {
+      throw new Error('Major booking failed: не удалось получить интервал забора');
+    }
+    return firstId;
+  }
+
+  private async createOrder({
+    quote,
+    input,
+    credentials,
+    shipperCityCode,
+    consigneeCityCode,
+    orderIntervalId,
+  }: {
+    quote: CarrierQuote;
+    input: CreateShipmentRequestInput;
+    credentials: InternalCarrierCredentials;
+    shipperCityCode: number;
+    consigneeCityCode: number;
+    orderIntervalId: number;
+  }): Promise<{ orderId: number; waybillNumber: string | null }> {
+    const shipperName = input.snapshot.contacts?.shipper?.name?.trim() || '';
+    const shipperPhone = input.snapshot.contacts?.shipper?.phone?.trim() || '';
+    const recipientName = input.snapshot.contacts?.recipient?.name?.trim() || '';
+    const recipientPhone = input.snapshot.contacts?.recipient?.phone?.trim() || '';
+    const shipperAddress = (input.draft.originLabel || input.snapshot.originLabel || '').trim();
+    const consigneeAddress = (input.draft.destinationLabel || input.snapshot.destinationLabel || '').trim();
+    const cargo = input.snapshot.cargo;
+    const description = (input.snapshot.itemSummary[0]?.title || 'Груз').trim().slice(0, 80);
+    const weightKg = Math.max(cargo.weightGrams / 1000, 0.1).toFixed(3);
+    const places = Math.max(Math.round(cargo.places || 1), 1);
+    const declaredCost = Math.max(cargo.declaredValueRub, 1).toFixed(2);
+    const lengthCm = Math.max(Math.round((cargo.lengthMm ?? 100) / 10), 1);
+    const widthCm = Math.max(Math.round((cargo.widthMm ?? 100) / 10), 1);
+    const heightCm = Math.max(Math.round((cargo.heightMm ?? 100) / 10), 1);
+    const requestGuid = randomUUID();
+    const cargoTakenDate = new Date().toISOString();
+
+    const xml = await this.majorSoapRequest(
+      credentials,
+      'CreateOrder',
+      `<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Body>
+    <CreateOrder xmlns="http://ltl-ws.major-express.ru/edclients/">
+      <RequestID>${escapeXml(requestGuid)}</RequestID>
+      <CargoTakenDate>${escapeXml(cargoTakenDate)}</CargoTakenDate>
+      <OrderIntervalID>${orderIntervalId}</OrderIntervalID>
+      <ClientInfo>${escapeXml(input.snapshot.coreOrderNumber || quote.requestId)}</ClientInfo>
+      <Shipper>
+        <Person>${escapeXml(shipperName)}</Person>
+        <Phone>${escapeXml(shipperPhone)}</Phone>
+        <Company>${escapeXml(shipperName)}</Company>
+        <Address>${escapeXml(shipperAddress)}</Address>
+        <PostIndex></PostIndex>
+        <CityCode>${shipperCityCode}</CityCode>
+      </Shipper>
+      <Consignee>
+        <Person>${escapeXml(recipientName)}</Person>
+        <Phone>${escapeXml(recipientPhone)}</Phone>
+        <Company>${escapeXml(recipientName)}</Company>
+        <Address>${escapeXml(consigneeAddress)}</Address>
+        <PostIndex></PostIndex>
+        <CityCode>${consigneeCityCode}</CityCode>
+      </Consignee>
+      <Weight>${weightKg}</Weight>
+      <Package>${places}</Package>
+      <Cost>${declaredCost}</Cost>
+      <Size>
+        <Length>${lengthCm}</Length>
+        <Width>${widthCm}</Width>
+        <Height>${heightCm}</Height>
+      </Size>
+      <Description>${escapeXml(description)}</Description>
+      <Remarks>${escapeXml(`TMS request ${quote.requestId}`)}</Remarks>
+      <IsOrderUrgent>false</IsOrderUrgent>
+      <CostCenter xsi:nil="true" />
+      <DeliveryCondition>None</DeliveryCondition>
+      <IsWBRequired>true</IsWBRequired>
+      <DeliveryComment>${escapeXml(consigneeAddress.slice(0, 200))}</DeliveryComment>
+      <WBNumber></WBNumber>
+    </CreateOrder>
+  </soap:Body>
+</soap:Envelope>`,
+    );
+    const orderId = Number(extractTag(xml, 'CreateOrderResult') ?? 0);
+    if (!Number.isInteger(orderId) || orderId <= 0) {
+      throw new Error('Major CreateOrder failed: invalid order id in response');
+    }
+    const waybill = extractTag(xml, 'WBNumber');
+    return { orderId, waybillNumber: waybill?.trim() || null };
+  }
+
+  private async getOrderWaybills(credentials: InternalCarrierCredentials, orderId: number): Promise<string[]> {
+    const xml = await this.majorSoapRequest(
+      credentials,
+      'OrdersWaybills',
+      `<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Body>
+    <OrdersWaybills xmlns="http://ltl-ws.major-express.ru/edclients/">
+      <OrderID>${orderId}</OrderID>
+    </OrdersWaybills>
+  </soap:Body>
+</soap:Envelope>`,
+    );
+    return [...xml.matchAll(/<string>([\s\S]*?)<\/string>/gi)]
+      .map((m) => m[1]?.trim() || '')
+      .filter(Boolean);
+  }
+
+  private async getOrderStatus(credentials: InternalCarrierCredentials, orderId: number): Promise<number> {
+    const xml = await this.majorSoapRequest(
+      credentials,
+      'OrderStatus',
+      `<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Body>
+    <OrderStatus xmlns="http://ltl-ws.major-express.ru/edclients/">
+      <OrderID>${orderId}</OrderID>
+    </OrderStatus>
+  </soap:Body>
+</soap:Envelope>`,
+    );
+    const code = Number(extractTag(xml, 'OrderStatusResult') ?? 0);
+    return Number.isFinite(code) ? code : 0;
+  }
+
+  private async getWaybillHistory(
+    credentials: InternalCarrierCredentials,
+    wbNumber: string,
+  ): Promise<Array<Omit<TrackingEventRecord, 'id'>>> {
+    const xml = await this.majorSoapRequest(
+      credentials,
+      'History',
+      `<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Body>
+    <History xmlns="http://ltl-ws.major-express.ru/edclients/">
+      <WBNumber>${escapeXml(wbNumber)}</WBNumber>
+    </History>
+  </soap:Body>
+</soap:Envelope>`,
+    );
+    const events = [...xml.matchAll(/<EDWBHistory>([\s\S]*?)<\/EDWBHistory>/gi)]
+      .map((match) => {
+        const block = match[1];
+        const date = extractTag(block, 'EventDateTime') || new Date().toISOString();
+        const event = extractTag(block, 'Event') || 'Статус обновлен';
+        const city = extractTag(block, 'CityName') || undefined;
+        const comments = extractTag(block, 'Comments') || '';
+        return {
+          shipmentId: '',
+          status: this.mapMajorHistoryStatus(event, comments),
+          description: comments ? `${event}. ${comments}` : event,
+          occurredAt: date,
+          location: city,
+        } as Omit<TrackingEventRecord, 'id'>;
+      })
+      .filter((item) => item.description.trim().length > 0);
+    return events.length > 0
+      ? events
+      : [
+          {
+            shipmentId: '',
+            status: 'CONFIRMED',
+            description: `Накладная Major: ${wbNumber}`,
+            occurredAt: new Date().toISOString(),
+          },
+        ];
+  }
+
+  private async getWaybillPdf(credentials: InternalCarrierCredentials, wbNumber: string): Promise<Buffer> {
+    const xml = await this.majorSoapRequest(
+      credentials,
+      'Waybill_PDF',
+      `<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Body>
+    <Waybill_PDF xmlns="http://ltl-ws.major-express.ru/edclients/">
+      <WBNumber>${escapeXml(wbNumber)}</WBNumber>
+    </Waybill_PDF>
+  </soap:Body>
+</soap:Envelope>`,
+    );
+    const payload = (extractTag(xml, 'Waybill_PDFResult') || '').trim();
+    if (!payload) {
+      throw new Error(`Major Waybill_PDF failed: empty response for WB ${wbNumber}`);
+    }
+    return Buffer.from(payload, 'base64');
+  }
+
+  private async getStickerPdf(credentials: InternalCarrierCredentials, wbNumber: string): Promise<Buffer> {
+    const xml = await this.majorSoapRequest(
+      credentials,
+      'StickerPack_PDF',
+      `<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Body>
+    <StickerPack_PDF xmlns="http://ltl-ws.major-express.ru/edclients/">
+      <WBNumber>${escapeXml(wbNumber)}</WBNumber>
+    </StickerPack_PDF>
+  </soap:Body>
+</soap:Envelope>`,
+    );
+    const payload = (extractTag(xml, 'StickerPack_PDFResult') || '').trim();
+    if (!payload) {
+      throw new Error(`Major StickerPack_PDF failed: empty response for WB ${wbNumber}`);
+    }
+    return Buffer.from(payload, 'base64');
+  }
+
+  private createDocumentStubs(
+    wbNumber: string,
+  ): Array<Pick<ShipmentDocumentRecord, 'type' | 'title' | 'content'>> {
+    return [
+      {
+        type: 'WAYBILL',
+        title: 'Накладная Major (PDF)',
+        content: `major-doc:waybill:${wbNumber}`,
+      },
+      {
+        type: 'LABEL',
+        title: 'Стикеры Major (PDF)',
+        content: `major-doc:label:${wbNumber}`,
+      },
+    ];
+  }
+
+  private mapMajorOrderStatus(code: number, waybillNumber: string): ShipmentRecord['status'] {
+    if (!waybillNumber) return 'CREATED';
+    // Точного enum в документации нет в разрезе TMS, поэтому используем безопасное приближение.
+    if (code >= 10) return 'DELIVERED';
+    if (code >= 6) return 'OUT_FOR_DELIVERY';
+    if (code >= 2) return 'IN_TRANSIT';
+    return 'CONFIRMED';
+  }
+
+  private mapMajorHistoryStatus(event: string, comments: string): ShipmentRecord['status'] {
+    const text = `${event} ${comments}`.toLowerCase();
+    if (/вруч|доставл|получ/.test(text)) return 'DELIVERED';
+    if (/курьер|выдано|out for delivery/.test(text)) return 'OUT_FOR_DELIVERY';
+    if (/транзит|прибыл|отправлен|принят/.test(text)) return 'IN_TRANSIT';
+    return 'CONFIRMED';
   }
 
   private buildCalculatorBody(

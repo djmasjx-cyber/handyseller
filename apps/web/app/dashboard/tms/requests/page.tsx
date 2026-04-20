@@ -18,6 +18,7 @@ import {
 } from "@handyseller/ui"
 import { Loader2 } from "lucide-react"
 import { authFetch } from "@/lib/auth-fetch"
+import { extractApiError, normalizeMessageLines } from "@/lib/api-error"
 import { AUTH_STORAGE_KEYS } from "@/lib/auth-storage"
 import { createTmsShipmentRequestFromOrder } from "@/lib/tms-create-request-from-order"
 
@@ -245,6 +246,7 @@ export default function TmsRequestsPage() {
   const [confirmingId, setConfirmingId] = useState<string | null>(null)
   const [expandedVariants, setExpandedVariants] = useState<Record<string, boolean>>({})
   const [error, setError] = useState<string | null>(null)
+  const [errorDetails, setErrorDetails] = useState<string[]>([])
   const [success, setSuccess] = useState<string | null>(null)
   const [toast, setToast] = useState<ToastState>(null)
   const [search, setSearch] = useState("")
@@ -456,6 +458,7 @@ export default function TmsRequestsPage() {
     if (!token) return
     setRefreshingId(requestId)
     setError(null)
+    setErrorDetails([])
     setSuccess(null)
     try {
       const headers = { Authorization: `Bearer ${token}` }
@@ -465,7 +468,8 @@ export default function TmsRequestsPage() {
       })
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
-        throw new Error(typeof data?.message === "string" ? data.message : "Не удалось обновить тарифы")
+        const parsed = extractApiError(data, "Не удалось обновить тарифы")
+        throw new Error([parsed.message, ...parsed.details].join("\n"))
       }
       const nextQuotes = await res.json().catch(() => [])
       const list = Array.isArray(nextQuotes) ? nextQuotes : []
@@ -476,9 +480,11 @@ export default function TmsRequestsPage() {
         ),
       )
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "Не удалось обновить тарифы"
-      setError(msg)
-      showToast("error", msg)
+      const text = e instanceof Error ? e.message : "Не удалось обновить тарифы"
+      const lines = normalizeMessageLines(text.split("\n"))
+      setError(lines[0] ?? "Не удалось обновить тарифы")
+      setErrorDetails(lines.length > 1 ? lines.slice(1) : [])
+      showToast("error", lines[0] ?? "Не удалось обновить тарифы")
     } finally {
       setRefreshingId(null)
     }
@@ -491,6 +497,7 @@ export default function TmsRequestsPage() {
     const key = `${requestId}:${quote.id}`
     setSelectingKey(key)
     setError(null)
+    setErrorDetails([])
     setSuccess(null)
     try {
       const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }
@@ -501,13 +508,16 @@ export default function TmsRequestsPage() {
       })
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
-        throw new Error(typeof data?.message === "string" ? data.message : "Не удалось выбрать тариф")
+        const parsed = extractApiError(data, "Не удалось выбрать тариф")
+        throw new Error([parsed.message, ...parsed.details].join("\n"))
       }
       await loadAll({ silent: true })
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "Не удалось выбрать тариф"
-      setError(msg)
-      showToast("error", msg)
+      const text = e instanceof Error ? e.message : "Не удалось выбрать тариф"
+      const lines = normalizeMessageLines(text.split("\n"))
+      setError(lines[0] ?? "Не удалось выбрать тариф")
+      setErrorDetails(lines.length > 1 ? lines.slice(1) : [])
+      showToast("error", lines[0] ?? "Не удалось выбрать тариф")
     } finally {
       setSelectingKey(null)
     }
@@ -517,6 +527,7 @@ export default function TmsRequestsPage() {
     if (!token) return
     setConfirmingId(requestId)
     setError(null)
+    setErrorDetails([])
     setSuccess(null)
     try {
       const headers = { Authorization: `Bearer ${token}` }
@@ -526,29 +537,37 @@ export default function TmsRequestsPage() {
       })
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
-        throw new Error(typeof data?.message === "string" ? data.message : "Не удалось подтвердить перевозку")
+        const parsed = extractApiError(data, "Не удалось подтвердить перевозку")
+        throw new Error([parsed.message, ...parsed.details].join("\n"))
       }
       const shipment = await res.json().catch(() => null)
       const trackingNumber =
         shipment && typeof shipment === "object" && typeof (shipment as { trackingNumber?: unknown }).trackingNumber === "string"
           ? (shipment as { trackingNumber: string }).trackingNumber
           : null
+      const isPendingCdekNumber = typeof trackingNumber === "string" && trackingNumber.startsWith("CDEK-PENDING-")
       setSuccess(
-        trackingNumber
+        isPendingCdekNumber
+          ? "Заявка принята CDEK. Номер CDEK еще формируется, проверьте отгрузку через 1-2 минуты."
+          : trackingNumber
           ? `Перевозка подтверждена. Трек-номер: ${trackingNumber}`
           : "Перевозка подтверждена и отправлена в ТК.",
       )
       showToast(
         "success",
-        trackingNumber
+        isPendingCdekNumber
+          ? "CDEK принял заявку, номер будет доступен позже."
+          : trackingNumber
           ? `Подтверждено. Трек-номер: ${trackingNumber}`
           : "Перевозка подтверждена и отправлена в ТК.",
       )
       await loadAll({ silent: true })
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "Не удалось подтвердить перевозку"
-      setError(msg)
-      showToast("error", msg)
+      const text = e instanceof Error ? e.message : "Не удалось подтвердить перевозку"
+      const lines = normalizeMessageLines(text.split("\n"))
+      setError(lines[0] ?? "Не удалось подтвердить перевозку")
+      setErrorDetails(lines.length > 1 ? lines.slice(1) : [])
+      showToast("error", lines[0] ?? "Не удалось подтвердить перевозку")
     } finally {
       setConfirmingId(null)
     }
@@ -577,7 +596,18 @@ export default function TmsRequestsPage() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {error ? <p className="text-sm text-destructive">{error}</p> : null}
+        {error ? (
+          <div className="space-y-1">
+            <p className="text-sm text-destructive">{error}</p>
+            {errorDetails.length > 0 ? (
+              <ul className="list-disc pl-5 text-xs text-destructive/90">
+                {errorDetails.map((line, idx) => (
+                  <li key={`${line}-${idx}`}>{line}</li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
         {success ? <p className="text-sm text-emerald-600">{success}</p> : null}
         {toast ? (
           <div className="pointer-events-none fixed right-4 top-4 z-[60]">

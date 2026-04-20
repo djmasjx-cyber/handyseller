@@ -240,7 +240,9 @@ export class ShipmentsService {
     }
     if (existingShipment) {
       const isLegacyCdekPending =
-        existingShipment.carrierId === 'cdek' && existingShipment.trackingNumber.startsWith('CDEK-PENDING-');
+        existingShipment.carrierId === 'cdek' &&
+        existingShipment.trackingNumber.startsWith('CDEK-PENDING-') &&
+        !existingShipment.carrierOrderReference;
       if (!isLegacyCdekPending) {
         request.status = 'BOOKED';
         request.updatedAt = new Date().toISOString();
@@ -371,6 +373,62 @@ export class ShipmentsService {
       document: doc,
       context: { userId, authToken },
     });
+  }
+
+  async refreshShipment(
+    userId: string,
+    shipmentId: string,
+    authToken?: string | null,
+  ): Promise<ShipmentRecord> {
+    const shipment = this.shipments.get(shipmentId);
+    if (!shipment || shipment.userId !== userId) {
+      throw new NotFoundException('Отгрузка не найдена');
+    }
+    const adapter = this.adapters.find((item) => item.descriptor.id === shipment.carrierId);
+    if (!adapter?.refreshShipment) {
+      throw new BadRequestException(`Обновление статуса для ${shipment.carrierName} пока не поддерживается.`);
+    }
+    let refreshed: Awaited<ReturnType<NonNullable<typeof adapter.refreshShipment>>>;
+    try {
+      refreshed = await adapter.refreshShipment({
+        shipment,
+        context: { userId, authToken },
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message.trim()
+          ? error.message
+          : `Не удалось обновить статус отгрузки ${shipment.carrierName}`;
+      throw new BadRequestException(message);
+    }
+
+    const updated: ShipmentRecord = { ...shipment, ...refreshed.shipmentPatch };
+    this.shipments.set(shipmentId, updated);
+
+    if (refreshed.tracking?.length) {
+      const existing = this.tracking.get(shipmentId) ?? [];
+      const additions = refreshed.tracking.map((item, index) => ({
+        ...item,
+        id: `${shipmentId}_rf_${Date.now()}_${index + 1}`,
+        shipmentId,
+      }));
+      this.tracking.set(shipmentId, [...existing, ...additions]);
+    }
+    if (refreshed.documents?.length) {
+      const current = this.documents.get(shipmentId) ?? [];
+      if (current.length === 0) {
+        const docs = refreshed.documents.map((doc, index) => ({
+          id: `${shipmentId}_doc_rf_${index + 1}`,
+          shipmentId,
+          type: doc.type,
+          title: doc.title,
+          content: doc.content,
+          createdAt: new Date().toISOString(),
+        }));
+        this.documents.set(shipmentId, docs);
+      }
+    }
+    return updated;
   }
 
   private getRequestOrThrow(userId: string, requestId: string): ShipmentRequestRecord {
