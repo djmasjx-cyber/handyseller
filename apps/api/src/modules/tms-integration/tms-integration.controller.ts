@@ -60,6 +60,16 @@ export class TmsIntegrationController {
     return this.tmsIntegrationService.deleteCarrierConnection(userId, id);
   }
 
+  @Post('carrier-connections/:id/check')
+  checkCarrierConnection(@CurrentUser('userId') userId: string, @Param('id') id: string) {
+    return this.tmsIntegrationService.checkCarrierConnection(userId, id);
+  }
+
+  @Post('carrier-connections/check-all')
+  checkAllCarrierConnections(@CurrentUser('userId') userId: string) {
+    return this.tmsIntegrationService.checkAllCarrierConnections(userId);
+  }
+
   @Get('carrier-connections/internal/:carrierCode/default')
   async getInternalCarrierCredentials(
     @CurrentUser('userId') userId: string,

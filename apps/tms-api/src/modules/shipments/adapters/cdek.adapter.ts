@@ -19,6 +19,8 @@ type CdekTariff = {
   calendar_max?: number;
 };
 
+type CdekCity = { code?: number; city?: string };
+
 function asNum(v: unknown): number | null {
   if (typeof v === 'number' && Number.isFinite(v)) return v;
   if (typeof v === 'string') {
@@ -26,6 +28,20 @@ function asNum(v: unknown): number | null {
     return Number.isFinite(n) ? n : null;
   }
   return null;
+}
+
+function cdekCityCandidates(label: string | null | undefined): string[] {
+  if (!label) return [];
+  const out: string[] = [];
+  const push = (v: string) => {
+    const t = v.replace(/^\s*\d{6}\s*,?\s*/u, '').replace(/\s+/g, ' ').trim();
+    if (t.length >= 2 && !out.includes(t)) out.push(t);
+  };
+  push(label);
+  for (const part of label.split(',').map((x) => x.trim())) if (part) push(part);
+  const m = label.match(/(?:г\.?|город)\s*([А-Яа-яЁёA-Za-z\- ]{2,80})/u);
+  if (m?.[1]) push(m[1]);
+  return out;
 }
 
 export class CdekAdapter implements CarrierAdapter {
@@ -52,11 +68,23 @@ export class CdekAdapter implements CarrierAdapter {
     if (!token) return [];
 
     const base = (process.env.CDEK_API_BASE ?? 'https://api.cdek.ru').replace(/\/+$/, '');
+    const fromCode = await this.resolveCityCode(base, token, input.draft.originLabel || input.snapshot.originLabel);
+    const toCode = await this.resolveCityCode(
+      base,
+      token,
+      input.draft.destinationLabel || input.snapshot.destinationLabel,
+    );
+    if (!fromCode || !toCode) {
+      this.logger.warn(
+        `CDEK city resolve failed; requestId=${requestId}; fromResolved=${Boolean(fromCode)}; toResolved=${Boolean(toCode)}`,
+      );
+      return [];
+    }
     const payload = {
       type: 2,
       currency: 1,
-      from_location: { address: input.draft.originLabel || input.snapshot.originLabel || '' },
-      to_location: { address: input.draft.destinationLabel || input.snapshot.destinationLabel || '' },
+      from_location: { code: fromCode },
+      to_location: { code: toCode },
       packages: [
         {
           weight: Math.max(Math.round(input.snapshot.cargo.weightGrams || 100), 100),
@@ -120,6 +148,25 @@ export class CdekAdapter implements CarrierAdapter {
       });
     }
     return quotes.sort((a, b) => a.priceRub - b.priceRub);
+  }
+
+  private async resolveCityCode(base: string, token: string, label: string | null | undefined): Promise<number | null> {
+    const candidates = cdekCityCandidates(label);
+    for (const city of candidates) {
+      const url = new URL('/v2/location/cities', base);
+      url.searchParams.set('country_codes', 'RU');
+      url.searchParams.set('city', city);
+      url.searchParams.set('size', '1');
+      const res = await fetch(url.toString(), {
+        headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+        cache: 'no-store',
+      }).catch(() => null);
+      if (!res?.ok) continue;
+      const data = (await res.json().catch(() => [])) as unknown;
+      const row = Array.isArray(data) && data.length ? (data[0] as CdekCity) : null;
+      if (row && typeof row.code === 'number' && Number.isFinite(row.code)) return row.code;
+    }
+    return null;
   }
 
   async book(quote: CarrierQuote): Promise<{

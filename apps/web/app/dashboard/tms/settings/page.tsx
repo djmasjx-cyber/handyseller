@@ -53,6 +53,8 @@ export default function TmsSettingsPage() {
   const [m2mItems, setM2mItems] = useState<TmsIntegrationClient[]>([])
   const [m2mLabel, setM2mLabel] = useState("")
   const [m2mSecretOnce, setM2mSecretOnce] = useState<string | null>(null)
+  const [checkingAll, setCheckingAll] = useState(false)
+  const [checkingById, setCheckingById] = useState<Record<string, boolean>>({})
   const activeConnections = items.filter((item) => !item.lastError).length
   const problematicConnections = items.filter((item) => Boolean(item.lastError)).length
 
@@ -154,6 +156,8 @@ export default function TmsSettingsPage() {
         const data = await res.json().catch(() => ({}))
         throw new Error(formatApiError(data))
       }
+      setAccountLabel("")
+      setContractLabel("")
       setLogin("")
       setPassword("")
       setAppKey("")
@@ -182,6 +186,48 @@ export default function TmsSettingsPage() {
       setError(err instanceof Error ? err.message : "Не удалось удалить подключение")
     } finally {
       setSaving(false)
+    }
+  }
+
+  const checkConnection = async (id: string) => {
+    if (!token) return
+    setError(null)
+    setCheckingById((prev) => ({ ...prev, [id]: true }))
+    try {
+      const res = await authFetch(`/api/tms/core/carrier-connections/${id}/check`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(formatApiError(data))
+      }
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось проверить подключение")
+    } finally {
+      setCheckingById((prev) => ({ ...prev, [id]: false }))
+    }
+  }
+
+  const checkAllConnections = async () => {
+    if (!token) return
+    setError(null)
+    setCheckingAll(true)
+    try {
+      const res = await authFetch("/api/tms/core/carrier-connections/check-all", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(formatApiError(data))
+      }
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось проверить подключения")
+    } finally {
+      setCheckingAll(false)
     }
   }
 
@@ -361,6 +407,12 @@ export default function TmsSettingsPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
+          <div>
+            <Button variant="outline" onClick={checkAllConnections} disabled={checkingAll || saving || loading}>
+              {checkingAll ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Проверить все подключения
+            </Button>
+          </div>
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="outline">Всего: {items.length}</Badge>
             <Badge className="bg-emerald-600 hover:bg-emerald-600">Активно: {activeConnections}</Badge>
@@ -395,9 +447,20 @@ export default function TmsSettingsPage() {
                 {item.lastValidatedAt ? `Проверено: ${new Date(item.lastValidatedAt).toLocaleString("ru-RU")}` : "Ещё не проверялось"}
               </p>
               {item.lastError ? <p className="text-sm text-destructive">{item.lastError}</p> : null}
-              <Button variant="outline" size="sm" onClick={() => remove(item.id)} disabled={saving}>
-                Удалить
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => checkConnection(item.id)}
+                  disabled={saving || checkingById[item.id]}
+                >
+                  {checkingById[item.id] ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                  Проверить
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => remove(item.id)} disabled={saving}>
+                  Удалить
+                </Button>
+              </div>
             </div>
           ))}
         </CardContent>

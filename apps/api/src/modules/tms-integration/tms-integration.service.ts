@@ -253,6 +253,50 @@ export class TmsIntegrationService {
     await this.prisma.carrierConnection.delete({ where: { id } });
   }
 
+  async checkCarrierConnection(userId: string, id: string): Promise<CarrierConnectionRecord> {
+    const connection = await this.prisma.carrierConnection.findFirst({
+      where: { id, userId },
+    });
+    if (!connection) {
+      throw new NotFoundException('Подключение перевозчика не найдено');
+    }
+    const login = this.crypto.decrypt(connection.login);
+    const password = this.crypto.decrypt(connection.password);
+    let lastError: string | null = null;
+    try {
+      if (connection.carrierCode === 'MAJOR_EXPRESS') {
+        await this.validateMajorCredentials(login, password);
+      } else if (connection.carrierCode === 'CDEK') {
+        await this.validateCdekCredentials(login, password);
+      } else if (connection.carrierCode === 'DELLIN') {
+        const appKey = connection.appKey ? this.crypto.decrypt(connection.appKey) : null;
+        await this.validateDellinCredentials(appKey);
+      }
+    } catch (e) {
+      lastError = e instanceof Error ? e.message : String(e);
+    }
+    const updated = await this.prisma.carrierConnection.update({
+      where: { id: connection.id },
+      data: {
+        lastValidatedAt: new Date(),
+        lastError,
+      },
+    });
+    return this.toCarrierConnectionRecord(updated);
+  }
+
+  async checkAllCarrierConnections(userId: string): Promise<CarrierConnectionRecord[]> {
+    const list = await this.prisma.carrierConnection.findMany({
+      where: { userId },
+      orderBy: [{ carrierCode: 'asc' }, { isDefault: 'desc' }, { createdAt: 'desc' }],
+    });
+    const out: CarrierConnectionRecord[] = [];
+    for (const item of list) {
+      out.push(await this.checkCarrierConnection(userId, item.id));
+    }
+    return out;
+  }
+
   async getInternalCarrierCredentials(
     userId: string,
     carrierCode: CarrierCode,
@@ -486,6 +530,30 @@ export class TmsIntegrationService {
       throw new BadRequestException(
         detail ? `CDEK: ${detail}` : 'CDEK не принял client_id/client_secret. Проверьте ключи API.',
       );
+    }
+  }
+
+  private async validateDellinCredentials(appKey: string | null): Promise<void> {
+    const key = (appKey ?? '').trim();
+    if (!key) {
+      throw new BadRequestException('Для Деловых Линий отсутствует appKey.');
+    }
+    const base = (process.env.DELLIN_API_BASE ?? 'https://api.dellin.ru').replace(/\/+$/, '');
+    const res = await fetch(`${base}/v2/public/kladr.json`, {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ appkey: key, q: 'Москва', limit: 1 }),
+    }).catch((error) => {
+      throw new BadRequestException(`Не удалось связаться с API Деловых Линий: ${String(error)}`);
+    });
+    const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    const cities =
+      (Array.isArray(data.cities) ? data.cities : null) ??
+      (Array.isArray((data.data as Record<string, unknown> | undefined)?.cities)
+        ? ((data.data as Record<string, unknown>).cities as unknown[])
+        : null);
+    if (!res.ok || !cities || cities.length === 0) {
+      throw new BadRequestException('Деловые Линии: appKey не прошёл проверку.');
     }
   }
 
