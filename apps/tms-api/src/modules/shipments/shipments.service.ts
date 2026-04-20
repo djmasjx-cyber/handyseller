@@ -18,6 +18,7 @@ import type {
 import { buildMockCarrierAdapters } from './adapters/mock-carrier.adapters';
 import { MajorExpressAdapter } from './adapters/major-express.adapter';
 import { DellinAdapter } from './adapters/dellin.adapter';
+import { CdekAdapter } from './adapters/cdek.adapter';
 import type { CarrierAdapter } from './adapters/base-carrier.adapter';
 
 @Injectable()
@@ -53,7 +54,7 @@ export class ShipmentsService {
   }
 
   private static buildCarrierAdapters(): CarrierAdapter[] {
-    const real: CarrierAdapter[] = [new MajorExpressAdapter(), new DellinAdapter()];
+    const real: CarrierAdapter[] = [new MajorExpressAdapter(), new DellinAdapter(), new CdekAdapter()];
     const includeMocks =
       process.env.TMS_INCLUDE_MOCK_CARRIERS === '1' ||
       process.env.TMS_INCLUDE_MOCK_CARRIERS === 'true' ||

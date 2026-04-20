@@ -457,6 +457,7 @@ model CarrierConnection {
 enum CarrierCode {
   MAJOR_EXPRESS
   DELLIN
+  CDEK
 }
 
 enum CarrierServiceType {

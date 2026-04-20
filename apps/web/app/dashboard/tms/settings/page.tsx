@@ -18,7 +18,7 @@ function formatApiError(data: unknown): string {
 
 type CarrierConnection = {
   id: string
-  carrierCode: "MAJOR_EXPRESS" | "DELLIN"
+  carrierCode: "MAJOR_EXPRESS" | "DELLIN" | "CDEK"
   serviceType: "EXPRESS" | "LTL"
   accountLabel: string | null
   contractLabel: string | null
@@ -46,7 +46,7 @@ export default function TmsSettingsPage() {
   const [items, setItems] = useState<CarrierConnection[]>([])
   const [accountLabel, setAccountLabel] = useState("")
   const [contractLabel, setContractLabel] = useState("")
-  const [carrierCode, setCarrierCode] = useState<"MAJOR_EXPRESS" | "DELLIN">("MAJOR_EXPRESS")
+  const [carrierCode, setCarrierCode] = useState<"MAJOR_EXPRESS" | "DELLIN" | "CDEK">("MAJOR_EXPRESS")
   const [login, setLogin] = useState("")
   const [password, setPassword] = useState("")
   const [appKey, setAppKey] = useState("")
@@ -209,13 +209,14 @@ export default function TmsSettingsPage() {
               id="carrierCode"
               value={carrierCode}
               onChange={(e) => {
-                setCarrierCode(e.target.value as "MAJOR_EXPRESS" | "DELLIN")
+                setCarrierCode(e.target.value as "MAJOR_EXPRESS" | "DELLIN" | "CDEK")
                 setAppKey("")
               }}
               className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
             >
               <option value="MAJOR_EXPRESS">Major Express</option>
               <option value="DELLIN">Деловые Линии</option>
+              <option value="CDEK">CDEK</option>
             </select>
           </div>
           <div className="space-y-2">
@@ -232,8 +233,17 @@ export default function TmsSettingsPage() {
               id="login"
               value={login}
               onChange={(e) => setLogin(e.target.value)}
-              placeholder={carrierCode === "DELLIN" ? "Телефон или логин из ЛК Деловых Линий" : "Логин Major Express"}
+              placeholder={
+                carrierCode === "DELLIN"
+                  ? "Телефон или логин из ЛК Деловых Линий"
+                  : carrierCode === "CDEK"
+                    ? "client_id CDEK API"
+                    : "Логин Major Express"
+              }
             />
+            {carrierCode === "CDEK" ? (
+              <p className="text-xs text-muted-foreground">Для CDEK укажите `client_id` API.</p>
+            ) : null}
           </div>
           {carrierCode === "DELLIN" ? (
             <div className="space-y-2 md:col-span-2">
@@ -257,8 +267,17 @@ export default function TmsSettingsPage() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder={carrierCode === "DELLIN" ? "Пароль от ЛК Деловых Линий" : "Пароль Major Express"}
+              placeholder={
+                carrierCode === "DELLIN"
+                  ? "Пароль от ЛК Деловых Линий"
+                  : carrierCode === "CDEK"
+                    ? "client_secret CDEK API"
+                    : "Пароль Major Express"
+              }
             />
+            {carrierCode === "CDEK" ? (
+              <p className="text-xs text-muted-foreground">Для CDEK укажите `client_secret` API.</p>
+            ) : null}
           </div>
           <div className="md:col-span-2 flex items-center gap-3">
             <Button onClick={save} disabled={saving || !login || !password}>
@@ -357,7 +376,7 @@ export default function TmsSettingsPage() {
             <div key={item.id} className="rounded-lg border p-4 space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <p className="font-medium">{item.accountLabel || (item.carrierCode === "DELLIN" ? "Деловые Линии" : "Major Express")}</p>
+                  <p className="font-medium">{item.accountLabel || (item.carrierCode === "DELLIN" ? "Деловые Линии" : item.carrierCode === "CDEK" ? "CDEK" : "Major Express")}</p>
                   <p className="text-sm text-muted-foreground">
                     {item.contractLabel || "Без названия договора"} · {item.loginPreview || "логин скрыт"}
                   </p>

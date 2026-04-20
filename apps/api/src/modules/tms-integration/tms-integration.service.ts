@@ -175,6 +175,9 @@ export class TmsIntegrationService {
     if (carrierCode === 'MAJOR_EXPRESS') {
       await this.validateMajorCredentials(login, password);
     }
+    if (carrierCode === 'CDEK') {
+      await this.validateCdekCredentials(login, password);
+    }
 
     const target =
       input.id != null
@@ -462,6 +465,26 @@ export class TmsIntegrationService {
         detail
           ? `Major Express: ${detail}`
           : 'Major Express вернул ошибку SOAP. Проверьте логин и пароль.',
+      );
+    }
+  }
+
+  private async validateCdekCredentials(login: string, password: string): Promise<void> {
+    const tokenUrl = new URL('/v2/oauth/token', process.env.CDEK_API_BASE ?? 'https://api.cdek.ru');
+    tokenUrl.searchParams.set('grant_type', 'client_credentials');
+    tokenUrl.searchParams.set('client_id', login);
+    tokenUrl.searchParams.set('client_secret', password);
+    const res = await fetch(tokenUrl.toString(), {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+    }).catch((error) => {
+      throw new BadRequestException(`Не удалось связаться с CDEK API: ${String(error)}`);
+    });
+    const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    if (!res.ok || typeof data.access_token !== 'string') {
+      const detail = typeof data.error_description === 'string' ? data.error_description : null;
+      throw new BadRequestException(
+        detail ? `CDEK: ${detail}` : 'CDEK не принял client_id/client_secret. Проверьте ключи API.',
       );
     }
   }

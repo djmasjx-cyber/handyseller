@@ -92,7 +92,7 @@ abstract class BaseMockCarrierAdapter implements CarrierAdapter {
 
 export class CdekMockCarrierAdapter extends BaseMockCarrierAdapter {
   readonly descriptor: CarrierDescriptor = {
-    id: 'cdek',
+    id: 'cdek-mock',
     name: 'CDEK Mock',
     modes: ['ROAD', 'COURIER', 'PICKUP'],
     supportedFlags: ['EXPRESS', 'CONSOLIDATED'],
