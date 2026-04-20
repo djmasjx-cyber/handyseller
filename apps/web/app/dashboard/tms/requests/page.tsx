@@ -238,6 +238,7 @@ export default function TmsRequestsPage() {
   const [refreshingId, setRefreshingId] = useState<string | null>(null)
   const [selectingKey, setSelectingKey] = useState<string | null>(null)
   const [confirmingId, setConfirmingId] = useState<string | null>(null)
+  const [expandedVariants, setExpandedVariants] = useState<Record<string, boolean>>({})
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState("")
   const [sortMode, setSortMode] = useState<SortMode>("newest")
@@ -501,6 +502,11 @@ export default function TmsRequestsPage() {
     }
   }
 
+  const toggleVariants = (requestId: string, carrierId: string) => {
+    const key = `${requestId}:${carrierId}`
+    setExpandedVariants((prev) => ({ ...prev, [key]: !prev[key] }))
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-16">
@@ -608,6 +614,9 @@ export default function TmsRequestsPage() {
                         const carrierQuotes = quotesForCarrier(quotes, col.id, item.draft.serviceFlags)
                         const canPick = item.status !== "BOOKED"
                         if (carrierQuotes.length === 0) return null
+                        const variantsKey = `${item.id}:${col.id}`
+                        const expanded = Boolean(expandedVariants[variantsKey])
+                        const shownQuotes = expanded ? carrierQuotes : carrierQuotes.slice(0, 4)
                         const minPrice = Math.min(...carrierQuotes.map((q) => q.priceRub))
                         const minEta = Math.min(...carrierQuotes.map((q) => q.etaDays))
                         return (
@@ -620,7 +629,7 @@ export default function TmsRequestsPage() {
                             </summary>
                             <div className="border-t p-2">
                               <div className="grid grid-cols-2 gap-1">
-                                {carrierQuotes.map((quote) => {
+                                {shownQuotes.map((quote) => {
                                   const selected = item.selectedQuoteId === quote.id
                                   const busy = selectingKey === `${item.id}:${quote.id}`
                                   return (
@@ -636,6 +645,15 @@ export default function TmsRequestsPage() {
                                   )
                                 })}
                               </div>
+                              {carrierQuotes.length > 4 ? (
+                                <button
+                                  type="button"
+                                  className="mt-1 text-[11px] text-primary underline-offset-2 hover:underline"
+                                  onClick={() => toggleVariants(item.id, col.id)}
+                                >
+                                  {expanded ? "Скрыть лишние" : `Показать еще (${carrierQuotes.length - 4})`}
+                                </button>
+                              ) : null}
                             </div>
                           </details>
                         )
@@ -720,11 +738,15 @@ export default function TmsRequestsPage() {
                       {carrierColumns.map((col) => {
                         const carrierQuotes = quotesForCarrier(quotes, col.id, item.draft.serviceFlags)
                         const canPick = item.status !== "BOOKED"
+                        const variantsKey = `${item.id}:${col.id}`
+                        const expanded = Boolean(expandedVariants[variantsKey])
+                        const shownQuotes = expanded ? carrierQuotes : carrierQuotes.slice(0, 4)
                         return (
                           <td key={col.id} className="border-l p-1 align-top text-center">
                             {carrierQuotes.length > 0 ? (
-                              <div className="grid grid-cols-2 gap-1">
-                                {carrierQuotes.map((quote) => {
+                              <div className="space-y-1">
+                                <div className="grid grid-cols-2 gap-1">
+                                {shownQuotes.map((quote) => {
                                   const selected = item.selectedQuoteId === quote.id
                                   const busy = selectingKey === `${item.id}:${quote.id}`
                                   return (
@@ -739,6 +761,16 @@ export default function TmsRequestsPage() {
                                     />
                                   )
                                 })}
+                                </div>
+                                {carrierQuotes.length > 4 ? (
+                                  <button
+                                    type="button"
+                                    className="text-[11px] text-primary underline-offset-2 hover:underline"
+                                    onClick={() => toggleVariants(item.id, col.id)}
+                                  >
+                                    {expanded ? "Скрыть лишние" : `Показать еще (${carrierQuotes.length - 4})`}
+                                  </button>
+                                ) : null}
                               </div>
                             ) : (
                               <span className="text-muted-foreground py-2 block">—</span>

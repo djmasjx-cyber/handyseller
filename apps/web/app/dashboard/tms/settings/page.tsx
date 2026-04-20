@@ -53,6 +53,7 @@ export default function TmsSettingsPage() {
   const [m2mItems, setM2mItems] = useState<TmsIntegrationClient[]>([])
   const [m2mLabel, setM2mLabel] = useState("")
   const [m2mSecretOnce, setM2mSecretOnce] = useState<string | null>(null)
+  const [credentialsFormVersion, setCredentialsFormVersion] = useState(0)
   const [checkingAll, setCheckingAll] = useState(false)
   const [checkingById, setCheckingById] = useState<Record<string, boolean>>({})
   const activeConnections = items.filter((item) => !item.lastError).length
@@ -161,6 +162,7 @@ export default function TmsSettingsPage() {
       setLogin("")
       setPassword("")
       setAppKey("")
+      setCredentialsFormVersion((v) => v + 1)
       await load()
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось сохранить подключение")
@@ -276,9 +278,11 @@ export default function TmsSettingsPage() {
           <div className="space-y-2">
             <Label htmlFor="login">Логин</Label>
             <Input
+              key={`login-${credentialsFormVersion}`}
               id="login"
               value={login}
               onChange={(e) => setLogin(e.target.value)}
+              autoComplete="off"
               placeholder={
                 carrierCode === "DELLIN"
                   ? "Телефон или логин из ЛК Деловых Линий"
@@ -295,6 +299,7 @@ export default function TmsSettingsPage() {
             <div className="space-y-2 md:col-span-2">
               <Label htmlFor="appKey">Ключ приложения (appKey)</Label>
               <Input
+              key={`appkey-${credentialsFormVersion}`}
                 id="appKey"
                 value={appKey}
                 onChange={(e) => setAppKey(e.target.value)}
@@ -309,10 +314,12 @@ export default function TmsSettingsPage() {
           <div className="space-y-2">
             <Label htmlFor="password">Пароль</Label>
             <Input
+              key={`password-${credentialsFormVersion}`}
               id="password"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              autoComplete="new-password"
               placeholder={
                 carrierCode === "DELLIN"
                   ? "Пароль от ЛК Деловых Линий"
