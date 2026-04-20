@@ -145,17 +145,17 @@ export class DellinAdapter implements CarrierAdapter {
     input: CreateShipmentRequestInput,
     requestId: string,
     context: CarrierQuoteContext,
-  ): Promise<CarrierQuote | null> {
+  ): Promise<CarrierQuote[]> {
     const credentials = await this.loadCredentials(context, requestId);
     if (!credentials) {
       this.logger.warn(`Dellin quote skipped: missing credentials context; requestId=${requestId}`);
-      return null;
+      return [];
     }
 
     const appKey = (credentials.appKey ?? '').trim() || process.env.DELLIN_APP_KEY?.trim();
     if (!appKey) {
       this.logger.warn(`Dellin quote skipped: missing appKey; requestId=${requestId}`);
-      return null;
+      return [];
     }
 
     const base = (process.env.DELLIN_API_BASE ?? 'https://api.dellin.ru').replace(/\/+$/, '');
@@ -177,7 +177,7 @@ export class DellinAdapter implements CarrierAdapter {
           originCode,
         )}; destResolved=${Boolean(destCode)}`,
       );
-      return null;
+      return [];
     }
 
     const cargo = input.snapshot.cargo;
@@ -188,76 +188,76 @@ export class DellinAdapter implements CarrierAdapter {
     );
     const statedValue = Math.max(cargo.declaredValueRub, 1);
 
-    const derivalDoor = process.env.DELLIN_DERIVAL_DOOR === '1' || process.env.DELLIN_DERIVAL_DOOR === 'true';
-    const arrivalDoor =
-      process.env.DELLIN_ARRIVAL_DOOR === '0' || process.env.DELLIN_ARRIVAL_DOOR === 'false' ? false : true;
-
-    const calcBody: Record<string, unknown> = {
-      appkey: appKey,
-      derivalPoint: originCode,
-      arrivalPoint: destCode,
-      derivalDoor,
-      arrivalDoor,
-      sizedVolume: Number(volM3.toFixed(4)),
-      sizedWeight: Number(weightKg.toFixed(3)),
-      statedValue,
-    };
-
     const lenM = Math.max((cargo.lengthMm ?? 0) / 1000, 0.01);
     const widM = Math.max((cargo.widthMm ?? 0) / 1000, 0.01);
     const hgtM = Math.max((cargo.heightMm ?? 0) / 1000, 0.01);
-    if (cargo.lengthMm && cargo.widthMm && cargo.heightMm) {
-      calcBody.length = Number(lenM.toFixed(3));
-      calcBody.width = Number(widM.toFixed(3));
-      calcBody.height = Number(hgtM.toFixed(3));
-    }
-
     const calcUrl = dellinJsonUrl(base, DELLIN_PUBLIC_CALCULATOR_PATH);
-    const res = await fetch(calcUrl, {
-      method: 'POST',
-      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-      body: JSON.stringify(calcBody),
-      cache: 'no-store',
-    }).catch(() => null);
-
-    if (!res?.ok) {
-      this.logger.warn(
-        `Dellin calculator HTTP failed: status=${res?.status ?? 'n/a'}; url=${calcUrl}; requestId=${requestId}`,
-      );
-      return null;
-    }
-
-    const data = (await res.json().catch(() => null)) as Record<string, unknown> | null;
-    if (!data) {
-      this.logger.warn(`Dellin calculator JSON parse failed; requestId=${requestId}`);
-      return null;
-    }
-
-    const parsed = parsePublicCalculator(data);
-    if (!parsed) {
-      const errSnippet = JSON.stringify(data).slice(0, 500);
-      this.logger.warn(`Dellin calculator returned no price; requestId=${requestId}; body=${errSnippet}`);
-      return null;
-    }
-
-    const { priceRub, etaDays, insuranceRub } = parsed;
-    const insNote = insuranceRub != null ? ` · страховка ~${insuranceRub} ₽` : '';
     const serviceFlags = input.draft.serviceFlags.filter((flag) =>
       this.descriptor.supportedFlags.includes(flag),
     );
+    const variants = [
+      { key: 'door-door', label: 'Дверь → дверь', derivalDoor: true, arrivalDoor: true },
+      { key: 'door-terminal', label: 'Дверь → терминал', derivalDoor: true, arrivalDoor: false },
+      { key: 'terminal-terminal', label: 'Терминал → терминал', derivalDoor: false, arrivalDoor: false },
+      { key: 'terminal-door', label: 'Терминал → дверь', derivalDoor: false, arrivalDoor: true },
+    ] as const;
 
-    return {
-      id: `${requestId}:${this.descriptor.id}`,
-      requestId,
-      carrierId: this.descriptor.id,
-      carrierName: this.descriptor.name,
-      mode: this.descriptor.modes[0],
-      priceRub,
-      etaDays,
-      serviceFlags,
-      notes: `${credentials.accountLabel ?? 'Договор'} · КЛАДР ${originCode.slice(0, 13)}…→${destCode.slice(0, 13)}… · оценка ${statedValue} ₽${insNote}`,
-      score: Math.round((100000 / Math.max(priceRub, 1)) * 100) / 100,
-    };
+    const quotes: CarrierQuote[] = [];
+    for (const variant of variants) {
+      const calcBody: Record<string, unknown> = {
+        appkey: appKey,
+        derivalPoint: originCode,
+        arrivalPoint: destCode,
+        derivalDoor: variant.derivalDoor,
+        arrivalDoor: variant.arrivalDoor,
+        sizedVolume: Number(volM3.toFixed(4)),
+        sizedWeight: Number(weightKg.toFixed(3)),
+        statedValue,
+      };
+      if (cargo.lengthMm && cargo.widthMm && cargo.heightMm) {
+        calcBody.length = Number(lenM.toFixed(3));
+        calcBody.width = Number(widM.toFixed(3));
+        calcBody.height = Number(hgtM.toFixed(3));
+      }
+      const res = await fetch(calcUrl, {
+        method: 'POST',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify(calcBody),
+        cache: 'no-store',
+      }).catch(() => null);
+      if (!res?.ok) {
+        this.logger.warn(
+          `Dellin calculator HTTP failed: status=${res?.status ?? 'n/a'}; url=${calcUrl}; requestId=${requestId}; variant=${variant.key}`,
+        );
+        continue;
+      }
+      const data = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+      if (!data) continue;
+      const parsed = parsePublicCalculator(data);
+      if (!parsed) continue;
+      const { priceRub, etaDays, insuranceRub } = parsed;
+      const insNote = insuranceRub != null ? ` · страховка ~${insuranceRub} ₽` : '';
+      quotes.push({
+        id: `${requestId}:${this.descriptor.id}:${variant.key}`,
+        requestId,
+        carrierId: this.descriptor.id,
+        carrierName: this.descriptor.name,
+        mode: this.descriptor.modes[0],
+        priceRub,
+        etaDays,
+        serviceFlags,
+        notes: `${variant.label} · ${credentials.accountLabel ?? 'Договор'} · КЛАДР ${originCode.slice(0, 13)}…→${destCode.slice(0, 13)}… · оценка ${statedValue} ₽${insNote}`,
+        priceDetails: {
+          source: 'carrier_total',
+          totalRub: priceRub,
+          insuranceRub: insuranceRub ?? undefined,
+          currency: 'RUB',
+          comment: `Dellin public calculator (${variant.label})`,
+        },
+        score: Math.round((100000 / Math.max(priceRub, 1)) * 100) / 100,
+      });
+    }
+    return quotes;
   }
 
   async book(quote: CarrierQuote): Promise<{

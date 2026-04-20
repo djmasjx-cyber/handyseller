@@ -101,6 +101,19 @@ export interface CarrierQuote {
   etaDays: number;
   serviceFlags: ServiceFlag[];
   notes?: string;
+  /**
+   * Нормализованная структура источника цены:
+   * чтобы логист всегда видел откуда взялась итоговая сумма у конкретного перевозчика.
+   */
+  priceDetails?: {
+    source: 'carrier_total' | 'computed' | 'mock';
+    totalRub: number;
+    tariffRub?: number;
+    insuranceRub?: number;
+    extrasRub?: number;
+    currency?: 'RUB';
+    comment?: string;
+  };
   score: number;
 }
 

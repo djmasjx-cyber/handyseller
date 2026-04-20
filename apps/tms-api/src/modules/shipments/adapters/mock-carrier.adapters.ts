@@ -33,6 +33,12 @@ function buildQuote(
     etaDays,
     serviceFlags,
     notes,
+    priceDetails: {
+      source: 'mock',
+      totalRub: priceRub,
+      currency: 'RUB',
+      comment: 'Mock carrier formula',
+    },
     score: computeQuoteScore({ priceRub, etaDays, serviceFlags }),
   };
 }
@@ -77,7 +83,7 @@ abstract class BaseMockCarrierAdapter implements CarrierAdapter {
     input: CreateShipmentRequestInput,
     requestId: string,
     context: CarrierQuoteContext,
-  ): Promise<CarrierQuote | null>;
+  ): Promise<CarrierQuote[]>;
 
   async book(quote: CarrierQuote) {
     return buildBooking(quote);
@@ -98,7 +104,7 @@ export class CdekMockCarrierAdapter extends BaseMockCarrierAdapter {
     const weightFactor = Math.max(input.snapshot.cargo.weightGrams / 1000, 1);
     const priceRub = Math.round(280 + weightFactor * 55 + input.draft.serviceFlags.length * 35);
     const etaDays = input.draft.serviceFlags.includes('EXPRESS') ? 1 : 3;
-    return buildQuote(this.descriptor, requestId, input, priceRub, etaDays, 'Сильный региональный охват');
+    return [buildQuote(this.descriptor, requestId, input, priceRub, etaDays, 'Сильный региональный охват')];
   }
 }
 
@@ -114,11 +120,11 @@ export class BoxberryMockCarrierAdapter extends BaseMockCarrierAdapter {
 
   async quote(input: CreateShipmentRequestInput, requestId: string, _context: CarrierQuoteContext) {
     if (input.draft.serviceFlags.includes('HAZMAT') || input.draft.serviceFlags.includes('AIR')) {
-      return null;
+      return [];
     }
     const weightFactor = Math.max(input.snapshot.cargo.weightGrams / 1000, 1);
     const priceRub = Math.round(220 + weightFactor * 48);
-    return buildQuote(this.descriptor, requestId, input, priceRub, 4, 'Экономичный ПВЗ-сценарий');
+    return [buildQuote(this.descriptor, requestId, input, priceRub, 4, 'Экономичный ПВЗ-сценарий')];
   }
 }
 
@@ -137,7 +143,7 @@ export class FleetMockCarrierAdapter extends BaseMockCarrierAdapter {
     const oversizeFactor = input.draft.serviceFlags.includes('OVERSIZED') ? 220 : 0;
     const priceRub = Math.round(360 + weightFactor * 42 + oversizeFactor);
     const etaDays = input.draft.serviceFlags.includes('EXPRESS') ? 1 : 2;
-    return buildQuote(this.descriptor, requestId, input, priceRub, etaDays, 'Контролируемое SLA своими силами');
+    return [buildQuote(this.descriptor, requestId, input, priceRub, etaDays, 'Контролируемое SLA своими силами')];
   }
 }
 

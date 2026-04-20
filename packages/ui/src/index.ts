@@ -11,4 +11,6 @@ export {
   CardContent,
 } from "./card"
 export { Badge, badgeVariants } from "./badge"
+export { HoverCard, HoverCardTrigger, HoverCardContent } from "./hover-card"
+export { Popover, PopoverTrigger, PopoverContent } from "./popover"
 export { cn } from "./utils"

@@ -12,6 +12,9 @@ import {
   CardTitle,
   Input,
   Label,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
 } from "@handyseller/ui"
 import { Loader2 } from "lucide-react"
 import { authFetch } from "@/lib/auth-fetch"
@@ -45,6 +48,15 @@ type Quote = {
   score: number
   serviceFlags?: string[]
   notes?: string
+  priceDetails?: {
+    source?: string
+    totalRub?: number
+    tariffRub?: number
+    insuranceRub?: number
+    extrasRub?: number
+    currency?: string
+    comment?: string
+  }
 }
 
 const SERVICE_LABELS: Record<string, string> = {
@@ -84,10 +96,105 @@ function pickQuoteForCarrier(
   carrierId: string,
   draftFlags: string[],
 ): Quote | null {
-  const exact = quotes.filter((q) => q.carrierId === carrierId && quoteMatchesDraft(q, draftFlags))
-  const pool = exact.length ? exact : quotes.filter((q) => q.carrierId === carrierId)
+  const exact = quotes
+    .filter((q) => q.carrierId === carrierId && quoteMatchesDraft(q, draftFlags))
+    .sort((a, b) => a.priceRub - b.priceRub)
+  const pool = exact.length ? exact : quotes.filter((q) => q.carrierId === carrierId).sort((a, b) => a.priceRub - b.priceRub)
   if (!pool.length) return null
-  return pool.reduce((a, b) => (a.priceRub <= b.priceRub ? a : b))
+  return pool[0]
+}
+
+function quotesForCarrier(quotes: Quote[], carrierId: string, draftFlags: string[]): Quote[] {
+  const exact = quotes
+    .filter((q) => q.carrierId === carrierId && quoteMatchesDraft(q, draftFlags))
+    .sort((a, b) => a.priceRub - b.priceRub)
+  const fallback = quotes.filter((q) => q.carrierId === carrierId).sort((a, b) => a.priceRub - b.priceRub)
+  return exact.length ? exact : fallback
+}
+
+function QuoteDetails({ quote }: { quote: Quote }) {
+  const price = quote.priceDetails
+  const variantLabel = quote.notes?.split("·")[0]?.trim() ?? "Вариант"
+  return (
+    <div className="space-y-1 text-xs">
+      <p className="font-medium text-foreground">{variantLabel}</p>
+      <p className="text-muted-foreground">Срок: {quote.etaDays} дн.</p>
+      <p className="font-semibold text-foreground">Итог: {quote.priceRub.toLocaleString("ru-RU")} ₽</p>
+      {price?.tariffRub != null ? <p className="text-muted-foreground">Тариф: {price.tariffRub.toLocaleString("ru-RU")} ₽</p> : null}
+      {price?.insuranceRub != null ? (
+        <p className="text-muted-foreground">Страховка: {price.insuranceRub.toLocaleString("ru-RU")} ₽</p>
+      ) : null}
+      {price?.extrasRub != null && price.extrasRub > 0 ? (
+        <p className="text-muted-foreground">Доп. услуги: {price.extrasRub.toLocaleString("ru-RU")} ₽</p>
+      ) : null}
+      {price?.comment ? <p className="text-muted-foreground">{price.comment}</p> : null}
+    </div>
+  )
+}
+
+function QuoteTile({
+  quote,
+  selected,
+  busy,
+  canPick,
+  disabled,
+  onSelect,
+}: {
+  quote: Quote
+  selected: boolean
+  busy: boolean
+  canPick: boolean
+  disabled: boolean
+  onSelect: () => void
+}) {
+  const variantLabel = quote.notes?.split("·")[0]?.trim() ?? "Вариант"
+  return (
+    <div
+      className={`relative min-h-[56px] rounded-md transition-colors ${
+        selected ? "ring-2 ring-primary ring-offset-1" : ""
+      }`}
+    >
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={onSelect}
+        className={`h-full w-full rounded-md px-1 py-1 pr-6 text-left ${
+          selected
+            ? "bg-primary text-primary-foreground"
+            : canPick
+              ? "bg-muted/60 hover:bg-primary/15 hover:ring-1 hover:ring-primary/40"
+              : "bg-muted/40 opacity-80"
+        }`}
+      >
+        {busy ? (
+          <Loader2 className="mx-auto h-4 w-4 animate-spin" />
+        ) : (
+          <>
+            <div className="text-[10px] leading-tight truncate opacity-90">{variantLabel}</div>
+            <div className="text-xs font-semibold tabular-nums leading-tight">
+              {quote.priceRub.toLocaleString("ru-RU")} ₽
+            </div>
+            <div className="text-[10px] leading-tight opacity-85">{quote.etaDays} дн.</div>
+          </>
+        )}
+      </button>
+      <Popover>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            className="absolute right-1 top-1 z-10 h-4 w-4 rounded-full border border-border/70 bg-background/90 text-[10px] leading-none text-muted-foreground"
+            onClick={(e) => e.stopPropagation()}
+            aria-label="Состав цены"
+          >
+            i
+          </button>
+        </PopoverTrigger>
+        <PopoverContent align="start" side="top" className="w-72">
+          <QuoteDetails quote={quote} />
+        </PopoverContent>
+      </Popover>
+    </div>
+  )
 }
 
 function collectCarrierColumns(quotesByRequest: Record<string, Quote[]>): Array<{ id: string; name: string }> {
@@ -407,9 +514,8 @@ export default function TmsRequestsPage() {
       <CardHeader>
         <CardTitle>Сравнение тарифов</CardTitle>
         <CardDescription>
-          Строки — заявки, колонки — перевозчики; в ячейке цена и срок. Очереди по типу потока (маркетплейс / ТК);
-          список обновляется каждые 30 с, пока вкладка открыта. Клик по ячейке — выбор тарифа, далее нажмите
-          «Подтвердить».
+          Строки — заявки, колонки — перевозчики; в ячейках варианты тарифов (дверь/терминал и др.). Наведите на
+          цену, чтобы увидеть состав суммы. Клик по варианту — выбор тарифа, далее нажмите «Подтвердить».
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -479,7 +585,89 @@ export default function TmsRequestsPage() {
         {items.length === 0 ? (
           <p className="text-sm text-muted-foreground">Расчётов пока нет. Создайте заявку из дашборда TMS или из заказов.</p>
         ) : (
-          <div className="overflow-x-auto rounded-md border">
+          <>
+            <div className="space-y-3 md:hidden">
+              {sortedRows.map((item) => {
+                const quotes = quotesByRequest[item.id] ?? []
+                return (
+                  <div key={item.id} className="rounded-md border p-3 space-y-3">
+                    <div>
+                      <p className="text-sm font-medium">{item.snapshot.marketplace}</p>
+                      <p className="text-xs text-muted-foreground">{item.snapshot.coreOrderNumber}</p>
+                    </div>
+                    <div className="grid grid-cols-1 gap-2 text-xs text-muted-foreground">
+                      <p>Откуда: {item.draft.originLabel}</p>
+                      <p>Куда: {item.draft.destinationLabel}</p>
+                      <p>Условия: {formatServiceFlags(item.draft.serviceFlags)}</p>
+                    </div>
+                    <Badge variant={item.status === "BOOKED" ? "default" : "secondary"}>
+                      {requestStatusLabel(item.status)}
+                    </Badge>
+                    <div className="space-y-2">
+                      {carrierColumns.map((col) => {
+                        const carrierQuotes = quotesForCarrier(quotes, col.id, item.draft.serviceFlags)
+                        const canPick = item.status !== "BOOKED"
+                        if (carrierQuotes.length === 0) return null
+                        const minPrice = Math.min(...carrierQuotes.map((q) => q.priceRub))
+                        const minEta = Math.min(...carrierQuotes.map((q) => q.etaDays))
+                        return (
+                          <details key={col.id} className="rounded-md border">
+                            <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2">
+                              <span className="text-xs font-medium">{col.name}</span>
+                              <span className="text-[11px] text-muted-foreground">
+                                от {minPrice.toLocaleString("ru-RU")} ₽ · от {minEta} дн.
+                              </span>
+                            </summary>
+                            <div className="border-t p-2">
+                              <div className="grid grid-cols-2 gap-1">
+                                {carrierQuotes.map((quote) => {
+                                  const selected = item.selectedQuoteId === quote.id
+                                  const busy = selectingKey === `${item.id}:${quote.id}`
+                                  return (
+                                    <QuoteTile
+                                      key={quote.id}
+                                      quote={quote}
+                                      selected={selected}
+                                      busy={busy}
+                                      canPick={canPick}
+                                      disabled={!canPick || Boolean(refreshingId === item.id) || Boolean(busy)}
+                                      onSelect={() => void selectQuote(item.id, quote)}
+                                    />
+                                  )
+                                })}
+                              </div>
+                            </div>
+                          </details>
+                        )
+                      })}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Button
+                        size="sm"
+                        disabled={
+                          item.status === "BOOKED" ||
+                          !item.selectedQuoteId ||
+                          confirmingId === item.id ||
+                          refreshingId === item.id
+                        }
+                        onClick={() => void confirmQuote(item.id)}
+                      >
+                        {confirmingId === item.id ? <Loader2 className="h-4 w-4 animate-spin" /> : "Подтвердить"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={refreshingId === item.id || confirmingId === item.id}
+                        onClick={() => void refreshQuotes(item.id)}
+                      >
+                        {refreshingId === item.id ? <Loader2 className="h-4 w-4 animate-spin" /> : "Обновить"}
+                      </Button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+            <div className="hidden md:block overflow-x-auto rounded-md border">
             <table className="w-full min-w-[720px] text-sm border-collapse">
               <thead>
                 <tr className="border-b bg-muted/50 text-left">
@@ -530,37 +718,28 @@ export default function TmsRequestsPage() {
                         </Badge>
                       </td>
                       {carrierColumns.map((col) => {
-                        const quote = pickQuoteForCarrier(quotes, col.id, item.draft.serviceFlags)
-                        const selected = quote ? item.selectedQuoteId === quote.id : false
-                        const busy = quote ? selectingKey === `${item.id}:${quote.id}` : false
+                        const carrierQuotes = quotesForCarrier(quotes, col.id, item.draft.serviceFlags)
                         const canPick = item.status !== "BOOKED"
                         return (
                           <td key={col.id} className="border-l p-1 align-top text-center">
-                            {quote ? (
-                              <button
-                                type="button"
-                                disabled={!canPick || Boolean(refreshingId === item.id) || Boolean(busy)}
-                                onClick={() => void selectQuote(item.id, quote)}
-                                className={`w-full rounded-md px-2 py-2 text-left transition-colors ${
-                                  selected
-                                    ? "bg-primary text-primary-foreground ring-2 ring-primary ring-offset-2"
-                                    : canPick
-                                      ? "bg-muted/60 hover:bg-primary/15 hover:ring-1 hover:ring-primary/40"
-                                      : "bg-muted/40 opacity-80"
-                                }`}
-                              >
-                                {busy ? (
-                                  <Loader2 className="mx-auto h-4 w-4 animate-spin" />
-                                ) : (
-                                  <>
-                                    <div className="font-semibold tabular-nums">{quote.priceRub.toLocaleString("ru-RU")} ₽</div>
-                                    <div className="text-xs opacity-90">{quote.etaDays} дн.</div>
-                                    {!quoteMatchesDraft(quote, item.draft.serviceFlags) && item.draft.serviceFlags.length ? (
-                                      <div className="text-[10px] mt-0.5 opacity-80">частично по услугам</div>
-                                    ) : null}
-                                  </>
-                                )}
-                              </button>
+                            {carrierQuotes.length > 0 ? (
+                              <div className="grid grid-cols-2 gap-1">
+                                {carrierQuotes.map((quote) => {
+                                  const selected = item.selectedQuoteId === quote.id
+                                  const busy = selectingKey === `${item.id}:${quote.id}`
+                                  return (
+                                    <QuoteTile
+                                      key={quote.id}
+                                      quote={quote}
+                                      selected={selected}
+                                      busy={busy}
+                                      canPick={canPick}
+                                      disabled={!canPick || Boolean(refreshingId === item.id) || Boolean(busy)}
+                                      onSelect={() => void selectQuote(item.id, quote)}
+                                    />
+                                  )
+                                })}
+                              </div>
                             ) : (
                               <span className="text-muted-foreground py-2 block">—</span>
                             )}
@@ -597,6 +776,7 @@ export default function TmsRequestsPage() {
               </tbody>
             </table>
           </div>
+          </>
         )}
       </CardContent>
     </Card>

@@ -17,7 +17,7 @@ export interface CarrierAdapter {
     input: CreateShipmentRequestInput,
     requestId: string,
     context: CarrierQuoteContext,
-  ): Promise<CarrierQuote | null>;
+  ): Promise<CarrierQuote[]>;
   book(quote: CarrierQuote): Promise<{
     shipment: Omit<ShipmentRecord, 'id' | 'userId' | 'createdAt'>;
     tracking: Array<Omit<TrackingEventRecord, 'id'>>;

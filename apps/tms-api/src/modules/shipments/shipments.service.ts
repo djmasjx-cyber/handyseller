@@ -23,6 +23,8 @@ import type { CarrierAdapter } from './adapters/base-carrier.adapter';
 @Injectable()
 export class ShipmentsService {
   private readonly logger = new Logger(ShipmentsService.name);
+  private readonly quoteDebugEnabled =
+    process.env.TMS_QUOTE_DEBUG === '1' || process.env.TMS_QUOTE_DEBUG === 'true';
   private readonly adapters: CarrierAdapter[] = ShipmentsService.buildCarrierAdapters();
   private readonly requests = new Map<string, ShipmentRequestRecord>();
   private readonly quotes = new Map<string, CarrierQuote[]>();
@@ -155,7 +157,9 @@ export class ShipmentsService {
     for (let i = 0; i < quoteResults.length; i += 1) {
       const result = quoteResults[i];
       if (result.status === 'fulfilled') {
-        if (result.value) successfulQuotes.push(result.value);
+        if (Array.isArray(result.value) && result.value.length > 0) {
+          successfulQuotes.push(...result.value);
+        }
         continue;
       }
       const adapter = this.adapters[i];
@@ -165,12 +169,34 @@ export class ShipmentsService {
     }
 
     const quotes = rankQuotes(successfulQuotes);
+    this.logQuoteAudit(requestId, request, quotes);
 
     request.status = quotes.length > 0 ? 'QUOTED' : 'DRAFT';
     request.updatedAt = new Date().toISOString();
     this.requests.set(requestId, request);
     this.quotes.set(requestId, quotes);
     return quotes;
+  }
+
+  private logQuoteAudit(requestId: string, request: ShipmentRequestRecord, quotes: CarrierQuote[]): void {
+    if (!this.quoteDebugEnabled) return;
+    const payload = {
+      requestId,
+      route: {
+        origin: request.draft.originLabel || request.snapshot.originLabel || null,
+        destination: request.draft.destinationLabel || request.snapshot.destinationLabel || null,
+      },
+      cargo: request.snapshot.cargo,
+      carriers: quotes.map((q) => ({
+        carrierId: q.carrierId,
+        carrierName: q.carrierName,
+        totalRub: q.priceRub,
+        etaDays: q.etaDays,
+        priceDetails: q.priceDetails ?? null,
+        notes: q.notes ?? null,
+      })),
+    };
+    this.logger.log(`[quote-audit] ${JSON.stringify(payload)}`);
   }
 
   getQuotes(userId: string, requestId: string): CarrierQuote[] {

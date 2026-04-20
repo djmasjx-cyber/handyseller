@@ -30,6 +30,21 @@ function extractTag(xml: string, tag: string): string | null {
   return match?.[1]?.trim() ?? null;
 }
 
+function parseLooseNumber(value: string | null | undefined): number {
+  if (!value) return 0;
+  const normalized = value.replace(/\s+/g, '').replace(',', '.');
+  const n = Number(normalized);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function extractFirstNumberTag(xml: string, tags: string[]): number {
+  for (const tag of tags) {
+    const n = parseLooseNumber(extractTag(xml, tag));
+    if (n > 0) return n;
+  }
+  return 0;
+}
+
 function stripPostalPrefix(value: string): string {
   return value.replace(/^\s*\d{6}\s*,?\s*/u, '').trim();
 }
@@ -107,11 +122,11 @@ export class MajorExpressAdapter implements CarrierAdapter {
     input: CreateShipmentRequestInput,
     requestId: string,
     context: CarrierQuoteContext,
-  ): Promise<CarrierQuote | null> {
+  ): Promise<CarrierQuote[]> {
     const credentials = await this.loadCredentials(context);
     if (!credentials) {
       this.logger.warn(`Major quote skipped: missing credentials context; requestId=${requestId}`);
-      return null;
+      return [];
     }
 
     const [shipperCity, consigneeCity] = await Promise.all([
@@ -129,7 +144,7 @@ export class MajorExpressAdapter implements CarrierAdapter {
           extractMajorCityCandidates(input.draft.destinationLabel || input.snapshot.destinationLabel),
         )}`,
       );
-      return null;
+      return [];
     }
 
     const result = await this.callCalculator(input, credentials, shipperCity.code, consigneeCity.code);
@@ -137,25 +152,36 @@ export class MajorExpressAdapter implements CarrierAdapter {
       this.logger.warn(
         `Major quote skipped: calculator returned empty; requestId=${requestId}; shipperCity=${shipperCity.code}; consigneeCity=${consigneeCity.code}`,
       );
-      return null;
+      return [];
     }
 
     const serviceFlags = input.draft.serviceFlags.filter((flag) =>
       this.descriptor.supportedFlags.includes(flag),
     );
 
-    return {
+    const computedPrice = result.total > 0 ? result.total : result.tariff + result.insurance;
+    const totalSource = result.total > 0 ? 'итог из ответа Major' : 'tariff + insurance';
+    return [{
       id: `${requestId}:${this.descriptor.id}`,
       requestId,
       carrierId: this.descriptor.id,
       carrierName: this.descriptor.name,
       mode: this.descriptor.modes[0],
-      priceRub: result.tariff + result.insurance,
+      priceRub: computedPrice,
       etaDays: result.deliveryTime,
       serviceFlags,
-      notes: `${credentials.accountLabel ?? 'Клиентский договор'} · ${shipperCity.name} -> ${consigneeCity.name} · тариф ${result.tariff} ₽ + страх. ${result.insurance} ₽`,
-      score: Math.round((100000 / Math.max(result.tariff + result.insurance, 1)) * 100) / 100,
-    };
+      notes: `${credentials.accountLabel ?? 'Клиентский договор'} · ${shipperCity.name} -> ${consigneeCity.name} · итог ${computedPrice.toFixed(2)} ₽ (${totalSource}), тариф ${result.tariff.toFixed(2)} ₽, страх. ${result.insurance.toFixed(2)} ₽`,
+      priceDetails: {
+        source: result.total > 0 ? 'carrier_total' : 'computed',
+        totalRub: computedPrice,
+        tariffRub: result.tariff,
+        insuranceRub: result.insurance,
+        extrasRub: Math.max(computedPrice - (result.tariff + result.insurance), 0),
+        currency: 'RUB',
+        comment: 'Major SOAP Calculator/Calculator1',
+      },
+      score: Math.round((100000 / Math.max(computedPrice, 1)) * 100) / 100,
+    }];
   }
 
   async book(quote: CarrierQuote): Promise<{
@@ -278,7 +304,7 @@ export class MajorExpressAdapter implements CarrierAdapter {
     credentials: InternalCarrierCredentials,
     shipperCityCode: number,
     consigneeCityCode: number,
-  ): Promise<{ tariff: number; insurance: number; deliveryTime: number } | null> {
+  ): Promise<{ tariff: number; insurance: number; total: number; deliveryTime: number } | null> {
     const cargo = input.snapshot.cargo;
     const hasDimensions =
       cargo.lengthMm != null && cargo.widthMm != null && cargo.heightMm != null && cargo.lengthMm > 0;
@@ -316,18 +342,33 @@ export class MajorExpressAdapter implements CarrierAdapter {
       if (!calc) {
         return null;
       }
+      const tariff = extractFirstNumberTag(calc, ['Tariff']);
+      const insurance = extractFirstNumberTag(calc, ['Insurance']);
+      const total = extractFirstNumberTag(calc, [
+        'Total',
+        'TotalSum',
+        'TotalCost',
+        'Price',
+        'Summ',
+        'Cost',
+      ]);
       return {
-        tariff: Number(extractTag(calc, 'Tariff') ?? 0),
-        insurance: Number(extractTag(calc, 'Insurance') ?? 0),
-        deliveryTime: Number(extractTag(calc, 'DeliveryTime') ?? 0) || 1,
+        tariff,
+        insurance,
+        total,
+        deliveryTime: Math.max(1, Math.round(extractFirstNumberTag(calc, ['DeliveryTime', 'Days']))),
       };
     }
 
     const calc = extractTag(xml, 'CalculatorResult') ?? xml;
+    const tariff = extractFirstNumberTag(calc, ['Tariff']);
+    const insurance = extractFirstNumberTag(calc, ['Insurance']);
+    const total = extractFirstNumberTag(calc, ['Total', 'TotalSum', 'TotalCost', 'Price', 'Summ', 'Cost']);
     return {
-      tariff: Number(extractTag(calc, 'Tariff') ?? 0),
-      insurance: Number(extractTag(calc, 'Insurance') ?? 0),
-      deliveryTime: Number(extractTag(calc, 'DeliveryTime') ?? 0) || 1,
+      tariff,
+      insurance,
+      total,
+      deliveryTime: Math.max(1, Math.round(extractFirstNumberTag(calc, ['DeliveryTime', 'Days']))),
     };
   }
 
@@ -359,11 +400,23 @@ export class MajorExpressAdapter implements CarrierAdapter {
     input: CreateShipmentRequestInput,
   ): string {
     const cargo = input.snapshot.cargo;
-    const packageWeight = Math.max(cargo.weightGrams / 1000, 0.1).toFixed(3);
+    const places = Math.max(Math.round(cargo.places || 1), 1);
+    const totalWeightKg = Math.max(cargo.weightGrams / 1000, 0.1);
+    const packageWeight = Math.max(totalWeightKg / places, 0.1).toFixed(3);
     const lengthCm = Math.max(Math.round((cargo.lengthMm ?? 100) / 10), 1);
     const widthCm = Math.max(Math.round((cargo.widthMm ?? 100) / 10), 1);
     const heightCm = Math.max(Math.round((cargo.heightMm ?? 100) / 10), 1);
     const cost = Math.max(cargo.declaredValueRub, 1).toFixed(2);
+    const packagesXml = Array.from({ length: places })
+      .map(
+        () => `        <EDCalculatorPackageType>
+          <Weight>${packageWeight}</Weight>
+          <Length>${lengthCm}</Length>
+          <Width>${widthCm}</Width>
+          <Height>${heightCm}</Height>
+        </EDCalculatorPackageType>`,
+      )
+      .join('\n');
 
     return `<?xml version="1.0" encoding="utf-8"?>
 <soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
@@ -373,12 +426,7 @@ export class MajorExpressAdapter implements CarrierAdapter {
       <ConsigneeCityCode>${consigneeCityCode}</ConsigneeCityCode>
       <Cost>${cost}</Cost>
       <Packages>
-        <EDCalculatorPackageType>
-          <Weight>${packageWeight}</Weight>
-          <Length>${lengthCm}</Length>
-          <Width>${widthCm}</Width>
-          <Height>${heightCm}</Height>
-        </EDCalculatorPackageType>
+${packagesXml}
       </Packages>
     </Calculator1>
   </soap:Body>
