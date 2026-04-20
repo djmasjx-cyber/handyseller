@@ -123,6 +123,7 @@ export class TmsIntegrationService {
     const destinationLabel =
       order.deliveryAddressLabel?.trim() ||
       (order.marketplace === 'MANUAL' ? 'Ручной канал' : `${order.marketplace} order`);
+    const contactOv = this.parseTmsContactOverride(order.tmsContactOverride);
 
     return {
       sourceSystem: 'HANDYSELLER_CORE',
@@ -134,6 +135,16 @@ export class TmsIntegrationService {
       createdAt: order.createdAt.toISOString(),
       originLabel: order.warehouseName ?? null,
       destinationLabel,
+      contacts: {
+        shipper: {
+          name: contactOv?.shipperName ?? null,
+          phone: contactOv?.shipperPhone ?? null,
+        },
+        recipient: {
+          name: contactOv?.recipientName ?? null,
+          phone: contactOv?.recipientPhone ?? null,
+        },
+      },
       cargo: {
         weightGrams,
         widthMm,
@@ -352,6 +363,12 @@ export class TmsIntegrationService {
     const heightMm = Math.round(dto.heightCm * 10);
     const places = dto.places ?? 1;
     const declaredValueRub = Math.round(Number(dto.declaredValueRub));
+    const tmsContactOverride = {
+      shipperName: dto.shipperName.trim(),
+      shipperPhone: dto.shipperPhone.trim(),
+      recipientName: dto.recipientName.trim(),
+      recipientPhone: dto.recipientPhone.trim(),
+    };
 
     const tmsCargoOverride = {
       weightGrams,
@@ -377,6 +394,7 @@ export class TmsIntegrationService {
           deliveryAddressLabel: dest,
           salesSource: src.name,
           tmsCargoOverride,
+          tmsContactOverride,
         },
       });
       await tx.orderItem.create({
@@ -414,6 +432,23 @@ export class TmsIntegrationService {
       heightMm: num(o.heightMm),
       places: num(o.places),
       declaredValueRub: num(o.declaredValueRub),
+    };
+  }
+
+  private parseTmsContactOverride(raw: unknown): {
+    shipperName?: string;
+    shipperPhone?: string;
+    recipientName?: string;
+    recipientPhone?: string;
+  } | null {
+    if (raw == null || typeof raw !== 'object') return null;
+    const o = raw as Record<string, unknown>;
+    const str = (v: unknown) => (typeof v === 'string' ? v.trim() || undefined : undefined);
+    return {
+      shipperName: str(o.shipperName),
+      shipperPhone: str(o.shipperPhone),
+      recipientName: str(o.recipientName),
+      recipientPhone: str(o.recipientPhone),
     };
   }
 

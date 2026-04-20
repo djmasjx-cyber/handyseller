@@ -20,6 +20,10 @@ export function TmsEstimateOrderModal({ open, onClose, onCreated }: Props) {
 
   const [origin, setOrigin] = useState("")
   const [destination, setDestination] = useState("")
+  const [shipperName, setShipperName] = useState("")
+  const [shipperPhone, setShipperPhone] = useState("")
+  const [recipientName, setRecipientName] = useState("")
+  const [recipientPhone, setRecipientPhone] = useState("")
   const [weightKg, setWeightKg] = useState("1")
   const [lengthCm, setLengthCm] = useState("10")
   const [widthCm, setWidthCm] = useState("10")
@@ -31,6 +35,10 @@ export function TmsEstimateOrderModal({ open, onClose, onCreated }: Props) {
     setError(null)
     setOrigin("")
     setDestination("")
+    setShipperName("")
+    setShipperPhone("")
+    setRecipientName("")
+    setRecipientPhone("")
     setWeightKg("1")
     setLengthCm("10")
     setWidthCm("10")
@@ -60,6 +68,10 @@ export function TmsEstimateOrderModal({ open, onClose, onCreated }: Props) {
         body: JSON.stringify({
           originAddress: origin.trim(),
           destinationAddress: destination.trim(),
+          shipperName: shipperName.trim(),
+          shipperPhone: shipperPhone.trim(),
+          recipientName: recipientName.trim(),
+          recipientPhone: recipientPhone.trim(),
           weightKg: w,
           lengthCm: l,
           widthCm: wi,
@@ -150,6 +162,49 @@ export function TmsEstimateOrderModal({ open, onClose, onCreated }: Props) {
             required
           />
 
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="shipperName">Отправитель (имя/компания) *</Label>
+              <Input
+                id="shipperName"
+                value={shipperName}
+                onChange={(e) => setShipperName(e.target.value)}
+                placeholder="Например: ООО Ромашка"
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="shipperPhone">Телефон отправителя *</Label>
+              <Input
+                id="shipperPhone"
+                value={shipperPhone}
+                onChange={(e) => setShipperPhone(e.target.value)}
+                placeholder="+7 999 123-45-67"
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="recipientName">Получатель (имя/компания) *</Label>
+              <Input
+                id="recipientName"
+                value={recipientName}
+                onChange={(e) => setRecipientName(e.target.value)}
+                placeholder="Например: Иван Петров"
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="recipientPhone">Телефон получателя *</Label>
+              <Input
+                id="recipientPhone"
+                value={recipientPhone}
+                onChange={(e) => setRecipientPhone(e.target.value)}
+                placeholder="+7 999 765-43-21"
+                required
+              />
+            </div>
+          </div>
+
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
             <div className="space-y-2">
               <Label htmlFor="wkg">Вес, кг *</Label>
@@ -193,7 +248,7 @@ export function TmsEstimateOrderModal({ open, onClose, onCreated }: Props) {
           </div>
 
           <p className="text-xs text-muted-foreground">
-            Обязательные поля: оба адреса, вес, три габарита, объявленная ценность. После создания откройте{" "}
+            Обязательные поля: оба адреса, контакты отправителя/получателя, вес, три габарита, объявленная ценность. После создания откройте{" "}
             <span className="font-medium">TMS</span> и нажмите «Получить варианты» по этому заказу.
           </p>
 
@@ -215,6 +270,10 @@ export function TmsEstimateOrderModal({ open, onClose, onCreated }: Props) {
                 saving ||
                 !origin.trim() ||
                 !destination.trim() ||
+                !shipperName.trim() ||
+                !shipperPhone.trim() ||
+                !recipientName.trim() ||
+                !recipientPhone.trim() ||
                 !weightKg.trim() ||
                 !lengthCm.trim() ||
                 !widthCm.trim() ||

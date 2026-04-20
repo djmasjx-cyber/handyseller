@@ -31,6 +31,30 @@ export class CreateTmsEstimateOrderDto {
   @MaxLength(500)
   destinationAddress!: string;
 
+  @IsString()
+  @IsNotEmpty({ message: 'Укажите имя/название отправителя' })
+  @MinLength(2, { message: 'Имя отправителя слишком короткое' })
+  @MaxLength(200)
+  shipperName!: string;
+
+  @IsString()
+  @IsNotEmpty({ message: 'Укажите телефон отправителя' })
+  @MinLength(5, { message: 'Телефон отправителя слишком короткий' })
+  @MaxLength(50)
+  shipperPhone!: string;
+
+  @IsString()
+  @IsNotEmpty({ message: 'Укажите имя/название получателя' })
+  @MinLength(2, { message: 'Имя получателя слишком короткое' })
+  @MaxLength(200)
+  recipientName!: string;
+
+  @IsString()
+  @IsNotEmpty({ message: 'Укажите телефон получателя' })
+  @MinLength(5, { message: 'Телефон получателя слишком короткий' })
+  @MaxLength(50)
+  recipientPhone!: string;
+
   @Type(() => Number)
   @IsNumber()
   @Min(0.01, { message: 'Вес должен быть больше 0' })

@@ -44,6 +44,20 @@ export interface CoreOrderSnapshot {
   createdAt: string;
   originLabel: string | null;
   destinationLabel: string | null;
+  contacts?: {
+    shipper: {
+      name: string | null;
+      phone: string | null;
+      email?: string | null;
+      company?: string | null;
+    };
+    recipient: {
+      name: string | null;
+      phone: string | null;
+      email?: string | null;
+      company?: string | null;
+    };
+  };
   cargo: CargoSnapshot;
   itemSummary: Array<{
     productId: string | null;

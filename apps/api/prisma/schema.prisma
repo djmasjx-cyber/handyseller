@@ -505,6 +505,8 @@ model Order {
   deliveryAddressLabel String? @map("delivery_address_label") @db.Text
   /// Параметры груза для TMS (ручная оценка): JSON { weightGrams, lengthMm, widthMm, heightMm, places, declaredValueRub }.
   tmsCargoOverride     Json?   @map("tms_cargo_override")
+  /// Контакты для TMS-оформления в ТК: JSON { shipper: {name, phone, ...}, recipient: {name, phone, ...} }.
+  tmsContactOverride   Json?   @map("tms_contact_override")
   /// FBO: товар со склада маркетплейса (WB: DBW, Ozon: FBO) — не списывать остаток «Мой склад»
   isFbo       Boolean? @map("is_fbo")
 
