@@ -242,6 +242,9 @@ export class ShipmentsService {
       const isLegacyCdekPending =
         existingShipment.carrierId === 'cdek' && existingShipment.trackingNumber.startsWith('CDEK-PENDING-');
       if (!isLegacyCdekPending) {
+        request.status = 'BOOKED';
+        request.updatedAt = new Date().toISOString();
+        this.requests.set(requestId, request);
         return existingShipment;
       }
       this.logger.warn(

@@ -220,6 +220,11 @@ type SortMode = "newest" | "cheapest_lane" | "fastest_lane" | `carrier:${string}
 /** Очереди работы логиста: одна матрица, разные «входные» потоки заказов. */
 type WorkQueueKey = "all" | "MARKETPLACE_RC" | "CARRIER_DELIVERY" | "INTERNAL_TRANSFER"
 
+type ToastState = {
+  kind: "success" | "error"
+  message: string
+} | null
+
 function workQueueFromSearchParam(raw: string | null): WorkQueueKey {
   if (raw === "rc" || raw === "MARKETPLACE_RC") return "MARKETPLACE_RC"
   if (raw === "tk" || raw === "CARRIER_DELIVERY") return "CARRIER_DELIVERY"
@@ -240,13 +245,27 @@ export default function TmsRequestsPage() {
   const [confirmingId, setConfirmingId] = useState<string | null>(null)
   const [expandedVariants, setExpandedVariants] = useState<Record<string, boolean>>({})
   const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
+  const [toast, setToast] = useState<ToastState>(null)
   const [search, setSearch] = useState("")
   const [sortMode, setSortMode] = useState<SortMode>("newest")
   const requestIdFromQuery = searchParams.get("requestId")
   const orderIdFromQuery = searchParams.get("orderId")
   const autoQuote = searchParams.get("autoQuote") === "1"
   const autoQuoteTriggeredRef = useRef(false)
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const workQueue = workQueueFromSearchParam(searchParams.get("queue"))
+
+  const showToast = useCallback((kind: "success" | "error", message: string) => {
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current)
+    }
+    setToast({ kind, message })
+    toastTimerRef.current = setTimeout(() => {
+      setToast(null)
+      toastTimerRef.current = null
+    }, 3500)
+  }, [])
 
   const setWorkQueue = (key: WorkQueueKey) => {
     const next = new URLSearchParams(searchParams.toString())
@@ -301,6 +320,14 @@ export default function TmsRequestsPage() {
     const id = window.setInterval(tick, 30_000)
     return () => window.clearInterval(id)
   }, [token, loadAll])
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) {
+        clearTimeout(toastTimerRef.current)
+      }
+    }
+  }, [])
 
   /**
    * Авто-создание заявки и расчёт сразу на этой странице (без перехода на дашборд TMS).
@@ -429,6 +456,7 @@ export default function TmsRequestsPage() {
     if (!token) return
     setRefreshingId(requestId)
     setError(null)
+    setSuccess(null)
     try {
       const headers = { Authorization: `Bearer ${token}` }
       const res = await authFetch(`/api/tms/shipment-requests/${requestId}/quotes/refresh`, {
@@ -448,7 +476,9 @@ export default function TmsRequestsPage() {
         ),
       )
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Не удалось обновить тарифы")
+      const msg = e instanceof Error ? e.message : "Не удалось обновить тарифы"
+      setError(msg)
+      showToast("error", msg)
     } finally {
       setRefreshingId(null)
     }
@@ -461,6 +491,7 @@ export default function TmsRequestsPage() {
     const key = `${requestId}:${quote.id}`
     setSelectingKey(key)
     setError(null)
+    setSuccess(null)
     try {
       const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }
       const res = await authFetch(`/api/tms/shipment-requests/${requestId}/select-quote`, {
@@ -474,7 +505,9 @@ export default function TmsRequestsPage() {
       }
       await loadAll({ silent: true })
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Не удалось выбрать тариф")
+      const msg = e instanceof Error ? e.message : "Не удалось выбрать тариф"
+      setError(msg)
+      showToast("error", msg)
     } finally {
       setSelectingKey(null)
     }
@@ -484,6 +517,7 @@ export default function TmsRequestsPage() {
     if (!token) return
     setConfirmingId(requestId)
     setError(null)
+    setSuccess(null)
     try {
       const headers = { Authorization: `Bearer ${token}` }
       const res = await authFetch(`/api/tms/shipment-requests/${requestId}/confirm`, {
@@ -494,9 +528,27 @@ export default function TmsRequestsPage() {
         const data = await res.json().catch(() => ({}))
         throw new Error(typeof data?.message === "string" ? data.message : "Не удалось подтвердить перевозку")
       }
+      const shipment = await res.json().catch(() => null)
+      const trackingNumber =
+        shipment && typeof shipment === "object" && typeof (shipment as { trackingNumber?: unknown }).trackingNumber === "string"
+          ? (shipment as { trackingNumber: string }).trackingNumber
+          : null
+      setSuccess(
+        trackingNumber
+          ? `Перевозка подтверждена. Трек-номер: ${trackingNumber}`
+          : "Перевозка подтверждена и отправлена в ТК.",
+      )
+      showToast(
+        "success",
+        trackingNumber
+          ? `Подтверждено. Трек-номер: ${trackingNumber}`
+          : "Перевозка подтверждена и отправлена в ТК.",
+      )
       await loadAll({ silent: true })
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Не удалось подтвердить перевозку")
+      const msg = e instanceof Error ? e.message : "Не удалось подтвердить перевозку"
+      setError(msg)
+      showToast("error", msg)
     } finally {
       setConfirmingId(null)
     }
@@ -526,6 +578,20 @@ export default function TmsRequestsPage() {
       </CardHeader>
       <CardContent className="space-y-4">
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
+        {success ? <p className="text-sm text-emerald-600">{success}</p> : null}
+        {toast ? (
+          <div className="pointer-events-none fixed right-4 top-4 z-[60]">
+            <div
+              className={`max-w-sm rounded-md border px-3 py-2 text-sm shadow-lg ${
+                toast.kind === "success"
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                  : "border-destructive/30 bg-destructive/10 text-destructive"
+              }`}
+            >
+              {toast.message}
+            </div>
+          </div>
+        ) : null}
 
         {items.length > 0 ? (
           <div className="flex flex-wrap gap-2 border-b pb-3">

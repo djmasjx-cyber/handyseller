@@ -201,6 +201,37 @@ export class CdekAdapter implements CarrierAdapter {
     }
 
     const cargo = input.snapshot.cargo;
+    const orderItems =
+      input.snapshot.itemSummary
+        ?.map((it, idx) => {
+          const amount = Math.max(1, Math.round(Number(it.quantity) || 1));
+          const totalWeight = Math.max(Math.round(Number(it.weightGrams) || 100), 1);
+          const itemWeight = Math.max(Math.round(totalWeight / amount), 1);
+          const name = (it.title || `Товар ${idx + 1}`).toString().slice(0, 255);
+          const wareKey = (it.productId || `item-${idx + 1}`).toString().slice(0, 50);
+          return {
+            name,
+            ware_key: wareKey,
+            payment: { value: 0 },
+            cost: 0,
+            weight: itemWeight,
+            amount,
+          };
+        })
+        .filter((x) => x.amount > 0) ?? [];
+    const packageItems =
+      orderItems.length > 0
+        ? orderItems
+        : [
+            {
+              name: 'Груз',
+              ware_key: 'fallback-item',
+              payment: { value: 0 },
+              cost: 0,
+              weight: Math.max(Math.round(cargo.weightGrams || 100), 1),
+              amount: 1,
+            },
+          ];
     const payload: Record<string, unknown> = {
       number: orderNumber,
       tariff_code: tariffCode,
@@ -222,6 +253,7 @@ export class CdekAdapter implements CarrierAdapter {
           length: Math.max(Math.round((cargo.lengthMm ?? 100) / 10), 1),
           width: Math.max(Math.round((cargo.widthMm ?? 100) / 10), 1),
           height: Math.max(Math.round((cargo.heightMm ?? 100) / 10), 1),
+          items: packageItems,
         },
       ],
     };
