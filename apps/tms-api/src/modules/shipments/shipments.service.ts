@@ -260,14 +260,23 @@ export class ShipmentsService {
       );
     }
 
-    const booking = await adapter.book({
-      quote,
-      input: {
-        snapshot: request.snapshot,
-        draft: request.draft,
-      },
-      context: { userId, authToken },
-    });
+    let booking: Awaited<ReturnType<typeof adapter.book>>;
+    try {
+      booking = await adapter.book({
+        quote,
+        input: {
+          snapshot: request.snapshot,
+          draft: request.draft,
+        },
+        context: { userId, authToken },
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message.trim()
+          ? error.message
+          : `Не удалось оформить перевозку через ${adapter.descriptor.name}`;
+      throw new BadRequestException(message);
+    }
     const shipmentId = `shp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const shipment: ShipmentRecord = {
       id: shipmentId,

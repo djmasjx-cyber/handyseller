@@ -95,6 +95,12 @@ export class CreateTmsEstimateOrderDto {
   declaredValueRub!: number;
 
   @IsString()
+  @IsNotEmpty({ message: 'Укажите описание груза' })
+  @MinLength(2, { message: 'Описание груза слишком короткое' })
+  @MaxLength(255, { message: 'Описание груза слишком длинное' })
+  cargoDescription!: string;
+
+  @IsString()
   @IsOptional()
   @MaxLength(120)
   salesSource?: string;

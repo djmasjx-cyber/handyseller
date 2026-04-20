@@ -307,6 +307,7 @@ export class CdekAdapter implements CarrierAdapter {
     }
 
     const payload: Record<string, unknown> = {
+      type: 2,
       number: orderNumber,
       tariff_code: tariffCode,
       comment: input.draft.notes?.slice(0, 255) || 'Создано из Handyseller TMS',

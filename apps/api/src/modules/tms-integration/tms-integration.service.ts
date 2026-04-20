@@ -119,6 +119,7 @@ export class TmsIntegrationService {
     const heightMm = cargoOv?.heightMm ?? (totalHeightMm || null);
     const places = cargoOv?.places ?? Math.max(order.items.length, 1);
     const declaredValueRub = cargoOv?.declaredValueRub ?? Number(order.totalAmount);
+    const cargoDescription = cargoOv?.cargoDescription;
 
     const destinationLabel =
       order.deliveryAddressLabel?.trim() ||
@@ -155,7 +156,7 @@ export class TmsIntegrationService {
       },
       itemSummary: order.items.map((item) => ({
         productId: item.product?.id ?? null,
-        title: item.product?.title ?? 'Товар',
+        title: cargoDescription || item.product?.title || 'Товар',
         quantity: item.quantity,
         weightGrams: item.product?.weight ?? null,
       })),
@@ -363,6 +364,7 @@ export class TmsIntegrationService {
     const heightMm = Math.round(dto.heightCm * 10);
     const places = dto.places ?? 1;
     const declaredValueRub = Math.round(Number(dto.declaredValueRub));
+    const cargoDescription = dto.cargoDescription.trim();
     const tmsContactOverride = {
       shipperName: dto.shipperName.trim(),
       shipperPhone: dto.shipperPhone.trim(),
@@ -377,6 +379,7 @@ export class TmsIntegrationService {
       heightMm,
       places,
       declaredValueRub,
+      cargoDescription,
     };
 
     const productId = await this.getOrCreateTmsEstimateProduct(userId);
@@ -421,10 +424,12 @@ export class TmsIntegrationService {
     heightMm?: number;
     places?: number;
     declaredValueRub?: number;
+    cargoDescription?: string;
   } | null {
     if (raw == null || typeof raw !== 'object') return null;
     const o = raw as Record<string, unknown>;
     const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+    const str = (v: unknown) => (typeof v === 'string' ? v.trim() || undefined : undefined);
     return {
       weightGrams: num(o.weightGrams),
       lengthMm: num(o.lengthMm),
@@ -432,6 +437,7 @@ export class TmsIntegrationService {
       heightMm: num(o.heightMm),
       places: num(o.places),
       declaredValueRub: num(o.declaredValueRub),
+      cargoDescription: str(o.cargoDescription),
     };
   }
 
