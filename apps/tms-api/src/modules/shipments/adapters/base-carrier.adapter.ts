@@ -2,6 +2,7 @@ import type {
   CarrierDescriptor,
   CarrierQuote,
   CreateShipmentRequestInput,
+  ShipmentDocumentRecord,
   ShipmentRecord,
   TrackingEventRecord,
 } from '@handyseller/tms-sdk';
@@ -27,5 +28,6 @@ export interface CarrierAdapter {
   book(payload: CarrierBookInput): Promise<{
     shipment: Omit<ShipmentRecord, 'id' | 'userId' | 'createdAt'>;
     tracking: Array<Omit<TrackingEventRecord, 'id'>>;
+    documents?: Array<Pick<ShipmentDocumentRecord, 'type' | 'title' | 'content'>>;
   }>;
 }

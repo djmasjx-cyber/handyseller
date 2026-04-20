@@ -284,24 +284,34 @@ export class ShipmentsService {
         shipmentId,
       })),
     );
-    this.documents.set(shipmentId, [
-      {
-        id: `${shipmentId}_waybill`,
-        shipmentId,
-        type: 'WAYBILL',
-        title: 'Транспортная накладная',
-        content: `ТН ${shipment.trackingNumber} / ${shipment.carrierName}`,
-        createdAt: shipment.createdAt,
-      },
-      {
-        id: `${shipmentId}_label`,
-        shipmentId,
-        type: 'LABEL',
-        title: 'Отгрузочный ярлык',
-        content: `LABEL ${shipment.trackingNumber}`,
-        createdAt: shipment.createdAt,
-      },
-    ]);
+    const docsFromCarrier = booking.documents?.length
+      ? booking.documents.map((doc, index) => ({
+          id: `${shipmentId}_doc_${index + 1}`,
+          shipmentId,
+          type: doc.type,
+          title: doc.title,
+          content: doc.content,
+          createdAt: shipment.createdAt,
+        }))
+      : [
+          {
+            id: `${shipmentId}_waybill`,
+            shipmentId,
+            type: 'WAYBILL' as const,
+            title: 'Транспортная накладная',
+            content: `ТН ${shipment.trackingNumber} / ${shipment.carrierName}`,
+            createdAt: shipment.createdAt,
+          },
+          {
+            id: `${shipmentId}_label`,
+            shipmentId,
+            type: 'LABEL' as const,
+            title: 'Отгрузочный ярлык',
+            content: `LABEL ${shipment.trackingNumber}`,
+            createdAt: shipment.createdAt,
+          },
+        ];
+    this.documents.set(shipmentId, docsFromCarrier);
 
     request.status = 'BOOKED';
     request.updatedAt = new Date().toISOString();

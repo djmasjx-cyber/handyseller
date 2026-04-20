@@ -41,6 +41,11 @@ export default function TmsShipmentsPage() {
   const [loading, setLoading] = useState(true)
 
   const openDocument = (doc: ShipmentDocument, print: boolean) => {
+    const maybeUrl = (doc.content ?? "").trim()
+    if (/^https?:\/\/\S+/i.test(maybeUrl)) {
+      window.open(maybeUrl, "_blank", "noopener,noreferrer")
+      return
+    }
     const w = window.open("", "_blank", "noopener,noreferrer")
     if (!w) return
     const title = doc.title || "Документ"

@@ -21,6 +21,29 @@ type CdekTariff = {
 
 type CdekCity = { code?: number; city?: string };
 
+type CdekOrderResponse = {
+  entity?: {
+    uuid?: string;
+    cdek_number?: string;
+    number?: string;
+  };
+  requests?: Array<{
+    state?: string;
+    request_uuid?: string;
+    errors?: Array<{ code?: string; message?: string }>;
+  }>;
+};
+
+type CdekPrintResponse = {
+  entity?: {
+    uuid?: string;
+  };
+  requests?: Array<{
+    state?: string;
+    errors?: Array<{ code?: string; message?: string }>;
+  }>;
+};
+
 function asNum(v: unknown): number | null {
   if (typeof v === 'number' && Number.isFinite(v)) return v;
   if (typeof v === 'string') {
@@ -172,6 +195,7 @@ export class CdekAdapter implements CarrierAdapter {
   async book({ quote, input, context }: CarrierBookInput): Promise<{
     shipment: Omit<ShipmentRecord, 'id' | 'userId' | 'createdAt'>;
     tracking: Array<Omit<TrackingEventRecord, 'id'>>;
+    documents?: Array<{ type: 'WAYBILL' | 'LABEL' | 'INVOICE'; title: string; content: string }>;
   }> {
     const credentials = await this.loadCredentials(context, quote.requestId);
     if (!credentials) {
@@ -201,6 +225,7 @@ export class CdekAdapter implements CarrierAdapter {
     }
 
     const cargo = input.snapshot.cargo;
+    const declaredTotal = Math.max(Math.round(cargo.declaredValueRub || 0), 0);
     const orderItems =
       input.snapshot.itemSummary
         ?.map((it, idx) => {
@@ -209,11 +234,12 @@ export class CdekAdapter implements CarrierAdapter {
           const itemWeight = Math.max(Math.round(totalWeight / amount), 1);
           const name = (it.title || `Товар ${idx + 1}`).toString().slice(0, 255);
           const wareKey = (it.productId || `item-${idx + 1}`).toString().slice(0, 50);
+          const itemDeclared = declaredTotal > 0 ? Math.max(Math.round(declaredTotal / Math.max(amount, 1)), 1) : 1;
           return {
             name,
             ware_key: wareKey,
             payment: { value: 0 },
-            cost: 0,
+            cost: itemDeclared,
             weight: itemWeight,
             amount,
           };
@@ -227,7 +253,7 @@ export class CdekAdapter implements CarrierAdapter {
               name: 'Груз',
               ware_key: 'fallback-item',
               payment: { value: 0 },
-              cost: 0,
+              cost: Math.max(declaredTotal, 1),
               weight: Math.max(Math.round(cargo.weightGrams || 100), 1),
               amount: 1,
             },
@@ -270,20 +296,22 @@ export class CdekAdapter implements CarrierAdapter {
       body: JSON.stringify(payload),
       cache: 'no-store',
     }).catch(() => null);
-    const createData = (await createRes?.json().catch(() => ({}))) as Record<string, unknown>;
+    const createData = (await createRes?.json().catch(() => ({}))) as CdekOrderResponse;
     this.logger.log(
       `[cdek-booking] response requestId=${quote.requestId} status=${createRes?.status ?? 'n/a'} body=${JSON.stringify(createData).slice(0, 1200)}`,
     );
     if (!createRes?.ok) {
       throw new Error(`CDEK booking failed: HTTP ${createRes?.status ?? 'n/a'}`);
     }
-    const entity =
-      createData && typeof createData.entity === 'object' && createData.entity
-        ? (createData.entity as Record<string, unknown>)
-        : null;
+    const acceptedUuid = createData.entity?.uuid?.trim() || null;
+    const resolved = acceptedUuid
+      ? await this.fetchOrderWithRetries(base, token, acceptedUuid, quote.requestId)
+      : null;
     const cdekNumber =
-      (entity && typeof entity.cdek_number === 'string' && entity.cdek_number.trim()) ||
-      (entity && typeof entity.number === 'string' && entity.number.trim()) ||
+      resolved?.entity?.cdek_number?.trim() ||
+      resolved?.entity?.number?.trim() ||
+      createData.entity?.cdek_number?.trim() ||
+      createData.entity?.number?.trim() ||
       orderNumber;
 
     return {
@@ -300,11 +328,109 @@ export class CdekAdapter implements CarrierAdapter {
         {
           shipmentId: '',
           status: 'CONFIRMED',
-          description: `Заявка создана в CDEK: ${cdekNumber}`,
+          description: acceptedUuid
+            ? `Заявка принята CDEK (${acceptedUuid}). Номер: ${cdekNumber}`
+            : `Заявка создана в CDEK: ${cdekNumber}`,
           occurredAt: new Date().toISOString(),
         },
       ],
+      documents: acceptedUuid ? await this.createPrintForms(base, token, acceptedUuid, quote.requestId) : undefined,
     };
+  }
+
+  private async fetchOrderWithRetries(
+    base: string,
+    token: string,
+    uuid: string,
+    requestId: string,
+  ): Promise<CdekOrderResponse | null> {
+    for (let i = 0; i < 3; i += 1) {
+      const order = await this.fetchOrderByUuid(base, token, uuid);
+      if (order?.entity?.cdek_number) return order;
+      if (order?.requests?.some((r) => r.state === 'INVALID')) {
+        this.logger.warn(
+          `[cdek-booking] order invalid requestId=${requestId} uuid=${uuid} body=${JSON.stringify(order).slice(0, 1200)}`,
+        );
+        return order;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+    }
+    return await this.fetchOrderByUuid(base, token, uuid);
+  }
+
+  private async fetchOrderByUuid(base: string, token: string, uuid: string): Promise<CdekOrderResponse | null> {
+    const url = new URL('/v2/orders', base);
+    url.searchParams.set('uuid', uuid);
+    const res = await fetch(url.toString(), {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+      },
+      cache: 'no-store',
+    }).catch(() => null);
+    if (!res?.ok) return null;
+    return (await res.json().catch(() => null)) as CdekOrderResponse | null;
+  }
+
+  private async createPrintForms(
+    base: string,
+    token: string,
+    orderUuid: string,
+    requestId: string,
+  ): Promise<Array<{ type: 'WAYBILL' | 'LABEL' | 'INVOICE'; title: string; content: string }>> {
+    const docs: Array<{ type: 'WAYBILL' | 'LABEL' | 'INVOICE'; title: string; content: string }> = [];
+
+    const orderPrintUuid = await this.requestPrintJob(base, token, '/v2/print/orders', {
+      orders: [{ order_uuid: orderUuid }],
+      copy_count: 1,
+    });
+    if (orderPrintUuid) {
+      docs.push({
+        type: 'WAYBILL',
+        title: 'Транспортная накладная (CDEK)',
+        content: `${base}/v2/print/orders/${orderPrintUuid}.pdf`,
+      });
+    } else {
+      this.logger.warn(`[cdek-booking] print order form not ready requestId=${requestId} orderUuid=${orderUuid}`);
+    }
+
+    const barcodePrintUuid = await this.requestPrintJob(base, token, '/v2/print/barcodes', {
+      orders: [{ order_uuid: orderUuid }],
+      copy_count: 1,
+    });
+    if (barcodePrintUuid) {
+      docs.push({
+        type: 'LABEL',
+        title: 'Отгрузочный ярлык (CDEK)',
+        content: `${base}/v2/print/barcodes/${barcodePrintUuid}.pdf`,
+      });
+    } else {
+      this.logger.warn(`[cdek-booking] print barcode not ready requestId=${requestId} orderUuid=${orderUuid}`);
+    }
+
+    return docs;
+  }
+
+  private async requestPrintJob(
+    base: string,
+    token: string,
+    path: string,
+    payload: Record<string, unknown>,
+  ): Promise<string | null> {
+    const res = await fetch(`${base}${path}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+      cache: 'no-store',
+    }).catch(() => null);
+    if (!res?.ok) return null;
+    const data = (await res.json().catch(() => null)) as CdekPrintResponse | null;
+    const uuid = data?.entity?.uuid?.trim();
+    return uuid || null;
   }
 
   private extractTariffCode(quoteId: string): number {
