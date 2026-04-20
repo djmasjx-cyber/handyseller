@@ -6,7 +6,7 @@ import type {
   ShipmentRecord,
   TrackingEventRecord,
 } from '@handyseller/tms-sdk';
-import type { CarrierAdapter, CarrierQuoteContext } from './base-carrier.adapter';
+import type { CarrierAdapter, CarrierBookInput, CarrierQuoteContext } from './base-carrier.adapter';
 
 function quoteId(requestId: string, carrierId: string) {
   return `${requestId}:${carrierId}`;
@@ -85,7 +85,7 @@ abstract class BaseMockCarrierAdapter implements CarrierAdapter {
     context: CarrierQuoteContext,
   ): Promise<CarrierQuote[]>;
 
-  async book(quote: CarrierQuote) {
+  async book({ quote }: CarrierBookInput) {
     return buildBooking(quote);
   }
 }

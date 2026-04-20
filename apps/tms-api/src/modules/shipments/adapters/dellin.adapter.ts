@@ -7,7 +7,7 @@ import type {
   ShipmentRecord,
   TrackingEventRecord,
 } from '@handyseller/tms-sdk';
-import type { CarrierAdapter, CarrierQuoteContext } from './base-carrier.adapter';
+import type { CarrierAdapter, CarrierBookInput, CarrierQuoteContext } from './base-carrier.adapter';
 
 /** Публичный калькулятор ДЛ: https://api.dellin.ru/v1/public/calculator.json (см. dev.dellin.ru, примеры интеграций). */
 const DELLIN_PUBLIC_CALCULATOR_PATH = '/v1/public/calculator';
@@ -260,7 +260,7 @@ export class DellinAdapter implements CarrierAdapter {
     return quotes;
   }
 
-  async book(quote: CarrierQuote): Promise<{
+  async book({ quote }: CarrierBookInput): Promise<{
     shipment: Omit<ShipmentRecord, 'id' | 'userId' | 'createdAt'>;
     tracking: Array<Omit<TrackingEventRecord, 'id'>>;
   }> {

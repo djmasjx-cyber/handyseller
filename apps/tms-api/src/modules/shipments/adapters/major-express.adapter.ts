@@ -7,7 +7,7 @@ import type {
   ShipmentRecord,
   TrackingEventRecord,
 } from '@handyseller/tms-sdk';
-import type { CarrierAdapter, CarrierQuoteContext } from './base-carrier.adapter';
+import type { CarrierAdapter, CarrierBookInput, CarrierQuoteContext } from './base-carrier.adapter';
 
 type MajorCity = {
   code: number;
@@ -184,7 +184,7 @@ export class MajorExpressAdapter implements CarrierAdapter {
     }];
   }
 
-  async book(quote: CarrierQuote): Promise<{
+  async book({ quote }: CarrierBookInput): Promise<{
     shipment: Omit<ShipmentRecord, 'id' | 'userId' | 'createdAt'>;
     tracking: Array<Omit<TrackingEventRecord, 'id'>>;
   }> {

@@ -7,7 +7,7 @@ import type {
   ShipmentRecord,
   TrackingEventRecord,
 } from '@handyseller/tms-sdk';
-import type { CarrierAdapter, CarrierQuoteContext } from './base-carrier.adapter';
+import type { CarrierAdapter, CarrierBookInput, CarrierQuoteContext } from './base-carrier.adapter';
 
 type CdekTariff = {
   tariff_code?: number;
@@ -53,7 +53,7 @@ export class CdekAdapter implements CarrierAdapter {
     modes: ['ROAD', 'COURIER', 'PICKUP'],
     supportedFlags: ['EXPRESS', 'CONSOLIDATED'],
     supportsTracking: true,
-    supportsBooking: false,
+    supportsBooking: true,
     requiresCredentials: true,
   };
 
@@ -169,29 +169,117 @@ export class CdekAdapter implements CarrierAdapter {
     return null;
   }
 
-  async book(quote: CarrierQuote): Promise<{
+  async book({ quote, input, context }: CarrierBookInput): Promise<{
     shipment: Omit<ShipmentRecord, 'id' | 'userId' | 'createdAt'>;
     tracking: Array<Omit<TrackingEventRecord, 'id'>>;
   }> {
+    const credentials = await this.loadCredentials(context, quote.requestId);
+    if (!credentials) {
+      throw new Error('CDEK booking failed: missing credentials');
+    }
+    const token = await this.getAccessToken(credentials, quote.requestId);
+    if (!token) {
+      throw new Error('CDEK booking failed: auth error');
+    }
+    const base = (process.env.CDEK_API_BASE ?? 'https://api.cdek.ru').replace(/\/+$/, '');
+    const tariffCode = this.extractTariffCode(quote.id);
+    const orderNumber = (input.snapshot.coreOrderNumber || '').trim();
+    if (!orderNumber) {
+      throw new Error('CDEK booking failed: missing internal order number');
+    }
+    const fromAddress = (input.draft.originLabel || input.snapshot.originLabel || '').trim();
+    const toAddress = (input.draft.destinationLabel || input.snapshot.destinationLabel || '').trim();
+    if (!fromAddress || !toAddress) {
+      throw new Error('CDEK booking failed: missing origin/destination address');
+    }
+    const shipperName = input.snapshot.contacts?.shipper?.name?.trim();
+    const shipperPhone = input.snapshot.contacts?.shipper?.phone?.trim();
+    const recipientName = input.snapshot.contacts?.recipient?.name?.trim();
+    const recipientPhone = input.snapshot.contacts?.recipient?.phone?.trim();
+    if (!shipperName || !shipperPhone || !recipientName || !recipientPhone) {
+      throw new Error('CDEK booking failed: missing sender/recipient contacts');
+    }
+
+    const cargo = input.snapshot.cargo;
+    const payload: Record<string, unknown> = {
+      number: orderNumber,
+      tariff_code: tariffCode,
+      comment: input.draft.notes?.slice(0, 255) || 'Создано из Handyseller TMS',
+      sender: {
+        name: shipperName,
+        phones: [{ number: shipperPhone }],
+      },
+      recipient: {
+        name: recipientName,
+        phones: [{ number: recipientPhone }],
+      },
+      from_location: { address: fromAddress },
+      to_location: { address: toAddress },
+      packages: [
+        {
+          number: '1',
+          weight: Math.max(Math.round(cargo.weightGrams || 100), 100),
+          length: Math.max(Math.round((cargo.lengthMm ?? 100) / 10), 1),
+          width: Math.max(Math.round((cargo.widthMm ?? 100) / 10), 1),
+          height: Math.max(Math.round((cargo.heightMm ?? 100) / 10), 1),
+        },
+      ],
+    };
+    this.logger.log(
+      `[cdek-booking] request send requestId=${quote.requestId} number=${orderNumber} tariff=${tariffCode}`,
+    );
+    const createRes = await fetch(`${base}/v2/orders`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+      cache: 'no-store',
+    }).catch(() => null);
+    const createData = (await createRes?.json().catch(() => ({}))) as Record<string, unknown>;
+    this.logger.log(
+      `[cdek-booking] response requestId=${quote.requestId} status=${createRes?.status ?? 'n/a'} body=${JSON.stringify(createData).slice(0, 1200)}`,
+    );
+    if (!createRes?.ok) {
+      throw new Error(`CDEK booking failed: HTTP ${createRes?.status ?? 'n/a'}`);
+    }
+    const entity =
+      createData && typeof createData.entity === 'object' && createData.entity
+        ? (createData.entity as Record<string, unknown>)
+        : null;
+    const cdekNumber =
+      (entity && typeof entity.cdek_number === 'string' && entity.cdek_number.trim()) ||
+      (entity && typeof entity.number === 'string' && entity.number.trim()) ||
+      orderNumber;
+
     return {
       shipment: {
         requestId: quote.requestId,
         carrierId: quote.carrierId,
         carrierName: quote.carrierName,
-        trackingNumber: `CDEK-PENDING-${Date.now().toString().slice(-6)}`,
-        status: 'CREATED',
+        trackingNumber: cdekNumber,
+        status: 'CONFIRMED',
         priceRub: quote.priceRub,
         etaDays: quote.etaDays,
       },
       tracking: [
         {
           shipmentId: '',
-          status: 'CREATED',
-          description: 'Тариф CDEK выбран. Подтверждение отгрузки следующим шагом.',
+          status: 'CONFIRMED',
+          description: `Заявка создана в CDEK: ${cdekNumber}`,
           occurredAt: new Date().toISOString(),
         },
       ],
     };
+  }
+
+  private extractTariffCode(quoteId: string): number {
+    const tail = quoteId.split(':').at(-1) ?? '';
+    const n = Number(tail);
+    if (Number.isFinite(n) && n > 0) return Math.round(n);
+    return 136;
   }
 
   private async loadCredentials(

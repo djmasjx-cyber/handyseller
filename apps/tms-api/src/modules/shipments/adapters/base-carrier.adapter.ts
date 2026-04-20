@@ -11,6 +11,12 @@ export interface CarrierQuoteContext {
   authToken?: string | null;
 }
 
+export interface CarrierBookInput {
+  quote: CarrierQuote;
+  input: CreateShipmentRequestInput;
+  context: CarrierQuoteContext;
+}
+
 export interface CarrierAdapter {
   readonly descriptor: CarrierDescriptor;
   quote(
@@ -18,7 +24,7 @@ export interface CarrierAdapter {
     requestId: string,
     context: CarrierQuoteContext,
   ): Promise<CarrierQuote[]>;
-  book(quote: CarrierQuote): Promise<{
+  book(payload: CarrierBookInput): Promise<{
     shipment: Omit<ShipmentRecord, 'id' | 'userId' | 'createdAt'>;
     tracking: Array<Omit<TrackingEventRecord, 'id'>>;
   }>;

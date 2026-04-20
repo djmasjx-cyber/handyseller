@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { rankQuotes } from '@handyseller/tms-domain';
 import type {
   CarrierDescriptor,
@@ -217,7 +217,11 @@ export class ShipmentsService {
     return request;
   }
 
-  async confirmSelectedQuote(userId: string, requestId: string): Promise<ShipmentRecord> {
+  async confirmSelectedQuote(
+    userId: string,
+    requestId: string,
+    authToken?: string | null,
+  ): Promise<ShipmentRecord> {
     const request = this.getRequestOrThrow(userId, requestId);
     if (!request.selectedQuoteId) {
       throw new NotFoundException('Сначала выберите тариф');
@@ -225,9 +229,6 @@ export class ShipmentsService {
     const existingShipment = [...this.shipments.values()].find(
       (item) => item.userId === userId && item.requestId === requestId,
     );
-    if (existingShipment) {
-      return existingShipment;
-    }
 
     const quote = (this.quotes.get(requestId) ?? []).find((item) => item.id === request.selectedQuoteId);
     if (!quote) {
@@ -237,8 +238,33 @@ export class ShipmentsService {
     if (!adapter) {
       throw new NotFoundException('Перевозчик не найден');
     }
+    if (existingShipment) {
+      const isLegacyCdekPending =
+        existingShipment.carrierId === 'cdek' && existingShipment.trackingNumber.startsWith('CDEK-PENDING-');
+      if (!isLegacyCdekPending) {
+        return existingShipment;
+      }
+      this.logger.warn(
+        `Found legacy local CDEK shipment without carrier order; rebooking requestId=${requestId} shipmentId=${existingShipment.id}`,
+      );
+      this.shipments.delete(existingShipment.id);
+      this.tracking.delete(existingShipment.id);
+      this.documents.delete(existingShipment.id);
+    }
+    if (!adapter.descriptor.supportsBooking) {
+      throw new BadRequestException(
+        `Оформление перевозки через ${adapter.descriptor.name} пока не реализовано: тариф можно сравнить и выбрать, но заявка в ЛК ТК не создается.`,
+      );
+    }
 
-    const booking = await adapter.book(quote);
+    const booking = await adapter.book({
+      quote,
+      input: {
+        snapshot: request.snapshot,
+        draft: request.draft,
+      },
+      context: { userId, authToken },
+    });
     const shipmentId = `shp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const shipment: ShipmentRecord = {
       id: shipmentId,

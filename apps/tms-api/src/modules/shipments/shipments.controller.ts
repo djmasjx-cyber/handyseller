@@ -79,8 +79,13 @@ export class ShipmentsController {
 
   @Post('shipment-requests/:id/confirm')
   @TmsAccess('write')
-  confirmQuote(@CurrentUser('userId') userId: string, @Param('id') requestId: string) {
-    return this.shipmentsService.confirmSelectedQuote(userId, requestId);
+  confirmQuote(
+    @CurrentUser('userId') userId: string,
+    @Param('id') requestId: string,
+    @Headers('authorization') authorization?: string,
+  ) {
+    const authToken = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
+    return this.shipmentsService.confirmSelectedQuote(userId, requestId, authToken);
   }
 
   @Get('shipments')

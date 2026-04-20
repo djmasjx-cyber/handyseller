@@ -20,6 +20,7 @@ export function TmsEstimateOrderModal({ open, onClose, onCreated }: Props) {
 
   const [origin, setOrigin] = useState("")
   const [destination, setDestination] = useState("")
+  const [internalOrderNumber, setInternalOrderNumber] = useState("")
   const [shipperName, setShipperName] = useState("")
   const [shipperPhone, setShipperPhone] = useState("")
   const [recipientName, setRecipientName] = useState("")
@@ -35,6 +36,7 @@ export function TmsEstimateOrderModal({ open, onClose, onCreated }: Props) {
     setError(null)
     setOrigin("")
     setDestination("")
+    setInternalOrderNumber("")
     setShipperName("")
     setShipperPhone("")
     setRecipientName("")
@@ -68,6 +70,7 @@ export function TmsEstimateOrderModal({ open, onClose, onCreated }: Props) {
         body: JSON.stringify({
           originAddress: origin.trim(),
           destinationAddress: destination.trim(),
+          externalId: internalOrderNumber.trim(),
           shipperName: shipperName.trim(),
           shipperPhone: shipperPhone.trim(),
           recipientName: recipientName.trim(),
@@ -161,6 +164,16 @@ export function TmsEstimateOrderModal({ open, onClose, onCreated }: Props) {
             placeholder="Например: Санкт-Петербург, пр. …"
             required
           />
+          <div className="space-y-2">
+            <Label htmlFor="internalOrderNumber">Внутренний номер заказа (ИМ) *</Label>
+            <Input
+              id="internalOrderNumber"
+              value={internalOrderNumber}
+              onChange={(e) => setInternalOrderNumber(e.target.value)}
+              placeholder="Например: TMS-5F1A23F3"
+              required
+            />
+          </div>
 
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <div className="space-y-2">
@@ -248,7 +261,7 @@ export function TmsEstimateOrderModal({ open, onClose, onCreated }: Props) {
           </div>
 
           <p className="text-xs text-muted-foreground">
-            Обязательные поля: оба адреса, контакты отправителя/получателя, вес, три габарита, объявленная ценность. После создания откройте{" "}
+            Обязательные поля: внутренний номер заказа (ИМ), оба адреса, контакты отправителя/получателя, вес, три габарита, объявленная ценность. После создания откройте{" "}
             <span className="font-medium">TMS</span> и нажмите «Получить варианты» по этому заказу.
           </p>
 
@@ -268,6 +281,7 @@ export function TmsEstimateOrderModal({ open, onClose, onCreated }: Props) {
               onClick={submit}
               disabled={
                 saving ||
+                !internalOrderNumber.trim() ||
                 !origin.trim() ||
                 !destination.trim() ||
                 !shipperName.trim() ||
