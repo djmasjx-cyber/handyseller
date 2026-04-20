@@ -1,0 +1,3 @@
+{
+  "/api/tms/address-suggest/route": "app/api/tms/address-suggest/route.js"
+}

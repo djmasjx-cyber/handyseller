@@ -303,8 +303,8 @@ self.__SERVER_FILES_MANIFEST={
       "beforeFiles": [],
       "afterFiles": [
         {
-          "source": "/api/:path*",
-          "destination": "http://localhost:4000/api/:path*"
+          "source": "/api/:path((?!tms(?:/|$)).*)",
+          "destination": "http://localhost:4000/api/:path"
         }
       ],
       "fallback": []
@@ -328,6 +328,11 @@ self.__SERVER_FILES_MANIFEST={
       {
         "source": "/dashboard/admin/payments/webhooks",
         "destination": "/admin/payments/webhooks",
+        "permanent": true
+      },
+      {
+        "source": "/dashboard/admin/reviews",
+        "destination": "/admin/reviews",
         "permanent": true
       }
     ]

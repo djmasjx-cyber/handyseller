@@ -2,7 +2,7 @@ var R=require("../../../chunks/ssr/[turbopack]_runtime.js")("server/app/blog/kak
 R.c("server/chunks/ssr/[root-of-the-server]__02c2ad1f._.js")
 R.c("server/chunks/ssr/apps_web_app_blog_kak-stat-samozanyatym-i-nachat-prodavat_page_tsx_8f6837b5._.js")
 R.c("server/chunks/ssr/_b302445b._.js")
-R.c("server/chunks/ssr/_8ff4e8de._.js")
+R.c("server/chunks/ssr/_77a2eee1._.js")
 R.c("server/chunks/ssr/_e2368350._.js")
 R.c("server/chunks/ssr/[root-of-the-server]__c8a0d866._.js")
 R.c("server/chunks/ssr/[root-of-the-server]__a9757c1b._.js")

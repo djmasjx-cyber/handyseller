@@ -1,7 +1,7 @@
 var R=require("../../../chunks/ssr/[turbopack]_runtime.js")("server/app/blog/kak-sdelat-foto-hendmeida-dlya-marketpleysov/page.js")
 R.c("server/chunks/ssr/[root-of-the-server]__442e2601._.js")
 R.c("server/chunks/ssr/apps_web_app_blog_kak-sdelat-foto-hendmeida-dlya-marketpleysov_page_tsx_a922a540._.js")
-R.c("server/chunks/ssr/_8ff4e8de._.js")
+R.c("server/chunks/ssr/_77a2eee1._.js")
 R.c("server/chunks/ssr/_b302445b._.js")
 R.c("server/chunks/ssr/_ca067f8e._.js")
 R.c("server/chunks/ssr/[root-of-the-server]__c8a0d866._.js")

@@ -2,7 +2,7 @@ var R=require("../../../chunks/ssr/[turbopack]_runtime.js")("server/app/blog/kak
 R.c("server/chunks/ssr/[root-of-the-server]__0cc45a57._.js")
 R.c("server/chunks/ssr/apps_web_app_blog_kak-rasschitat-tsenu-hendmeida_page_tsx_5082d3fd._.js")
 R.c("server/chunks/ssr/_52631311._.js")
-R.c("server/chunks/ssr/_8ff4e8de._.js")
+R.c("server/chunks/ssr/_77a2eee1._.js")
 R.c("server/chunks/ssr/_b302445b._.js")
 R.c("server/chunks/ssr/[root-of-the-server]__c8a0d866._.js")
 R.c("server/chunks/ssr/[root-of-the-server]__a9757c1b._.js")

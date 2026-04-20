@@ -1,0 +1,3 @@
+{
+  "/api/orders/paged/route": "app/api/orders/paged/route.js"
+}

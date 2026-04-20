@@ -2,7 +2,7 @@ var R=require("../../../chunks/ssr/[turbopack]_runtime.js")("server/app/blog/cht
 R.c("server/chunks/ssr/[root-of-the-server]__0b04de6a._.js")
 R.c("server/chunks/ssr/0da96_web_app_blog_chto-mozhno-sdelat-svoimi-rukami-dlya-prodazhi_page_tsx_113c889d._.js")
 R.c("server/chunks/ssr/_36809c14._.js")
-R.c("server/chunks/ssr/_8ff4e8de._.js")
+R.c("server/chunks/ssr/_77a2eee1._.js")
 R.c("server/chunks/ssr/_b302445b._.js")
 R.c("server/chunks/ssr/[root-of-the-server]__c8a0d866._.js")
 R.c("server/chunks/ssr/[root-of-the-server]__a9757c1b._.js")
