@@ -77,6 +77,12 @@ export class ShipmentsController {
     return this.shipmentsService.selectQuote(userId, requestId, quoteId);
   }
 
+  @Post('shipment-requests/:id/confirm')
+  @TmsAccess('write')
+  confirmQuote(@CurrentUser('userId') userId: string, @Param('id') requestId: string) {
+    return this.shipmentsService.confirmSelectedQuote(userId, requestId);
+  }
+
   @Get('shipments')
   listShipments(@CurrentUser('userId') userId: string) {
     return this.shipmentsService.listShipments(userId);

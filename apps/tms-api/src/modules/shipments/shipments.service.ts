@@ -178,11 +178,33 @@ export class ShipmentsService {
     return this.quotes.get(requestId) ?? [];
   }
 
-  async selectQuote(userId: string, requestId: string, quoteId: string): Promise<ShipmentRecord> {
+  selectQuote(userId: string, requestId: string, quoteId: string): ShipmentRequestRecord {
     const request = this.getRequestOrThrow(userId, requestId);
     const quote = (this.quotes.get(requestId) ?? []).find((item) => item.id === quoteId);
     if (!quote) {
       throw new NotFoundException('Тариф не найден');
+    }
+    request.selectedQuoteId = quoteId;
+    request.updatedAt = new Date().toISOString();
+    this.requests.set(requestId, request);
+    return request;
+  }
+
+  async confirmSelectedQuote(userId: string, requestId: string): Promise<ShipmentRecord> {
+    const request = this.getRequestOrThrow(userId, requestId);
+    if (!request.selectedQuoteId) {
+      throw new NotFoundException('Сначала выберите тариф');
+    }
+    const existingShipment = [...this.shipments.values()].find(
+      (item) => item.userId === userId && item.requestId === requestId,
+    );
+    if (existingShipment) {
+      return existingShipment;
+    }
+
+    const quote = (this.quotes.get(requestId) ?? []).find((item) => item.id === request.selectedQuoteId);
+    if (!quote) {
+      throw new NotFoundException('Выбранный тариф больше недоступен, обновите тарифы');
     }
     const adapter = this.adapters.find((item) => item.descriptor.id === quote.carrierId);
     if (!adapter) {
@@ -226,10 +248,8 @@ export class ShipmentsService {
     ]);
 
     request.status = 'BOOKED';
-    request.selectedQuoteId = quoteId;
     request.updatedAt = new Date().toISOString();
     this.requests.set(requestId, request);
-
     return shipment;
   }
 

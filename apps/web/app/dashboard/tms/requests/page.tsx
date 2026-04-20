@@ -130,6 +130,7 @@ export default function TmsRequestsPage() {
   const [loading, setLoading] = useState(true)
   const [refreshingId, setRefreshingId] = useState<string | null>(null)
   const [selectingKey, setSelectingKey] = useState<string | null>(null)
+  const [confirmingId, setConfirmingId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState("")
   const [sortMode, setSortMode] = useState<SortMode>("newest")
@@ -371,6 +372,28 @@ export default function TmsRequestsPage() {
     }
   }
 
+  const confirmQuote = async (requestId: string) => {
+    if (!token) return
+    setConfirmingId(requestId)
+    setError(null)
+    try {
+      const headers = { Authorization: `Bearer ${token}` }
+      const res = await authFetch(`/api/tms/shipment-requests/${requestId}/confirm`, {
+        method: "POST",
+        headers,
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(typeof data?.message === "string" ? data.message : "Не удалось подтвердить перевозку")
+      }
+      await loadAll({ silent: true })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Не удалось подтвердить перевозку")
+    } finally {
+      setConfirmingId(null)
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-16">
@@ -385,7 +408,8 @@ export default function TmsRequestsPage() {
         <CardTitle>Сравнение тарифов</CardTitle>
         <CardDescription>
           Строки — заявки, колонки — перевозчики; в ячейке цена и срок. Очереди по типу потока (маркетплейс / ТК);
-          список обновляется каждые 30 с, пока вкладка открыта. Клик по ячейке — выбор тарифа.
+          список обновляется каждые 30 с, пока вкладка открыта. Клик по ячейке — выбор тарифа, далее нажмите
+          «Подтвердить».
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -544,14 +568,28 @@ export default function TmsRequestsPage() {
                         )
                       })}
                       <td className="border-l px-2 py-2 align-top text-right whitespace-nowrap">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={refreshingId === item.id}
-                          onClick={() => void refreshQuotes(item.id)}
-                        >
-                          {refreshingId === item.id ? <Loader2 className="h-4 w-4 animate-spin" /> : "Обновить"}
-                        </Button>
+                        <div className="inline-flex items-center gap-2">
+                          <Button
+                            size="sm"
+                            disabled={
+                              item.status === "BOOKED" ||
+                              !item.selectedQuoteId ||
+                              confirmingId === item.id ||
+                              refreshingId === item.id
+                            }
+                            onClick={() => void confirmQuote(item.id)}
+                          >
+                            {confirmingId === item.id ? <Loader2 className="h-4 w-4 animate-spin" /> : "Подтвердить"}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={refreshingId === item.id || confirmingId === item.id}
+                            onClick={() => void refreshQuotes(item.id)}
+                          >
+                            {refreshingId === item.id ? <Loader2 className="h-4 w-4 animate-spin" /> : "Обновить"}
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   )
