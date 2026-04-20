@@ -335,6 +335,35 @@ export class ShipmentsService {
     return this.documents.get(shipmentId) ?? [];
   }
 
+  async downloadDocument(
+    userId: string,
+    shipmentId: string,
+    documentId: string,
+    authToken?: string | null,
+  ): Promise<{ content: Buffer; mimeType: string; fileName: string }> {
+    const shipment = this.shipments.get(shipmentId);
+    if (!shipment || shipment.userId !== userId) {
+      throw new NotFoundException('Отгрузка не найдена');
+    }
+    const doc = (this.documents.get(shipmentId) ?? []).find((item) => item.id === documentId);
+    if (!doc) {
+      throw new NotFoundException('Документ не найден');
+    }
+    const adapter = this.adapters.find((item) => item.descriptor.id === shipment.carrierId);
+    if (!adapter?.downloadDocument) {
+      return {
+        content: Buffer.from(doc.content ?? '', 'utf-8'),
+        mimeType: 'text/plain; charset=utf-8',
+        fileName: `${shipment.trackingNumber || shipment.id}-${doc.type.toLowerCase()}.txt`,
+      };
+    }
+    return adapter.downloadDocument({
+      shipment,
+      document: doc,
+      context: { userId, authToken },
+    });
+  }
+
   private getRequestOrThrow(userId: string, requestId: string): ShipmentRequestRecord {
     const request = this.requests.get(requestId);
     if (!request || request.userId !== userId) {

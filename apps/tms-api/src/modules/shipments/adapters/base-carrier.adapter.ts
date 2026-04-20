@@ -18,6 +18,12 @@ export interface CarrierBookInput {
   context: CarrierQuoteContext;
 }
 
+export interface CarrierDocumentDownloadInput {
+  shipment: ShipmentRecord;
+  document: ShipmentDocumentRecord;
+  context: CarrierQuoteContext;
+}
+
 export interface CarrierAdapter {
   readonly descriptor: CarrierDescriptor;
   quote(
@@ -30,4 +36,7 @@ export interface CarrierAdapter {
     tracking: Array<Omit<TrackingEventRecord, 'id'>>;
     documents?: Array<Pick<ShipmentDocumentRecord, 'type' | 'title' | 'content'>>;
   }>;
+  downloadDocument?(
+    payload: CarrierDocumentDownloadInput,
+  ): Promise<{ content: Buffer; mimeType: string; fileName: string }>;
 }

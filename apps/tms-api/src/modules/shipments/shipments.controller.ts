@@ -1,5 +1,6 @@
-import { Body, Controller, Get, Headers, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, Post, Res, UseGuards } from '@nestjs/common';
 import type { CreateShipmentRequestInput } from '@handyseller/tms-sdk';
+import type { Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { TmsAccess } from '../auth/tms-access.metadata';
@@ -101,5 +102,20 @@ export class ShipmentsController {
   @Get('shipments/:id/documents')
   documents(@CurrentUser('userId') userId: string, @Param('id') shipmentId: string) {
     return this.shipmentsService.getDocuments(userId, shipmentId);
+  }
+
+  @Get('shipments/:shipmentId/documents/:documentId/file')
+  async downloadDocument(
+    @CurrentUser('userId') userId: string,
+    @Param('shipmentId') shipmentId: string,
+    @Param('documentId') documentId: string,
+    @Headers('authorization') authorization: string | undefined,
+    @Res() res: Response,
+  ) {
+    const authToken = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
+    const file = await this.shipmentsService.downloadDocument(userId, shipmentId, documentId, authToken);
+    res.setHeader('Content-Type', file.mimeType);
+    res.setHeader('Content-Disposition', `inline; filename="${file.fileName.replace(/"/g, '')}"`);
+    res.send(file.content);
   }
 }

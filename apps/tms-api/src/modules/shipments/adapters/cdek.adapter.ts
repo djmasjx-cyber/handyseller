@@ -7,7 +7,12 @@ import type {
   ShipmentRecord,
   TrackingEventRecord,
 } from '@handyseller/tms-sdk';
-import type { CarrierAdapter, CarrierBookInput, CarrierQuoteContext } from './base-carrier.adapter';
+import type {
+  CarrierAdapter,
+  CarrierBookInput,
+  CarrierDocumentDownloadInput,
+  CarrierQuoteContext,
+} from './base-carrier.adapter';
 
 type CdekTariff = {
   tariff_code?: number;
@@ -33,6 +38,7 @@ type CdekOrderResponse = {
     errors?: Array<{ code?: string; message?: string }>;
   }>;
 };
+type CdekOrderLookupResponse = CdekOrderResponse | CdekOrderResponse[];
 
 type CdekPrintResponse = {
   entity?: {
@@ -65,6 +71,36 @@ function cdekCityCandidates(label: string | null | undefined): string[] {
   const m = label.match(/(?:г\.?|город)\s*([А-Яа-яЁёA-Za-z\- ]{2,80})/u);
   if (m?.[1]) push(m[1]);
   return out;
+}
+
+function isCdekRequestInvalid(response: CdekOrderResponse | null): boolean {
+  return Boolean(response?.requests?.some((r) => r.state === 'INVALID'));
+}
+
+function cdekResponseErrorMessage(response: CdekOrderResponse | null): string | null {
+  const messages = (response?.requests ?? [])
+    .flatMap((req) => req.errors ?? [])
+    .map((e) => e.message?.trim())
+    .filter((x): x is string => Boolean(x));
+  if (!messages.length) return null;
+  return messages.join('; ');
+}
+
+function normalizeCdekOrderResponse(payload: CdekOrderLookupResponse | null): CdekOrderResponse | null {
+  if (!payload) return null;
+  if (Array.isArray(payload)) return payload[0] ?? null;
+  return payload;
+}
+
+function buildCdekPrintMarker(kind: 'orders' | 'barcodes', uuid: string): string {
+  return `cdek-print:${kind}:${uuid}`;
+}
+
+function parseCdekPrintMarker(content: string): { kind: 'orders' | 'barcodes'; uuid: string } | null {
+  const m = /^cdek-print:(orders|barcodes):([0-9a-f-]{8,})$/i.exec(content.trim());
+  if (!m) return null;
+  const kind = m[1] === 'barcodes' ? 'barcodes' : 'orders';
+  return { kind, uuid: m[2] };
 }
 
 export class CdekAdapter implements CarrierAdapter {
@@ -258,6 +294,12 @@ export class CdekAdapter implements CarrierAdapter {
               amount: 1,
             },
           ];
+    const fromCode = await this.resolveCityCode(base, token, fromAddress);
+    const toCode = await this.resolveCityCode(base, token, toAddress);
+    if (!fromCode || !toCode) {
+      throw new Error('CDEK booking failed: cannot resolve city code for origin/destination');
+    }
+
     const payload: Record<string, unknown> = {
       number: orderNumber,
       tariff_code: tariffCode,
@@ -270,8 +312,8 @@ export class CdekAdapter implements CarrierAdapter {
         name: recipientName,
         phones: [{ number: recipientPhone }],
       },
-      from_location: { address: fromAddress },
-      to_location: { address: toAddress },
+      from_location: { code: fromCode, address: fromAddress },
+      to_location: { code: toCode, address: toAddress },
       packages: [
         {
           number: '1',
@@ -296,22 +338,27 @@ export class CdekAdapter implements CarrierAdapter {
       body: JSON.stringify(payload),
       cache: 'no-store',
     }).catch(() => null);
-    const createData = (await createRes?.json().catch(() => ({}))) as CdekOrderResponse;
-    this.logger.log(
-      `[cdek-booking] response requestId=${quote.requestId} status=${createRes?.status ?? 'n/a'} body=${JSON.stringify(createData).slice(0, 1200)}`,
+    const createData = normalizeCdekOrderResponse(
+      (await createRes?.json().catch(() => null)) as CdekOrderLookupResponse | null,
     );
-    if (!createRes?.ok) {
-      throw new Error(`CDEK booking failed: HTTP ${createRes?.status ?? 'n/a'}`);
+    this.logger.log(
+      `[cdek-booking] response requestId=${quote.requestId} status=${createRes?.status ?? 'n/a'} body=${JSON.stringify(createData ?? {}).slice(0, 1200)}`,
+    );
+    const cdekErrorMessage = cdekResponseErrorMessage(createData);
+    if (!createRes?.ok || isCdekRequestInvalid(createData)) {
+      throw new Error(
+        `CDEK booking failed: ${cdekErrorMessage || `HTTP ${createRes?.status ?? 'n/a'}`}`,
+      );
     }
-    const acceptedUuid = createData.entity?.uuid?.trim() || null;
+    const acceptedUuid = createData?.entity?.uuid?.trim() || null;
     const resolved = acceptedUuid
       ? await this.fetchOrderWithRetries(base, token, acceptedUuid, quote.requestId)
       : null;
     const cdekNumber =
       resolved?.entity?.cdek_number?.trim() ||
       resolved?.entity?.number?.trim() ||
-      createData.entity?.cdek_number?.trim() ||
-      createData.entity?.number?.trim() ||
+      createData?.entity?.cdek_number?.trim() ||
+      createData?.entity?.number?.trim() ||
       orderNumber;
 
     return {
@@ -335,6 +382,47 @@ export class CdekAdapter implements CarrierAdapter {
         },
       ],
       documents: acceptedUuid ? await this.createPrintForms(base, token, acceptedUuid, quote.requestId) : undefined,
+    };
+  }
+
+  async downloadDocument({
+    document,
+    context,
+    shipment,
+  }: CarrierDocumentDownloadInput): Promise<{ content: Buffer; mimeType: string; fileName: string }> {
+    const marker = parseCdekPrintMarker(document.content ?? '');
+    if (!marker) {
+      return {
+        content: Buffer.from(document.content ?? '', 'utf-8'),
+        mimeType: 'text/plain; charset=utf-8',
+        fileName: `${shipment.trackingNumber || shipment.id}-${document.type.toLowerCase()}.txt`,
+      };
+    }
+    const credentials = await this.loadCredentials(context, shipment.requestId);
+    if (!credentials) {
+      throw new Error('CDEK document download failed: missing credentials');
+    }
+    const token = await this.getAccessToken(credentials, shipment.requestId);
+    if (!token) {
+      throw new Error('CDEK document download failed: auth error');
+    }
+    const base = (process.env.CDEK_API_BASE ?? 'https://api.cdek.ru').replace(/\/+$/, '');
+    const endpoint = marker.kind === 'orders' ? 'orders' : 'barcodes';
+    const res = await fetch(`${base}/v2/print/${endpoint}/${marker.uuid}.pdf`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/pdf',
+      },
+      cache: 'no-store',
+    }).catch(() => null);
+    if (!res?.ok) {
+      throw new Error(`CDEK document download failed: HTTP ${res?.status ?? 'n/a'}`);
+    }
+    const arrayBuffer = await res.arrayBuffer();
+    return {
+      content: Buffer.from(arrayBuffer),
+      mimeType: 'application/pdf',
+      fileName: `${shipment.trackingNumber || shipment.id}-${endpoint}.pdf`,
     };
   }
 
@@ -369,7 +457,8 @@ export class CdekAdapter implements CarrierAdapter {
       cache: 'no-store',
     }).catch(() => null);
     if (!res?.ok) return null;
-    return (await res.json().catch(() => null)) as CdekOrderResponse | null;
+    const data = (await res.json().catch(() => null)) as CdekOrderLookupResponse | null;
+    return normalizeCdekOrderResponse(data);
   }
 
   private async createPrintForms(
@@ -388,7 +477,7 @@ export class CdekAdapter implements CarrierAdapter {
       docs.push({
         type: 'WAYBILL',
         title: 'Транспортная накладная (CDEK)',
-        content: `${base}/v2/print/orders/${orderPrintUuid}.pdf`,
+        content: buildCdekPrintMarker('orders', orderPrintUuid),
       });
     } else {
       this.logger.warn(`[cdek-booking] print order form not ready requestId=${requestId} orderUuid=${orderUuid}`);
@@ -402,7 +491,7 @@ export class CdekAdapter implements CarrierAdapter {
       docs.push({
         type: 'LABEL',
         title: 'Отгрузочный ярлык (CDEK)',
-        content: `${base}/v2/print/barcodes/${barcodePrintUuid}.pdf`,
+        content: buildCdekPrintMarker('barcodes', barcodePrintUuid),
       });
     } else {
       this.logger.warn(`[cdek-booking] print barcode not ready requestId=${requestId} orderUuid=${orderUuid}`);

@@ -40,37 +40,57 @@ export default function TmsShipmentsPage() {
   const [trackingError, setTrackingError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
-  const openDocument = (doc: ShipmentDocument, print: boolean) => {
-    const maybeUrl = (doc.content ?? "").trim()
-    if (/^https?:\/\/\S+/i.test(maybeUrl)) {
-      window.open(maybeUrl, "_blank", "noopener,noreferrer")
-      return
+  const openDocument = async (shipmentId: string, doc: ShipmentDocument, print: boolean) => {
+    if (!token) return
+    try {
+      const res = await authFetch(`/api/tms/shipments/${shipmentId}/documents/${doc.id}/file`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!res.ok) {
+        throw new Error("Не удалось получить документ")
+      }
+      const blob = await res.blob()
+      const objectUrl = URL.createObjectURL(blob)
+      const w = window.open(objectUrl, "_blank", "noopener,noreferrer")
+      if (!w) {
+        URL.revokeObjectURL(objectUrl)
+        return
+      }
+      if (print) {
+        w.onload = () => {
+          w.print()
+          setTimeout(() => URL.revokeObjectURL(objectUrl), 1000)
+        }
+      } else {
+        setTimeout(() => URL.revokeObjectURL(objectUrl), 10000)
+      }
+    } catch {
+      const w = window.open("", "_blank", "noopener,noreferrer")
+      if (!w) return
+      const title = doc.title || "Документ"
+      const body = doc.content ?? "Содержимое документа недоступно."
+      const escapedTitle = title.replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      const escapedBody = body.replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      w.document.write(`
+        <!doctype html>
+        <html lang="ru">
+          <head>
+            <meta charset="utf-8" />
+            <title>${escapedTitle}</title>
+            <style>
+              body { font-family: Arial, sans-serif; padding: 24px; }
+              pre { white-space: pre-wrap; font-family: inherit; line-height: 1.5; }
+            </style>
+          </head>
+          <body>
+            <h1>${escapedTitle}</h1>
+            <pre>${escapedBody}</pre>
+          </body>
+        </html>
+      `)
+      w.document.close()
+      if (print) w.print()
     }
-    const w = window.open("", "_blank", "noopener,noreferrer")
-    if (!w) return
-    const title = doc.title || "Документ"
-    const body = doc.content ?? "Содержимое документа недоступно."
-    const escapedTitle = title.replace(/</g, "&lt;").replace(/>/g, "&gt;")
-    const escapedBody = body.replace(/</g, "&lt;").replace(/>/g, "&gt;")
-    w.document.write(`
-      <!doctype html>
-      <html lang="ru">
-        <head>
-          <meta charset="utf-8" />
-          <title>${escapedTitle}</title>
-          <style>
-            body { font-family: Arial, sans-serif; padding: 24px; }
-            pre { white-space: pre-wrap; font-family: inherit; line-height: 1.5; }
-          </style>
-        </head>
-        <body>
-          <h1>${escapedTitle}</h1>
-          <pre>${escapedBody}</pre>
-        </body>
-      </html>
-    `)
-    w.document.close()
-    if (print) w.print()
   }
 
   const formatDateTime = (s: string) => {
@@ -199,7 +219,7 @@ export default function TmsShipmentsPage() {
                       size="sm"
                       variant="outline"
                       className="h-7 px-2 text-xs relative z-10 pointer-events-auto"
-                      onClick={() => openDocument(doc, false)}
+                      onClick={() => void openDocument(item.id, doc, false)}
                     >
                       Открыть
                     </Button>
@@ -208,7 +228,7 @@ export default function TmsShipmentsPage() {
                       size="sm"
                       variant="outline"
                       className="h-7 px-2 text-xs relative z-10 pointer-events-auto"
-                      onClick={() => openDocument(doc, true)}
+                      onClick={() => void openDocument(item.id, doc, true)}
                     >
                       Печать
                     </Button>
