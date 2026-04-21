@@ -106,6 +106,19 @@ function parseMajorPdfMarker(
   return { kind, wbNumber, pdf };
 }
 
+function parseMajorPdfMarkerMeta(content: string): { kind: 'waybill' | 'label'; wbNumber: string } | null {
+  const trimmed = (content || '').trim();
+  if (!trimmed.startsWith('major-pdf:')) return null;
+  const parts = trimmed.split(':');
+  if (parts.length < 4) return null;
+  const kindRaw = parts[1];
+  const wbNumber = (parts[2] || '').trim();
+  if (!wbNumber) return null;
+  const kind = kindRaw === 'label' ? 'label' : kindRaw === 'waybill' ? 'waybill' : null;
+  if (!kind) return null;
+  return { kind, wbNumber };
+}
+
 function stripPostalPrefix(value: string): string {
   return value.replace(/^\s*\d{6}\s*,?\s*/u, '').trim();
 }
@@ -366,6 +379,27 @@ export class MajorExpressAdapter implements CarrierAdapter {
         content: cached.pdf,
         mimeType: 'application/pdf',
         fileName: `${cached.wbNumber}-major-${cached.kind}.pdf`,
+      };
+    }
+    const cachedMeta = parseMajorPdfMarkerMeta(content);
+    if (cachedMeta) {
+      const credentials = await this.loadCredentials(context);
+      if (!credentials) {
+        throw new Error('Major document download failed: missing credentials');
+      }
+      if (cachedMeta.kind === 'waybill') {
+        const pdf = await this.getWaybillPdf(credentials, cachedMeta.wbNumber);
+        return {
+          content: pdf,
+          mimeType: 'application/pdf',
+          fileName: `${cachedMeta.wbNumber}-major-waybill.pdf`,
+        };
+      }
+      const pdf = await this.getStickerPdf(credentials, cachedMeta.wbNumber);
+      return {
+        content: pdf,
+        mimeType: 'application/pdf',
+        fileName: `${cachedMeta.wbNumber}-major-label.pdf`,
       };
     }
     const [prefix, kind, wb] = content.split(':');

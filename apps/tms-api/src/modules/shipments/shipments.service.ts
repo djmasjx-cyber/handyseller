@@ -318,11 +318,14 @@ export class ShipmentsService implements OnModuleInit {
         existingShipment.carrierId === 'cdek' &&
         existingShipment.trackingNumber.startsWith('CDEK-PENDING-') &&
         !existingShipment.carrierOrderReference;
+      const isCdekPending =
+        existingShipment.carrierId === 'cdek' &&
+        existingShipment.trackingNumber.startsWith('CDEK-PENDING-');
       const isLegacyMajorPending =
         existingShipment.carrierId === 'major-express' &&
         existingShipment.trackingNumber.startsWith('MAJOR-PENDING-') &&
         !existingShipment.carrierOrderReference;
-      if (!isLegacyCdekPending && !isLegacyMajorPending) {
+      if (!isLegacyCdekPending && !isLegacyMajorPending && !isCdekPending) {
         request.status = 'BOOKED';
         request.updatedAt = new Date().toISOString();
         this.requests.set(requestId, request);
@@ -330,7 +333,7 @@ export class ShipmentsService implements OnModuleInit {
         return existingShipment;
       }
       this.logger.warn(
-        `Found legacy local shipment without carrier order; rebooking requestId=${requestId} shipmentId=${existingShipment.id} carrier=${existingShipment.carrierId}`,
+        `Found pending shipment; rebooking requestId=${requestId} shipmentId=${existingShipment.id} carrier=${existingShipment.carrierId}`,
       );
       this.shipments.delete(existingShipment.id);
       this.tracking.delete(existingShipment.id);
@@ -584,7 +587,9 @@ export class ShipmentsService implements OnModuleInit {
     const b64 = parts.slice(3).join(':');
     if (!b64) return null;
     try {
-      return { buffer: Buffer.from(b64, 'base64') };
+      const buffer = Buffer.from(b64, 'base64');
+      if (buffer.length < 16 || buffer.subarray(0, 5).toString('ascii') !== '%PDF-') return null;
+      return { buffer };
     } catch {
       return null;
     }

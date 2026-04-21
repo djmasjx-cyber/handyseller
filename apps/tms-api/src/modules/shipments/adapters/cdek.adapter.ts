@@ -149,8 +149,8 @@ function isDoorToDoorTariff(t: CdekTariff): boolean {
  */
 function getCdekOrderType(): 1 | 2 {
   const raw = process.env.CDEK_ORDER_TYPE?.trim();
-  if (raw === '2') return 2;
-  return 1;
+  if (raw === '1') return 1;
+  return 2;
 }
 
 export class CdekAdapter implements CarrierAdapter {
@@ -442,35 +442,42 @@ export class CdekAdapter implements CarrierAdapter {
       const details = cdekResponseErrorMessage(resolved);
       throw new Error(`CDEK booking failed: ${details || 'request became INVALID after ACCEPTED'}`);
     }
+    if (hasCdekHardFailureRequestState(resolved)) {
+      const details = cdekResponseErrorMessage(resolved);
+      const states = cdekRequestStates(resolved).join(', ');
+      throw new Error(
+        `CDEK booking failed: заявка отклонена после ACCEPTED (состояния: ${states || 'n/a'}). ${details || ''}`.trim(),
+      );
+    }
     const cdekNumber =
       resolved?.entity?.cdek_number?.trim() ||
       resolved?.entity?.number?.trim() ||
       createData?.entity?.cdek_number?.trim() ||
       createData?.entity?.number?.trim() ||
       '';
-    const isNumberReady = Boolean(cdekNumber);
-    const pendingTracking = `CDEK-PENDING-${acceptedUuid.slice(0, 8).toUpperCase()}`;
-    const trackingNumber = isNumberReady ? cdekNumber : pendingTracking;
+    if (!cdekNumber) {
+      throw new Error(
+        `CDEK booking failed: order accepted but CDEK number is not ready (uuid=${acceptedUuid}). Проверьте заполнение обязательных полей и повторите.`,
+      );
+    }
 
     return {
       shipment: {
         requestId: quote.requestId,
         carrierId: quote.carrierId,
         carrierName: quote.carrierName,
-        trackingNumber,
-        carrierOrderNumber: isNumberReady ? cdekNumber : undefined,
+        trackingNumber: cdekNumber,
+        carrierOrderNumber: cdekNumber,
         carrierOrderReference: acceptedUuid,
-        status: isNumberReady ? 'CONFIRMED' : 'CREATED',
+        status: 'CONFIRMED',
         priceRub: quote.priceRub,
         etaDays: quote.etaDays,
       },
       tracking: [
         {
           shipmentId: '',
-          status: isNumberReady ? 'CONFIRMED' : 'CREATED',
-          description: isNumberReady
-            ? `Заявка принята CDEK (${acceptedUuid}). Номер: ${cdekNumber}`
-            : `Заявка принята CDEK (${acceptedUuid}). Номер CDEK еще не присвоен, повторите проверку позже.`,
+          status: 'CONFIRMED',
+          description: `Заявка принята CDEK (${acceptedUuid}). Номер: ${cdekNumber}`,
           occurredAt: new Date().toISOString(),
         },
       ],
