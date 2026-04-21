@@ -24,6 +24,8 @@ type MajorCity = {
   isShipper: boolean;
 };
 
+type MajorCookieJar = Map<string, string>;
+
 function escapeXml(value: string): string {
   return value
     .replaceAll('&', '&amp;')
@@ -36,6 +38,12 @@ function escapeXml(value: string): string {
 function extractTag(xml: string, tag: string): string | null {
   const match = xml.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, 'i'));
   return match?.[1]?.trim() ?? null;
+}
+
+function extractHiddenInput(html: string, name: string): string {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = html.match(new RegExp(`<input[^>]*name=["']${escaped}["'][^>]*value=["']([^"']*)["']`, 'i'));
+  return match?.[1] ?? '';
 }
 
 function parseLooseNumber(value: string | null | undefined): number {
@@ -121,6 +129,38 @@ function parseMajorPdfMarkerMeta(content: string): { kind: 'waybill' | 'label'; 
 
 function stripPostalPrefix(value: string): string {
   return value.replace(/^\s*\d{6}\s*,?\s*/u, '').trim();
+}
+
+function parseSetCookieHeader(value: string): { name: string; val: string } | null {
+  const firstPart = value.split(';')[0]?.trim();
+  if (!firstPart) return null;
+  const eq = firstPart.indexOf('=');
+  if (eq <= 0) return null;
+  const name = firstPart.slice(0, eq).trim();
+  const val = firstPart.slice(eq + 1).trim();
+  if (!name) return null;
+  return { name, val };
+}
+
+function applySetCookies(jar: MajorCookieJar, response: Response): void {
+  const raw = (response.headers as unknown as { getSetCookie?: () => string[] }).getSetCookie?.() ?? [];
+  for (const entry of raw) {
+    const parsed = parseSetCookieHeader(entry);
+    if (!parsed) continue;
+    jar.set(parsed.name, parsed.val);
+  }
+  // Fallback for runtimes without getSetCookie support.
+  const single = response.headers.get('set-cookie');
+  if (single) {
+    const parsed = parseSetCookieHeader(single);
+    if (parsed) jar.set(parsed.name, parsed.val);
+  }
+}
+
+function cookieHeader(jar: MajorCookieJar): string {
+  return [...jar.entries()]
+    .map(([k, v]) => `${k}=${v}`)
+    .join('; ');
 }
 
 function normalizeCityName(value: string): string {
@@ -334,19 +374,22 @@ export class MajorExpressAdapter implements CarrierAdapter {
     this.logger.log(
       `[major-booking] order accepted requestId=${quote.requestId} orderId=${orderId} statusCode=${statusCode} waybill=${created.waybillNumber ?? 'n/a'}`,
     );
-    const waybills = created.waybillNumber ? [created.waybillNumber] : await this.getOrderWaybills(credentials, orderId);
-    let waybillNumber = waybills[0]?.trim() || '';
-    if (!waybillNumber) {
-      waybillNumber = await this.createWaybillFromOrderPayload(
-        credentials,
-        input,
-        quote,
-        shipperCity.code,
-        consigneeCity.code,
-      );
+    let waybillNumber = created.waybillNumber?.trim() || '';
+    const waybillCreated = await this.createWaybillFromOrderPayload(
+      credentials,
+      input,
+      quote,
+      shipperCity.code,
+      consigneeCity.code,
+    );
+    if (waybillCreated) {
+      waybillNumber = waybillCreated;
       this.logger.log(
-        `[major-booking] waybill created via CreateWaybill requestId=${quote.requestId} orderId=${orderId} wb=${waybillNumber || 'n/a'}`,
+        `[major-booking] waybill created via CreateWaybill requestId=${quote.requestId} orderId=${orderId} wb=${waybillNumber}`,
       );
+    }
+    if (!waybillNumber) {
+      waybillNumber = await this.waitForOrderWaybill(credentials, orderId);
     }
     const trackingNumber = waybillNumber || `MAJOR-ORDER-${orderId}`;
     const docs = waybillNumber
@@ -435,7 +478,9 @@ export class MajorExpressAdapter implements CarrierAdapter {
       };
     }
     if (kind === 'label') {
-      const pdf = await this.getStickerPdf(credentials, wb);
+      const pdf =
+        (await this.tryGetStickerViaWebSession(credentials, shipment, wb)) ??
+        (await this.getStickerPdf(credentials, wb));
       return {
         content: pdf,
         mimeType: 'application/pdf',
@@ -923,6 +968,16 @@ export class MajorExpressAdapter implements CarrierAdapter {
     return wb;
   }
 
+  private async waitForOrderWaybill(credentials: InternalCarrierCredentials, orderId: number): Promise<string> {
+    for (let i = 0; i < 12; i += 1) {
+      const waybills = await this.getOrderWaybills(credentials, orderId);
+      const wb = waybills[0]?.trim() || '';
+      if (wb) return wb;
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    }
+    return '';
+  }
+
   private async getOrderWaybills(credentials: InternalCarrierCredentials, orderId: number): Promise<string[]> {
     const xml = await this.majorSoapRequest(
       credentials,
@@ -1052,6 +1107,63 @@ export class MajorExpressAdapter implements CarrierAdapter {
       await new Promise((resolve) => setTimeout(resolve, 1500));
     }
     throw new Error(`Major StickerPack_PDF failed: PDF not ready for WB ${wbNumber}`);
+  }
+
+  private async tryGetStickerViaWebSession(
+    credentials: InternalCarrierCredentials,
+    shipment: ShipmentRecord,
+    wbNumber: string,
+  ): Promise<Buffer | null> {
+    const orderId = (shipment.carrierOrderReference ?? '').trim();
+    if (!orderId) return null;
+    const base = (process.env.MAJOR_WEB_BASE ?? 'https://lke.major-express.ru').replace(/\/+$/, '');
+    const jar: MajorCookieJar = new Map();
+    const loginUrl = `${base}/login.aspx?ReturnUrl=${encodeURIComponent(
+      `/InvoiceEdit.aspx?id=${encodeURIComponent(wbNumber)}&order_id=${encodeURIComponent(orderId)}`,
+    )}`;
+    const loginPage = await fetch(loginUrl, { cache: 'no-store' }).catch(() => null);
+    if (!loginPage?.ok) return null;
+    applySetCookies(jar, loginPage);
+    const loginHtml = await loginPage.text().catch(() => '');
+    const viewState = extractHiddenInput(loginHtml, '__VIEWSTATE');
+    const loginBody = new URLSearchParams();
+    loginBody.set('__VIEWSTATE', viewState);
+    loginBody.set('TextBox1', credentials.login);
+    loginBody.set('TextBox2', credentials.password);
+    loginBody.set('Button1', 'Вход');
+    const loginResp = await fetch(loginUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Cookie: cookieHeader(jar),
+      },
+      body: loginBody.toString(),
+      redirect: 'manual',
+      cache: 'no-store',
+    }).catch(() => null);
+    if (!loginResp) return null;
+    applySetCookies(jar, loginResp);
+    const invoiceUrl = `${base}/InvoiceEdit.aspx?id=${encodeURIComponent(wbNumber)}&order_id=${encodeURIComponent(orderId)}`;
+    const invoicePage = await fetch(invoiceUrl, {
+      headers: { Cookie: cookieHeader(jar) },
+      cache: 'no-store',
+    }).catch(() => null);
+    if (!invoicePage?.ok) return null;
+    applySetCookies(jar, invoicePage);
+    const printResp = await fetch(`${base}/MestaPrint.aspx`, {
+      headers: {
+        Cookie: cookieHeader(jar),
+        Referer: invoiceUrl,
+      },
+      cache: 'no-store',
+    }).catch(() => null);
+    if (!printResp?.ok) return null;
+    const ctype = printResp.headers.get('content-type') || '';
+    const content = Buffer.from(await printResp.arrayBuffer());
+    if (isLikelyPdf(content)) return content;
+    // Some environments can return HTML wrapper; reject non-PDF payloads.
+    if (!ctype.includes('pdf')) return null;
+    return isLikelyPdf(content) ? content : null;
   }
 
   private createDocumentStubs(
