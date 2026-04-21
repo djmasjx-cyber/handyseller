@@ -243,7 +243,12 @@ export class MajorExpressAdapter implements CarrierAdapter {
     let created: { orderId: number; waybillNumber: string | null };
     try {
       const cargoTakenDateIso = toLocalBusinessIso(new Date());
-      const intervalId = await this.getOrderIntervalId(credentials, shipperAddress, cargoTakenDateIso);
+      const intervalId = await this.getOrderIntervalId(
+        credentials,
+        shipperCity.code,
+        shipperAddress,
+        cargoTakenDateIso,
+      );
       this.logger.log(
         `[major-booking] request send requestId=${quote.requestId} orderNumber=${input.snapshot.coreOrderNumber} interval=${intervalId} shipperCity=${shipperCity.code} consigneeCity=${consigneeCity.code}`,
       );
@@ -264,7 +269,12 @@ export class MajorExpressAdapter implements CarrierAdapter {
       const tomorrow = new Date();
       tomorrow.setDate(tomorrow.getDate() + 1);
       const cargoTakenDateIso = toLocalBusinessIso(tomorrow);
-      const intervalId = await this.getOrderIntervalId(credentials, shipperAddress, cargoTakenDateIso);
+      const intervalId = await this.getOrderIntervalId(
+        credentials,
+        shipperCity.code,
+        shipperAddress,
+        cargoTakenDateIso,
+      );
       this.logger.warn(
         `[major-booking] cutoff reached for today, retrying next day requestId=${quote.requestId} date=${tomorrow.toISOString().slice(0, 10)} interval=${intervalId}`,
       );
@@ -616,6 +626,7 @@ export class MajorExpressAdapter implements CarrierAdapter {
 
   private async getOrderIntervalId(
     credentials: InternalCarrierCredentials,
+    shipperCityCode: number,
     shipperAddress: string,
     cargoTakenDateIso: string,
   ): Promise<number> {
@@ -630,9 +641,12 @@ export class MajorExpressAdapter implements CarrierAdapter {
   <soap:Body>
     <OrderIntervals xmlns="http://ltl-ws.major-express.ru/edclients/">
       <Data>
+        <CityCode>${shipperCityCode}</CityCode>
         <Address>${escapedAddress}</Address>
+        <CargoTakenDate>${escapedDate}</CargoTakenDate>
         <Created>${escapedDate}</Created>
         <IsOrderUrgent>false</IsOrderUrgent>
+        <IsWBRequired>true</IsWBRequired>
       </Data>
     </OrderIntervals>
   </soap:Body>
