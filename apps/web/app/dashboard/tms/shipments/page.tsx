@@ -95,19 +95,25 @@ export default function TmsShipmentsPage() {
         throw new Error([parsed.message, ...parsed.details].join("\n"))
       }
       const blob = await res.blob()
+      if (!blob || blob.size === 0) {
+        throw new Error("Документ пустой, попробуйте обновить статус ТК и повторить")
+      }
       const objectUrl = URL.createObjectURL(blob)
       const w = window.open(objectUrl, "_blank", "noopener,noreferrer")
       if (!w) {
         URL.revokeObjectURL(objectUrl)
         return
       }
+      // Do not revoke aggressively: PDF viewers may lazily fetch blob data and show a blank page if revoked too early.
+      const revoke = () => URL.revokeObjectURL(objectUrl)
+      w.addEventListener("beforeunload", revoke, { once: true })
       if (print) {
         w.onload = () => {
           w.print()
-          setTimeout(() => URL.revokeObjectURL(objectUrl), 1000)
+          setTimeout(revoke, 120000)
         }
       } else {
-        setTimeout(() => URL.revokeObjectURL(objectUrl), 10000)
+        setTimeout(revoke, 300000)
       }
     } catch (e) {
       const lines = normalizeMessageLines(e instanceof Error ? e.message.split("\n") : [])

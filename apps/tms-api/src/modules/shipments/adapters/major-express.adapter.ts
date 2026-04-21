@@ -46,6 +46,20 @@ function extractHiddenInput(html: string, name: string): string {
   return match?.[1] ?? '';
 }
 
+function extractHiddenInputs(html: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  const rx = /<input[^>]*type=["']hidden["'][^>]*>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = rx.exec(html)) != null) {
+    const tag = m[0];
+    const name = /name=["']([^"']+)["']/i.exec(tag)?.[1];
+    if (!name) continue;
+    const value = /value=["']([^"']*)["']/i.exec(tag)?.[1] ?? '';
+    out[name] = value;
+  }
+  return out;
+}
+
 function parseLooseNumber(value: string | null | undefined): number {
   if (!value) return 0;
   const normalized = value.replace(/\s+/g, '').replace(',', '.');
@@ -1150,6 +1164,26 @@ export class MajorExpressAdapter implements CarrierAdapter {
     }).catch(() => null);
     if (!invoicePage?.ok) return null;
     applySetCookies(jar, invoicePage);
+    const invoiceHtml = await invoicePage.text().catch(() => '');
+    const hidden = extractHiddenInputs(invoiceHtml);
+    const postBody = new URLSearchParams();
+    for (const [k, v] of Object.entries(hidden)) postBody.set(k, v);
+    // ASP.NET postback signature for "Печать наклеек" button on InvoiceEdit.aspx.
+    postBody.set('__EVENTTARGET', 'btnPrintStick');
+    postBody.set('__EVENTARGUMENT', '');
+    postBody.set('btnPrintStick', 'Печать наклеек');
+    const printPost = await fetch(invoiceUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Cookie: cookieHeader(jar),
+        Referer: invoiceUrl,
+      },
+      body: postBody.toString(),
+      cache: 'no-store',
+    }).catch(() => null);
+    if (!printPost?.ok) return null;
+    applySetCookies(jar, printPost);
     const printResp = await fetch(`${base}/MestaPrint.aspx`, {
       headers: {
         Cookie: cookieHeader(jar),

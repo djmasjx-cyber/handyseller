@@ -411,13 +411,26 @@ export class ShipmentsService implements OnModuleInit {
     this.documents.set(shipmentId, docsFromCarrier);
     void this.store.replaceDocuments(shipmentId, docsFromCarrier);
     void this.persistDocumentAssets(shipmentId, docsFromCarrier);
+
+    // Warm up documents/tracking right after booking so UI opens cached files instantly.
+    // We do this best-effort: booking must stay successful even if carrier doc sync is delayed.
+    try {
+      await this.refreshShipment(userId, shipmentId, authToken);
+    } catch (error) {
+      this.logger.warn(
+        `[slo] immediate_refresh_failed carrier=${shipment.carrierId} shipmentId=${shipmentId} reason=${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+
     void this.store.enqueueSyncJob({
       id: `job_refresh_${shipmentId}_${Date.now()}`,
       kind: 'refresh_shipment',
       carrier: shipment.carrierId,
       idempotencyKey: `refresh:${shipmentId}:${new Date().toISOString().slice(0, 13)}`,
       payload: { userId, shipmentId },
-      nextRunAt: new Date(Date.now() + 30_000).toISOString(),
+      nextRunAt: new Date().toISOString(),
     });
     this.logger.log(`[slo] shipment_confirmed carrier=${shipment.carrierId} shipmentId=${shipmentId}`);
 
