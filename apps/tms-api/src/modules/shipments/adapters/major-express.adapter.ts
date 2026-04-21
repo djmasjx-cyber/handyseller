@@ -94,7 +94,7 @@ function parseMajorPdfMarker(
   const trimmed = (content || '').trim();
   if (!trimmed.startsWith('major-pdf:')) return null;
   const parts = trimmed.split(':');
-  if (parts.length < 5) return null;
+  if (parts.length < 4) return null;
   const kindRaw = parts[1];
   const wbNumber = parts[2] || '';
   const base64 = parts.slice(3).join(':');

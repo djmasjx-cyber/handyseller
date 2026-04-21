@@ -580,7 +580,7 @@ export class ShipmentsService implements OnModuleInit {
     const value = (content ?? '').trim();
     if (!value.startsWith('major-pdf:')) return null;
     const parts = value.split(':');
-    if (parts.length < 5) return null;
+    if (parts.length < 4) return null;
     const b64 = parts.slice(3).join(':');
     if (!b64) return null;
     try {
