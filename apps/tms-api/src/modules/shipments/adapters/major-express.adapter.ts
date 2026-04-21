@@ -63,6 +63,21 @@ function parseMajorError(xml: string): string | null {
   return null;
 }
 
+function isMajorCutoffError(message: string): boolean {
+  const m = message.toLowerCase();
+  return (
+    m.includes('время создания заказа больше времени окончания') ||
+    m.includes('окончания приёма заказа') ||
+    m.includes('окончания приема заказа')
+  );
+}
+
+function toLocalBusinessIso(date: Date): string {
+  const d = new Date(date);
+  d.setHours(10, 0, 0, 0);
+  return d.toISOString();
+}
+
 function stripPostalPrefix(value: string): string {
   return value.replace(/^\s*\d{6}\s*,?\s*/u, '').trim();
 }
@@ -228,14 +243,37 @@ export class MajorExpressAdapter implements CarrierAdapter {
     this.logger.log(
       `[major-booking] request send requestId=${quote.requestId} orderNumber=${input.snapshot.coreOrderNumber} interval=${intervalId} shipperCity=${shipperCity.code} consigneeCity=${consigneeCity.code}`,
     );
-    const created = await this.createOrder({
-      quote,
-      input,
-      credentials,
-      shipperCityCode: shipperCity.code,
-      consigneeCityCode: consigneeCity.code,
-      orderIntervalId: intervalId,
-    });
+    let created: { orderId: number; waybillNumber: string | null };
+    try {
+      created = await this.createOrder({
+        quote,
+        input,
+        credentials,
+        shipperCityCode: shipperCity.code,
+        consigneeCityCode: consigneeCity.code,
+        orderIntervalId: intervalId,
+        cargoTakenDateIso: toLocalBusinessIso(new Date()),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '';
+      if (!isMajorCutoffError(message)) {
+        throw error;
+      }
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      this.logger.warn(
+        `[major-booking] cutoff reached for today, retrying next day requestId=${quote.requestId} date=${tomorrow.toISOString().slice(0, 10)}`,
+      );
+      created = await this.createOrder({
+        quote,
+        input,
+        credentials,
+        shipperCityCode: shipperCity.code,
+        consigneeCityCode: consigneeCity.code,
+        orderIntervalId: intervalId,
+        cargoTakenDateIso: toLocalBusinessIso(tomorrow),
+      });
+    }
     const orderId = created.orderId;
     const statusCode = await this.getOrderStatus(credentials, orderId);
     this.logger.log(
@@ -599,6 +637,7 @@ export class MajorExpressAdapter implements CarrierAdapter {
     shipperCityCode,
     consigneeCityCode,
     orderIntervalId,
+    cargoTakenDateIso,
   }: {
     quote: CarrierQuote;
     input: CreateShipmentRequestInput;
@@ -606,6 +645,7 @@ export class MajorExpressAdapter implements CarrierAdapter {
     shipperCityCode: number;
     consigneeCityCode: number;
     orderIntervalId: number;
+    cargoTakenDateIso: string;
   }): Promise<{ orderId: number; waybillNumber: string | null }> {
     const shipperName = input.snapshot.contacts?.shipper?.name?.trim() || '';
     const shipperPhone = input.snapshot.contacts?.shipper?.phone?.trim() || '';
@@ -622,7 +662,7 @@ export class MajorExpressAdapter implements CarrierAdapter {
     const widthCm = Math.max(Math.round((cargo.widthMm ?? 100) / 10), 1);
     const heightCm = Math.max(Math.round((cargo.heightMm ?? 100) / 10), 1);
     const requestGuid = randomUUID();
-    const cargoTakenDate = new Date().toISOString();
+    const cargoTakenDate = cargoTakenDateIso;
 
     const xml = await this.majorSoapRequest(
       credentials,
