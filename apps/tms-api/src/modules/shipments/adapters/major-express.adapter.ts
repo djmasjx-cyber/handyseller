@@ -239,30 +239,13 @@ export class MajorExpressAdapter implements CarrierAdapter {
     if (!shipperCity || !consigneeCity) {
       throw new Error('Major booking failed: не удалось определить коды городов отправителя/получателя');
     }
-    const intervalId = await this.getOrderIntervalId(credentials);
-    this.logger.log(
-      `[major-booking] request send requestId=${quote.requestId} orderNumber=${input.snapshot.coreOrderNumber} interval=${intervalId} shipperCity=${shipperCity.code} consigneeCity=${consigneeCity.code}`,
-    );
+    const shipperAddress = (input.draft.originLabel || input.snapshot.originLabel || '').trim();
     let created: { orderId: number; waybillNumber: string | null };
     try {
-      created = await this.createOrder({
-        quote,
-        input,
-        credentials,
-        shipperCityCode: shipperCity.code,
-        consigneeCityCode: consigneeCity.code,
-        orderIntervalId: intervalId,
-        cargoTakenDateIso: toLocalBusinessIso(new Date()),
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : '';
-      if (!isMajorCutoffError(message)) {
-        throw error;
-      }
-      const tomorrow = new Date();
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      this.logger.warn(
-        `[major-booking] cutoff reached for today, retrying next day requestId=${quote.requestId} date=${tomorrow.toISOString().slice(0, 10)}`,
+      const cargoTakenDateIso = toLocalBusinessIso(new Date());
+      const intervalId = await this.getOrderIntervalId(credentials, shipperAddress, cargoTakenDateIso);
+      this.logger.log(
+        `[major-booking] request send requestId=${quote.requestId} orderNumber=${input.snapshot.coreOrderNumber} interval=${intervalId} shipperCity=${shipperCity.code} consigneeCity=${consigneeCity.code}`,
       );
       created = await this.createOrder({
         quote,
@@ -271,7 +254,28 @@ export class MajorExpressAdapter implements CarrierAdapter {
         shipperCityCode: shipperCity.code,
         consigneeCityCode: consigneeCity.code,
         orderIntervalId: intervalId,
-        cargoTakenDateIso: toLocalBusinessIso(tomorrow),
+        cargoTakenDateIso,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '';
+      if (!isMajorCutoffError(message)) {
+        throw error;
+      }
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const cargoTakenDateIso = toLocalBusinessIso(tomorrow);
+      const intervalId = await this.getOrderIntervalId(credentials, shipperAddress, cargoTakenDateIso);
+      this.logger.warn(
+        `[major-booking] cutoff reached for today, retrying next day requestId=${quote.requestId} date=${tomorrow.toISOString().slice(0, 10)} interval=${intervalId}`,
+      );
+      created = await this.createOrder({
+        quote,
+        input,
+        credentials,
+        shipperCityCode: shipperCity.code,
+        consigneeCityCode: consigneeCity.code,
+        orderIntervalId: intervalId,
+        cargoTakenDateIso,
       });
     }
     const orderId = created.orderId;
@@ -610,8 +614,37 @@ export class MajorExpressAdapter implements CarrierAdapter {
     return xml;
   }
 
-  private async getOrderIntervalId(credentials: InternalCarrierCredentials): Promise<number> {
+  private async getOrderIntervalId(
+    credentials: InternalCarrierCredentials,
+    shipperAddress: string,
+    cargoTakenDateIso: string,
+  ): Promise<number> {
+    const escapedAddress = escapeXml(shipperAddress || 'Москва');
+    const escapedDate = escapeXml(cargoTakenDateIso);
+
     const xml = await this.majorSoapRequest(
+      credentials,
+      'OrderIntervals',
+      `<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Body>
+    <OrderIntervals xmlns="http://ltl-ws.major-express.ru/edclients/">
+      <Data>
+        <Address>${escapedAddress}</Address>
+        <Created>${escapedDate}</Created>
+        <IsOrderUrgent>false</IsOrderUrgent>
+      </Data>
+    </OrderIntervals>
+  </soap:Body>
+</soap:Envelope>`,
+    );
+    const specificId = Number(extractTag(xml, 'ID') ?? 0);
+    if (Number.isInteger(specificId) && specificId > 0) {
+      return specificId;
+    }
+
+    // Fallback for accounts where OrderIntervals may be restricted.
+    const fallbackXml = await this.majorSoapRequest(
       credentials,
       'dict_OrderIntervals',
       `<?xml version="1.0" encoding="utf-8"?>
@@ -623,11 +656,11 @@ export class MajorExpressAdapter implements CarrierAdapter {
   </soap:Body>
 </soap:Envelope>`,
     );
-    const firstId = Number(extractTag(xml, 'ID') ?? 0);
-    if (!Number.isInteger(firstId) || firstId <= 0) {
-      throw new Error('Major booking failed: не удалось получить интервал забора');
+    const fallbackId = Number(extractTag(fallbackXml, 'ID') ?? 0);
+    if (Number.isInteger(fallbackId) && fallbackId > 0) {
+      return fallbackId;
     }
-    return firstId;
+    throw new Error('Major booking failed: не удалось получить интервал забора');
   }
 
   private async createOrder({
