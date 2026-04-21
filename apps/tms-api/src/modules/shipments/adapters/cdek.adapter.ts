@@ -18,6 +18,8 @@ import type {
 type CdekTariff = {
   tariff_code?: number;
   tariff_name?: string;
+  /** 1 дверь-дверь, 2 дверь-склад, 3 склад-дверь, 4 склад-склад (см. документацию CDEK calculator). */
+  delivery_mode?: number;
   delivery_sum?: number;
   period_min?: number;
   period_max?: number;
@@ -123,6 +125,24 @@ function parseCdekDocumentMarker(content: string): { type: 'waybill' | 'label'; 
   return { type: m[1] === 'label' ? 'label' : 'waybill', orderUuid: m[2] };
 }
 
+/** Только дверь-дверь: у нас нет кодов ПВЗ, тарифы «до склада» дают «Не задан офис получателя». */
+function isDoorToDoorTariff(t: CdekTariff): boolean {
+  const dm = t.delivery_mode;
+  if (dm == null || Number.isNaN(Number(dm))) return true;
+  return Number(dm) === 1;
+}
+
+/**
+ * Тип заказа CDEK: 1 — интернет-магазин (можно передавать товары в packages[].items),
+ * 2 — доставка (без состава товаров в посылке по правилам API).
+ * @see https://apidoc.cdek.ru/
+ */
+function getCdekOrderType(): 1 | 2 {
+  const raw = process.env.CDEK_ORDER_TYPE?.trim();
+  if (raw === '2') return 2;
+  return 1;
+}
+
 export class CdekAdapter implements CarrierAdapter {
   private readonly logger = new Logger(CdekAdapter.name);
   readonly descriptor: CarrierDescriptor = {
@@ -147,6 +167,7 @@ export class CdekAdapter implements CarrierAdapter {
     if (!token) return [];
 
     const base = (process.env.CDEK_API_BASE ?? 'https://api.cdek.ru').replace(/\/+$/, '');
+    const orderType = getCdekOrderType();
     const fromCode = await this.resolveCityCode(base, token, input.draft.originLabel || input.snapshot.originLabel);
     const toCode = await this.resolveCityCode(
       base,
@@ -160,7 +181,7 @@ export class CdekAdapter implements CarrierAdapter {
       return [];
     }
     const payload = {
-      type: 2,
+      type: orderType,
       currency: 1,
       from_location: { code: fromCode },
       to_location: { code: toCode },
@@ -197,9 +218,17 @@ export class CdekAdapter implements CarrierAdapter {
     const tariffs = tariffsRaw as CdekTariff[];
     if (!tariffs.length) return [];
 
+    const tariffsDoor = tariffs.filter(isDoorToDoorTariff);
+    const tariffsForQuotes = tariffsDoor.length ? tariffsDoor : tariffs;
+    if (!tariffsDoor.length && tariffs.length) {
+      this.logger.warn(
+        `CDEK quote: no door-to-door tariffs after filter; using full list (may require ПВЗ). requestId=${requestId}`,
+      );
+    }
+
     const serviceFlags = input.draft.serviceFlags.filter((f) => this.descriptor.supportedFlags.includes(f));
     const quotes: CarrierQuote[] = [];
-    for (const t of tariffs) {
+    for (const t of tariffsForQuotes) {
       const priceRub = asNum(t.delivery_sum);
       if (!priceRub || priceRub <= 0) continue;
       const etaMin = asNum(t.calendar_min) ?? asNum(t.period_min) ?? 1;
@@ -207,6 +236,8 @@ export class CdekAdapter implements CarrierAdapter {
       const etaDays = Math.max(1, Math.round((etaMin + etaMax) / 2));
       const code = t.tariff_code ?? Math.round(priceRub);
       const name = t.tariff_name ?? `Тариф ${code}`;
+      const dm = t.delivery_mode;
+      const modeLabel = dm === 1 ? 'дверь-дверь' : dm != null ? `режим ${dm}` : 'режим ?';
       quotes.push({
         id: `${requestId}:${this.descriptor.id}:${code}`,
         requestId,
@@ -216,12 +247,12 @@ export class CdekAdapter implements CarrierAdapter {
         priceRub,
         etaDays,
         serviceFlags,
-        notes: `${name} · CDEK API`,
+        notes: `${name} · ${modeLabel} · CDEK API`,
         priceDetails: {
           source: 'carrier_total',
           totalRub: priceRub,
           currency: 'RUB',
-          comment: `CDEK tariff ${code}`,
+          comment: `CDEK tariff ${code}${dm != null ? ` · delivery_mode=${dm}` : ''}`,
         },
         score: Math.round((100000 / Math.max(priceRub, 1)) * 100) / 100,
       });
@@ -326,8 +357,21 @@ export class CdekAdapter implements CarrierAdapter {
       throw new Error('CDEK booking failed: cannot resolve city code for origin/destination');
     }
 
+    const orderType = getCdekOrderType();
+    const packagesPayload: Record<string, unknown>[] = [
+      {
+        number: '1',
+        comment: packageItems[0]?.name || 'Груз',
+        weight: packageWeightGrams,
+        length: Math.max(Math.round((cargo.lengthMm ?? 100) / 10), 1),
+        width: Math.max(Math.round((cargo.widthMm ?? 100) / 10), 1),
+        height: Math.max(Math.round((cargo.heightMm ?? 100) / 10), 1),
+        ...(orderType === 1 ? { items: packageItems } : {}),
+      },
+    ];
+
     const payload: Record<string, unknown> = {
-      type: 2,
+      type: orderType,
       number: orderNumber,
       tariff_code: tariffCode,
       comment: input.draft.notes?.slice(0, 255) || 'Создано из Handyseller TMS',
@@ -342,20 +386,10 @@ export class CdekAdapter implements CarrierAdapter {
       },
       from_location: { code: fromCode, address: fromAddress },
       to_location: { code: toCode, address: toAddress },
-      packages: [
-        {
-          number: '1',
-          comment: packageItems[0]?.name || 'Груз',
-          weight: packageWeightGrams,
-          length: Math.max(Math.round((cargo.lengthMm ?? 100) / 10), 1),
-          width: Math.max(Math.round((cargo.widthMm ?? 100) / 10), 1),
-          height: Math.max(Math.round((cargo.heightMm ?? 100) / 10), 1),
-          items: packageItems,
-        },
-      ],
+      packages: packagesPayload,
     };
     this.logger.log(
-      `[cdek-booking] base=${base} request send requestId=${quote.requestId} number=${orderNumber} tariff=${tariffCode} packageWeightG=${packageWeightGrams}`,
+      `[cdek-booking] base=${base} type=${orderType} request send requestId=${quote.requestId} number=${orderNumber} tariff=${tariffCode} packageWeightG=${packageWeightGrams}`,
     );
     const createRes = await fetch(`${base}/v2/orders`, {
       method: 'POST',
