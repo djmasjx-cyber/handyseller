@@ -35,6 +35,12 @@ type CdekOrderResponse = {
     cdek_number?: string;
     number?: string;
   };
+  related_entities?: Array<{
+    uuid?: string;
+    type?: string;
+    url?: string;
+    create_time?: string;
+  }>;
   requests?: Array<{
     state?: string;
     request_uuid?: string;
@@ -126,6 +132,13 @@ function normalizeCdekOrderResponse(payload: CdekOrderLookupResponse | null): Cd
   if (!payload) return null;
   if (Array.isArray(payload)) return payload[0] ?? null;
   return payload;
+}
+
+function parseCdekDateTime(value?: string): number {
+  if (!value) return 0;
+  const normalized = value.replace(/([+-]\d{2})(\d{2})$/, '$1:$2');
+  const ts = Date.parse(normalized);
+  return Number.isFinite(ts) ? ts : 0;
 }
 
 function parseCdekPrintMarker(content: string): { kind: 'orders' | 'barcodes'; uuid: string } | null {
@@ -553,7 +566,9 @@ export class CdekAdapter implements CarrierAdapter {
     const stub = parseCdekDocumentMarker(document.content ?? '');
     if (stub) {
       const endpoint = stub.type === 'waybill' ? 'orders' : 'barcodes';
-      const printUuid = await this.requestPrintJobWithRetries(base, token, endpoint, stub.orderUuid);
+      const order = await this.fetchOrderByUuid(base, token, stub.orderUuid);
+      const relatedUuid = this.pickRelatedPrintUuid(order, endpoint);
+      const printUuid = relatedUuid ?? (await this.requestPrintJobWithRetries(base, token, endpoint, stub.orderUuid));
       if (!printUuid) {
         throw new Error(`CDEK document download failed: ${endpoint} print uuid not ready`);
       }
@@ -612,13 +627,19 @@ export class CdekAdapter implements CarrierAdapter {
         },
       };
     }
-    const prefetchedDocs = await this.prefetchDocuments(base, token, orderUuid, {
-      ...shipment,
-      trackingNumber: cdekNumber,
-      carrierOrderNumber: cdekNumber,
-      carrierOrderReference: orderUuid,
-      status: 'CONFIRMED',
-    });
+    const prefetchedDocs = await this.prefetchDocuments(
+      base,
+      token,
+      orderUuid,
+      {
+        ...shipment,
+        trackingNumber: cdekNumber,
+        carrierOrderNumber: cdekNumber,
+        carrierOrderReference: orderUuid,
+        status: 'CONFIRMED',
+      },
+      order,
+    );
     return {
       shipmentPatch: {
         status: 'CONFIRMED',
@@ -643,11 +664,15 @@ export class CdekAdapter implements CarrierAdapter {
     token: string,
     orderUuid: string,
     shipment: ShipmentRecord,
+    order?: CdekOrderResponse | null,
   ): Promise<Array<{ type: 'WAYBILL' | 'LABEL' | 'INVOICE'; title: string; content: string }>> {
     try {
+      const existingOrder = order ?? (await this.fetchOrderByUuid(base, token, orderUuid));
+      const relatedWaybillUuid = this.pickRelatedPrintUuid(existingOrder, 'orders');
+      const relatedBarcodeUuid = this.pickRelatedPrintUuid(existingOrder, 'barcodes');
       const [waybillUuid, labelUuid] = await Promise.all([
-        this.requestPrintJobWithRetries(base, token, 'orders', orderUuid),
-        this.requestPrintJobWithRetries(base, token, 'barcodes', orderUuid),
+        relatedWaybillUuid ?? this.requestPrintJobWithRetries(base, token, 'orders', orderUuid),
+        relatedBarcodeUuid ?? this.requestPrintJobWithRetries(base, token, 'barcodes', orderUuid),
       ]);
       if (!waybillUuid || !labelUuid) {
         return this.createDocumentStubs(orderUuid);
@@ -674,6 +699,15 @@ export class CdekAdapter implements CarrierAdapter {
       );
       return this.createDocumentStubs(orderUuid);
     }
+  }
+
+  private pickRelatedPrintUuid(order: CdekOrderResponse | null, endpoint: 'orders' | 'barcodes'): string | null {
+    const wantedType = endpoint === 'orders' ? 'waybill' : 'barcode';
+    const list = (order?.related_entities ?? [])
+      .filter((item) => (item.type ?? '').toLowerCase() === wantedType && typeof item.uuid === 'string' && item.uuid)
+      .sort((a, b) => parseCdekDateTime(b.create_time) - parseCdekDateTime(a.create_time));
+    const uuid = list[0]?.uuid?.trim();
+    return uuid || null;
   }
 
   private async downloadPrintPdf(
