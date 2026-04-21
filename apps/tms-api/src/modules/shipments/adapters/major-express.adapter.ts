@@ -553,10 +553,15 @@ export class MajorExpressAdapter implements CarrierAdapter {
       },
       body,
     }).catch(() => null);
+    const xml = (await res?.text().catch(() => '')) ?? '';
     if (!res?.ok) {
-      throw new Error(`Major ${action} failed: HTTP ${res?.status ?? 'n/a'}`);
+      const err = parseMajorError(xml);
+      throw new Error(
+        `Major ${action} failed: HTTP ${res?.status ?? 'n/a'}${err ? `; ${err}` : ''}${
+          xml ? `; body=${xml.slice(0, 600).replace(/\s+/g, ' ')}` : ''
+        }`,
+      );
     }
-    const xml = await res.text();
     const err = parseMajorError(xml);
     if (err) {
       throw new Error(`Major ${action} failed: ${err}`);
