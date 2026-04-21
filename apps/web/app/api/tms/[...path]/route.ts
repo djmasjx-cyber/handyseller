@@ -33,6 +33,40 @@ function isPublicOpenApiRoute(req: NextRequest, path: string[]): boolean {
   return req.method === "GET" && path.length === 1 && path[0] === "openapi.yaml"
 }
 
+/** `Response.text()` перекодирует тело в UTF-8 и портит бинарные ответы (PDF, стикеры и т.д.). */
+function isBinaryUpstreamContentType(contentType: string | null): boolean {
+  if (!contentType) return false
+  const base = contentType.toLowerCase().split(";")[0].trim()
+  if (base === "application/pdf") return true
+  if (base === "application/octet-stream") return true
+  if (base === "application/zip") return true
+  if (base.startsWith("image/")) return true
+  if (base.startsWith("audio/")) return true
+  if (base.startsWith("video/")) return true
+  return false
+}
+
+function isShipmentDocumentFileDownload(path: string[], method: string): boolean {
+  return (
+    method === "GET" &&
+    path.length >= 5 &&
+    path[0] === "shipments" &&
+    path[2] === "documents" &&
+    path[4] === "file"
+  )
+}
+
+function buildUpstreamResponseHeaders(res: Response): Headers {
+  const h = new Headers()
+  const ct = res.headers.get("content-type")
+  if (ct) h.set("Content-Type", ct)
+  const cd = res.headers.get("content-disposition")
+  if (cd) h.set("Content-Disposition", cd)
+  const cl = res.headers.get("content-length")
+  if (cl) h.set("Content-Length", cl)
+  return h
+}
+
 async function proxy(req: NextRequest, path: string[]) {
   const token = getToken(req)
   const publicSpec = isPublicOpenApiRoute(req, path)
@@ -55,11 +89,21 @@ async function proxy(req: NextRequest, path: string[]) {
 
   try {
     const res = await fetch(resolveTarget(req, path), init)
+    const upstreamCt = res.headers.get("content-type")
+    const useBinaryBody =
+      isBinaryUpstreamContentType(upstreamCt) || isShipmentDocumentFileDownload(path, req.method)
+    const headers = buildUpstreamResponseHeaders(res)
+
+    if (useBinaryBody) {
+      const body = await res.arrayBuffer()
+      return new NextResponse(body, { status: res.status, headers })
+    }
+
     const text = await res.text()
-    return new NextResponse(text, {
-      status: res.status,
-      headers: { "Content-Type": res.headers.get("content-type") ?? "application/json" },
-    })
+    if (!headers.has("Content-Type")) {
+      headers.set("Content-Type", upstreamCt ?? "application/json")
+    }
+    return new NextResponse(text, { status: res.status, headers })
   } catch {
     return NextResponse.json({ error: "TMS сервис недоступен" }, { status: 502 })
   }
