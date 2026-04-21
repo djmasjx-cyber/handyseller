@@ -225,6 +225,9 @@ export class MajorExpressAdapter implements CarrierAdapter {
       throw new Error('Major booking failed: не удалось определить коды городов отправителя/получателя');
     }
     const intervalId = await this.getOrderIntervalId(credentials);
+    this.logger.log(
+      `[major-booking] request send requestId=${quote.requestId} orderNumber=${input.snapshot.coreOrderNumber} interval=${intervalId} shipperCity=${shipperCity.code} consigneeCity=${consigneeCity.code}`,
+    );
     const created = await this.createOrder({
       quote,
       input,
@@ -234,6 +237,10 @@ export class MajorExpressAdapter implements CarrierAdapter {
       orderIntervalId: intervalId,
     });
     const orderId = created.orderId;
+    const statusCode = await this.getOrderStatus(credentials, orderId);
+    this.logger.log(
+      `[major-booking] order accepted requestId=${quote.requestId} orderId=${orderId} statusCode=${statusCode} waybill=${created.waybillNumber ?? 'n/a'}`,
+    );
     const waybills = created.waybillNumber ? [created.waybillNumber] : await this.getOrderWaybills(credentials, orderId);
     const waybillNumber = waybills[0]?.trim() || '';
     const trackingNumber = waybillNumber || `MAJOR-ORDER-${orderId}`;
@@ -554,6 +561,9 @@ export class MajorExpressAdapter implements CarrierAdapter {
     if (err) {
       throw new Error(`Major ${action} failed: ${err}`);
     }
+    this.logger.debug?.(
+      `[major-soap] action=${action} ok body=${xml.slice(0, 800).replace(/\s+/g, ' ')}`,
+    );
     return xml;
   }
 

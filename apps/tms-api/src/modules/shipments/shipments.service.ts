@@ -243,14 +243,18 @@ export class ShipmentsService {
         existingShipment.carrierId === 'cdek' &&
         existingShipment.trackingNumber.startsWith('CDEK-PENDING-') &&
         !existingShipment.carrierOrderReference;
-      if (!isLegacyCdekPending) {
+      const isLegacyMajorPending =
+        existingShipment.carrierId === 'major-express' &&
+        existingShipment.trackingNumber.startsWith('MAJOR-PENDING-') &&
+        !existingShipment.carrierOrderReference;
+      if (!isLegacyCdekPending && !isLegacyMajorPending) {
         request.status = 'BOOKED';
         request.updatedAt = new Date().toISOString();
         this.requests.set(requestId, request);
         return existingShipment;
       }
       this.logger.warn(
-        `Found legacy local CDEK shipment without carrier order; rebooking requestId=${requestId} shipmentId=${existingShipment.id}`,
+        `Found legacy local shipment without carrier order; rebooking requestId=${requestId} shipmentId=${existingShipment.id} carrier=${existingShipment.carrierId}`,
       );
       this.shipments.delete(existingShipment.id);
       this.tracking.delete(existingShipment.id);
