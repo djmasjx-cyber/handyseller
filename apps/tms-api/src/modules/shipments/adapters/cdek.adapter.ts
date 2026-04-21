@@ -594,7 +594,7 @@ export class CdekAdapter implements CarrierAdapter {
     endpoint: 'orders' | 'barcodes',
     orderUuid: string,
   ): Promise<string | null> {
-    for (let i = 0; i < 4; i += 1) {
+    for (let i = 0; i < 12; i += 1) {
       const printUuid = await this.requestPrintJob(
         base,
         token,
@@ -605,8 +605,9 @@ export class CdekAdapter implements CarrierAdapter {
         },
       );
       if (printUuid) return printUuid;
-      await new Promise((resolve) => setTimeout(resolve, 900));
+      await new Promise((resolve) => setTimeout(resolve, 2000));
     }
+    this.logger.warn(`[cdek-doc] print uuid timeout endpoint=${endpoint} orderUuid=${orderUuid}`);
     return null;
   }
 

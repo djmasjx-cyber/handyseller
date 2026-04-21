@@ -420,17 +420,24 @@ export class ShipmentsService {
     }
     if (refreshed.documents?.length) {
       const current = this.documents.get(shipmentId) ?? [];
-      if (current.length === 0) {
-        const docs = refreshed.documents.map((doc, index) => ({
-          id: `${shipmentId}_doc_rf_${index + 1}`,
-          shipmentId,
-          type: doc.type,
-          title: doc.title,
-          content: doc.content,
-          createdAt: new Date().toISOString(),
-        }));
-        this.documents.set(shipmentId, docs);
-      }
+      const now = new Date().toISOString();
+      const refreshedByType = new Map(
+        refreshed.documents.map((doc, index) => [
+          doc.type,
+          {
+            id: `${shipmentId}_doc_rf_${index + 1}`,
+            shipmentId,
+            type: doc.type,
+            title: doc.title,
+            content: doc.content,
+            createdAt: now,
+          },
+        ]),
+      );
+      const merged = current
+        .filter((doc) => !refreshedByType.has(doc.type))
+        .concat([...refreshedByType.values()]);
+      this.documents.set(shipmentId, merged);
     }
     return updated;
   }
