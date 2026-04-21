@@ -84,6 +84,28 @@ function isLikelyPdf(buffer: Buffer): boolean {
   return head === '%PDF-';
 }
 
+function buildMajorPdfMarker(kind: 'waybill' | 'label', wbNumber: string, pdf: Buffer): string {
+  return `major-pdf:${kind}:${wbNumber}:${pdf.toString('base64')}`;
+}
+
+function parseMajorPdfMarker(
+  content: string,
+): { kind: 'waybill' | 'label'; wbNumber: string; pdf: Buffer } | null {
+  const trimmed = (content || '').trim();
+  if (!trimmed.startsWith('major-pdf:')) return null;
+  const parts = trimmed.split(':');
+  if (parts.length < 5) return null;
+  const kindRaw = parts[1];
+  const wbNumber = parts[2] || '';
+  const base64 = parts.slice(3).join(':');
+  if (!wbNumber || !base64) return null;
+  const kind = kindRaw === 'label' ? 'label' : kindRaw === 'waybill' ? 'waybill' : null;
+  if (!kind) return null;
+  const pdf = Buffer.from(base64, 'base64');
+  if (!isLikelyPdf(pdf)) return null;
+  return { kind, wbNumber, pdf };
+}
+
 function stripPostalPrefix(value: string): string {
   return value.replace(/^\s*\d{6}\s*,?\s*/u, '').trim();
 }
@@ -302,7 +324,9 @@ export class MajorExpressAdapter implements CarrierAdapter {
     const waybills = created.waybillNumber ? [created.waybillNumber] : await this.getOrderWaybills(credentials, orderId);
     const waybillNumber = waybills[0]?.trim() || '';
     const trackingNumber = waybillNumber || `MAJOR-ORDER-${orderId}`;
-    const docs = waybillNumber ? this.createDocumentStubs(waybillNumber) : [];
+    const docs = waybillNumber
+      ? await this.createDocumentsWithCache(credentials, waybillNumber, quote.requestId)
+      : [];
 
     return {
       shipment: {
@@ -336,6 +360,14 @@ export class MajorExpressAdapter implements CarrierAdapter {
     context,
   }: CarrierDocumentDownloadInput): Promise<{ content: Buffer; mimeType: string; fileName: string }> {
     const content = (document.content ?? '').trim();
+    const cached = parseMajorPdfMarker(content);
+    if (cached) {
+      return {
+        content: cached.pdf,
+        mimeType: 'application/pdf',
+        fileName: `${cached.wbNumber}-major-${cached.kind}.pdf`,
+      };
+    }
     const [prefix, kind, wb] = content.split(':');
     if (prefix !== 'major-doc' || !kind || !wb) {
       return {
@@ -414,7 +446,9 @@ export class MajorExpressAdapter implements CarrierAdapter {
         status,
       },
       tracking,
-      documents: waybillNumber ? this.createDocumentStubs(waybillNumber) : undefined,
+      documents: waybillNumber
+        ? await this.createDocumentsWithCache(credentials, waybillNumber, shipment.requestId)
+        : undefined,
     };
   }
 
@@ -918,6 +952,37 @@ export class MajorExpressAdapter implements CarrierAdapter {
         content: `major-doc:label:${wbNumber}`,
       },
     ];
+  }
+
+  private async createDocumentsWithCache(
+    credentials: InternalCarrierCredentials,
+    wbNumber: string,
+    requestId: string,
+  ): Promise<Array<Pick<ShipmentDocumentRecord, 'type' | 'title' | 'content'>>> {
+    try {
+      const [waybillPdf, labelPdf] = await Promise.all([
+        this.getWaybillPdf(credentials, wbNumber),
+        this.getStickerPdf(credentials, wbNumber),
+      ]);
+      return [
+        {
+          type: 'WAYBILL',
+          title: 'Накладная Major (PDF)',
+          content: buildMajorPdfMarker('waybill', wbNumber, waybillPdf),
+        },
+        {
+          type: 'LABEL',
+          title: 'Стикеры Major (PDF)',
+          content: buildMajorPdfMarker('label', wbNumber, labelPdf),
+        },
+      ];
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'n/a';
+      this.logger.warn(
+        `[major-doc] cache build fallback to stubs requestId=${requestId} wb=${wbNumber} reason=${msg}`,
+      );
+      return this.createDocumentStubs(wbNumber);
+    }
   }
 
   private mapMajorOrderStatus(code: number, waybillNumber: string): ShipmentRecord['status'] {

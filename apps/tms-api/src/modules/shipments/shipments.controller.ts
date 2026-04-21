@@ -129,4 +129,22 @@ export class ShipmentsController {
     res.setHeader('Content-Disposition', `inline; filename="${file.fileName.replace(/"/g, '')}"`);
     res.send(file.content);
   }
+
+  @Get('sync/failed-jobs')
+  @TmsAccess('write')
+  failedJobs() {
+    return this.shipmentsService.listFailedSyncJobs();
+  }
+
+  @Post('sync/failed-jobs/:id/replay')
+  @TmsAccess('write')
+  replayFailedJob(@Param('id') jobId: string) {
+    return this.shipmentsService.replayFailedSyncJob(jobId);
+  }
+
+  @Post('sync/backfill')
+  @TmsAccess('write')
+  backfillPersistentStore() {
+    return this.shipmentsService.backfillPersistentStore();
+  }
 }

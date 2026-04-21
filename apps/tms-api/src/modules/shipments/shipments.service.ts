@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { rankQuotes } from '@handyseller/tms-domain';
 import type {
   CarrierDescriptor,
@@ -20,9 +20,11 @@ import { MajorExpressAdapter } from './adapters/major-express.adapter';
 import { DellinAdapter } from './adapters/dellin.adapter';
 import { CdekAdapter } from './adapters/cdek.adapter';
 import type { CarrierAdapter } from './adapters/base-carrier.adapter';
+import { TmsStoreService } from './storage/tms-store.service';
+import { ObjectStorageService } from './storage/object-storage.service';
 
 @Injectable()
-export class ShipmentsService {
+export class ShipmentsService implements OnModuleInit {
   private readonly logger = new Logger(ShipmentsService.name);
   private readonly quoteDebugEnabled =
     process.env.TMS_QUOTE_DEBUG === '1' || process.env.TMS_QUOTE_DEBUG === 'true';
@@ -48,6 +50,38 @@ export class ShipmentsService {
       description: 'Черновик для будущей автоматизации: минимум цена при соблюдении SLA и сервисных ограничений.',
     },
   ];
+
+  constructor(
+    private readonly store: TmsStoreService,
+    private readonly objectStorage: ObjectStorageService,
+  ) {}
+
+  async onModuleInit(): Promise<void> {
+    if (!this.store.isEnabled()) return;
+    const [requests, shipments, tracking, documents] = await Promise.all([
+      this.store.loadRequests(),
+      this.store.loadShipments(),
+      this.store.loadTracking(),
+      this.store.loadDocuments(),
+    ]);
+    for (const item of requests) this.requests.set(item.id, item);
+    for (const item of shipments) this.shipments.set(item.id, item);
+    for (const item of tracking) {
+      const list = this.tracking.get(item.shipmentId) ?? [];
+      list.push(item);
+      this.tracking.set(item.shipmentId, list);
+    }
+    for (const item of documents) {
+      const list = this.documents.get(item.shipmentId) ?? [];
+      list.push(item);
+      this.documents.set(item.shipmentId, list);
+      const marker = this.extractInlinePdfMarker(item.content);
+      if (marker) {
+        const objectKey = `shipments/${item.shipmentId}/documents/${item.id}.pdf`;
+        void this.objectStorage.putBuffer(objectKey, marker.buffer);
+      }
+    }
+  }
 
   listCarriers(): CarrierDescriptor[] {
     return this.adapters.map((adapter) => adapter.descriptor);
@@ -110,6 +144,44 @@ export class ShipmentsService {
     };
   }
 
+  async listFailedSyncJobs(): Promise<
+    Array<{
+      id: string;
+      kind: string;
+      carrier: string | null;
+      attempt: number;
+      lastError: string | null;
+      payload: unknown;
+      nextRunAt: string;
+    }>
+  > {
+    return this.store.listFailedSyncJobs(100);
+  }
+
+  async replayFailedSyncJob(jobId: string): Promise<{ ok: boolean }> {
+    const ok = await this.store.replayFailedSyncJob(jobId);
+    return { ok };
+  }
+
+  async backfillPersistentStore(): Promise<{ requests: number; shipments: number; tracking: number; documents: number }> {
+    const requests = [...this.requests.values()];
+    const shipments = [...this.shipments.values()];
+    const tracking = [...this.tracking.values()].flat();
+    const documents = [...this.documents.values()].flat();
+    for (const item of requests) await this.store.saveRequest(item);
+    for (const item of shipments) await this.store.saveShipment(item);
+    for (const item of shipments) {
+      await this.store.replaceTracking(item.id, this.tracking.get(item.id) ?? []);
+      const docs = this.documents.get(item.id) ?? [];
+      await this.store.replaceDocuments(item.id, docs);
+      await this.persistDocumentAssets(item.id, docs);
+    }
+    this.logger.log(
+      `[rollout] backfill_done requests=${requests.length} shipments=${shipments.length} tracking=${tracking.length} documents=${documents.length}`,
+    );
+    return { requests: requests.length, shipments: shipments.length, tracking: tracking.length, documents: documents.length };
+  }
+
   async createFromCoreOrder(
     userId: string,
     input: CreateShipmentRequestInput,
@@ -128,6 +200,7 @@ export class ShipmentsService {
       updatedAt: now,
     };
     this.requests.set(id, request);
+    void this.store.saveRequest(request);
     const quotes = await this.refreshQuotes(userId, id, authToken);
     return {
       request: this.requests.get(id)!,
@@ -175,6 +248,7 @@ export class ShipmentsService {
     request.status = quotes.length > 0 ? 'QUOTED' : 'DRAFT';
     request.updatedAt = new Date().toISOString();
     this.requests.set(requestId, request);
+    void this.store.saveRequest(request);
     this.quotes.set(requestId, quotes);
     return quotes;
   }
@@ -214,6 +288,7 @@ export class ShipmentsService {
     request.selectedQuoteId = quoteId;
     request.updatedAt = new Date().toISOString();
     this.requests.set(requestId, request);
+    void this.store.saveRequest(request);
     return request;
   }
 
@@ -251,6 +326,7 @@ export class ShipmentsService {
         request.status = 'BOOKED';
         request.updatedAt = new Date().toISOString();
         this.requests.set(requestId, request);
+        void this.store.saveRequest(request);
         return existingShipment;
       }
       this.logger.warn(
@@ -259,6 +335,7 @@ export class ShipmentsService {
       this.shipments.delete(existingShipment.id);
       this.tracking.delete(existingShipment.id);
       this.documents.delete(existingShipment.id);
+      void this.store.deleteShipment(existingShipment.id);
     }
     if (!adapter.descriptor.supportsBooking) {
       throw new BadRequestException(
@@ -291,6 +368,7 @@ export class ShipmentsService {
       ...booking.shipment,
     };
     this.shipments.set(shipmentId, shipment);
+    void this.store.saveShipment(shipment);
     this.tracking.set(
       shipmentId,
       booking.tracking.map((item, index) => ({
@@ -299,6 +377,7 @@ export class ShipmentsService {
         shipmentId,
       })),
     );
+    void this.store.replaceTracking(shipmentId, this.tracking.get(shipmentId) ?? []);
     const docsFromCarrier = booking.documents?.length
       ? booking.documents.map((doc, index) => ({
           id: `${shipmentId}_doc_${index + 1}`,
@@ -327,10 +406,22 @@ export class ShipmentsService {
           },
         ];
     this.documents.set(shipmentId, docsFromCarrier);
+    void this.store.replaceDocuments(shipmentId, docsFromCarrier);
+    void this.persistDocumentAssets(shipmentId, docsFromCarrier);
+    void this.store.enqueueSyncJob({
+      id: `job_refresh_${shipmentId}_${Date.now()}`,
+      kind: 'refresh_shipment',
+      carrier: shipment.carrierId,
+      idempotencyKey: `refresh:${shipmentId}:${new Date().toISOString().slice(0, 13)}`,
+      payload: { userId, shipmentId },
+      nextRunAt: new Date(Date.now() + 30_000).toISOString(),
+    });
+    this.logger.log(`[slo] shipment_confirmed carrier=${shipment.carrierId} shipmentId=${shipmentId}`);
 
     request.status = 'BOOKED';
     request.updatedAt = new Date().toISOString();
     this.requests.set(requestId, request);
+    void this.store.saveRequest(request);
     return shipment;
   }
 
@@ -365,6 +456,20 @@ export class ShipmentsService {
       throw new NotFoundException('Документ не найден');
     }
     const adapter = this.adapters.find((item) => item.descriptor.id === shipment.carrierId);
+    const inline = this.extractInlinePdfMarker(doc.content);
+    if (inline) {
+      const objectKey = `shipments/${shipmentId}/documents/${documentId}.pdf`;
+      const existing = await this.objectStorage.getBuffer(objectKey);
+      const content = existing ?? inline.buffer;
+      if (!existing) {
+        await this.objectStorage.putBuffer(objectKey, inline.buffer);
+      }
+      return {
+        content,
+        mimeType: 'application/pdf',
+        fileName: `${shipment.trackingNumber || shipment.id}-${doc.type.toLowerCase()}.pdf`,
+      };
+    }
     if (!adapter?.downloadDocument) {
       return {
         content: Buffer.from(doc.content ?? '', 'utf-8'),
@@ -408,6 +513,7 @@ export class ShipmentsService {
 
     const updated: ShipmentRecord = { ...shipment, ...refreshed.shipmentPatch };
     this.shipments.set(shipmentId, updated);
+    void this.store.saveShipment(updated);
 
     if (refreshed.tracking?.length) {
       const existing = this.tracking.get(shipmentId) ?? [];
@@ -417,6 +523,7 @@ export class ShipmentsService {
         shipmentId,
       }));
       this.tracking.set(shipmentId, [...existing, ...additions]);
+      void this.store.replaceTracking(shipmentId, this.tracking.get(shipmentId) ?? []);
     }
     if (refreshed.documents?.length) {
       const current = this.documents.get(shipmentId) ?? [];
@@ -438,6 +545,11 @@ export class ShipmentsService {
         .filter((doc) => !refreshedByType.has(doc.type))
         .concat([...refreshedByType.values()]);
       this.documents.set(shipmentId, merged);
+      void this.store.replaceDocuments(shipmentId, merged);
+      void this.persistDocumentAssets(shipmentId, merged);
+      this.logger.log(
+        `[slo] documents_updated shipmentId=${shipmentId} carrier=${shipment.carrierId} count=${merged.length}`,
+      );
     }
     return updated;
   }
@@ -462,6 +574,32 @@ export class ShipmentsService {
     if (requestStatus === 'QUOTED') return 'QUOTED';
     if (requestStatus === 'DRAFT') return 'DRAFT';
     return 'NO_REQUEST';
+  }
+
+  private extractInlinePdfMarker(content?: string | null): { buffer: Buffer } | null {
+    const value = (content ?? '').trim();
+    if (!value.startsWith('major-pdf:')) return null;
+    const parts = value.split(':');
+    if (parts.length < 5) return null;
+    const b64 = parts.slice(3).join(':');
+    if (!b64) return null;
+    try {
+      return { buffer: Buffer.from(b64, 'base64') };
+    } catch {
+      return null;
+    }
+  }
+
+  private async persistDocumentAssets(
+    shipmentId: string,
+    documents: ShipmentDocumentRecord[],
+  ): Promise<void> {
+    for (const doc of documents) {
+      const inline = this.extractInlinePdfMarker(doc.content);
+      if (!inline) continue;
+      const objectKey = `shipments/${shipmentId}/documents/${doc.id}.pdf`;
+      await this.objectStorage.putBuffer(objectKey, inline.buffer);
+    }
   }
 
   private async fetchCoreOrders(
