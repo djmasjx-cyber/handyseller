@@ -581,7 +581,7 @@ export class ShipmentsService implements OnModuleInit {
 
   private extractInlinePdfMarker(content?: string | null): { buffer: Buffer } | null {
     const value = (content ?? '').trim();
-    if (!value.startsWith('major-pdf:')) return null;
+    if (!value.startsWith('major-pdf:') && !value.startsWith('cdek-pdf:')) return null;
     const parts = value.split(':');
     if (parts.length < 4) return null;
     const b64 = parts.slice(3).join(':');

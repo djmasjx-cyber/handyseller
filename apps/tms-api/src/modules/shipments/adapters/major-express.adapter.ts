@@ -335,7 +335,19 @@ export class MajorExpressAdapter implements CarrierAdapter {
       `[major-booking] order accepted requestId=${quote.requestId} orderId=${orderId} statusCode=${statusCode} waybill=${created.waybillNumber ?? 'n/a'}`,
     );
     const waybills = created.waybillNumber ? [created.waybillNumber] : await this.getOrderWaybills(credentials, orderId);
-    const waybillNumber = waybills[0]?.trim() || '';
+    let waybillNumber = waybills[0]?.trim() || '';
+    if (!waybillNumber) {
+      waybillNumber = await this.createWaybillFromOrderPayload(
+        credentials,
+        input,
+        quote,
+        shipperCity.code,
+        consigneeCity.code,
+      );
+      this.logger.log(
+        `[major-booking] waybill created via CreateWaybill requestId=${quote.requestId} orderId=${orderId} wb=${waybillNumber || 'n/a'}`,
+      );
+    }
     const trackingNumber = waybillNumber || `MAJOR-ORDER-${orderId}`;
     const docs = waybillNumber
       ? await this.createDocumentsWithCache(credentials, waybillNumber, quote.requestId)
@@ -838,6 +850,77 @@ export class MajorExpressAdapter implements CarrierAdapter {
     }
     const waybill = extractTag(xml, 'WBNumber');
     return { orderId, waybillNumber: waybill?.trim() || null };
+  }
+
+  private async createWaybillFromOrderPayload(
+    credentials: InternalCarrierCredentials,
+    input: CreateShipmentRequestInput,
+    quote: CarrierQuote,
+    shipperCityCode: number,
+    consigneeCityCode: number,
+  ): Promise<string> {
+    const shipperName = input.snapshot.contacts?.shipper?.name?.trim() || '';
+    const shipperPhone = input.snapshot.contacts?.shipper?.phone?.trim() || '';
+    const recipientName = input.snapshot.contacts?.recipient?.name?.trim() || '';
+    const recipientPhone = input.snapshot.contacts?.recipient?.phone?.trim() || '';
+    const shipperAddress = (input.draft.originLabel || input.snapshot.originLabel || '').trim();
+    const consigneeAddress = (input.draft.destinationLabel || input.snapshot.destinationLabel || '').trim();
+    const cargo = input.snapshot.cargo;
+    const description = (input.snapshot.itemSummary[0]?.title || 'Груз').trim().slice(0, 80);
+    const weightKg = Math.max(cargo.weightGrams / 1000, 0.1).toFixed(3);
+    const places = Math.max(Math.round(cargo.places || 1), 1);
+    const declaredCost = Math.max(cargo.declaredValueRub, 1).toFixed(2);
+    const lengthCm = Math.max(Math.round((cargo.lengthMm ?? 100) / 10), 1);
+    const widthCm = Math.max(Math.round((cargo.widthMm ?? 100) / 10), 1);
+    const heightCm = Math.max(Math.round((cargo.heightMm ?? 100) / 10), 1);
+    const requestGuid = randomUUID();
+
+    const xml = await this.majorSoapRequest(
+      credentials,
+      'CreateWaybill',
+      `<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Body>
+    <CreateWaybill xmlns="http://ltl-ws.major-express.ru/edclients/">
+      <RequestID>${escapeXml(requestGuid)}</RequestID>
+      <ClientInfo>${escapeXml(input.snapshot.coreOrderNumber || quote.requestId)}</ClientInfo>
+      <Shipper>
+        <Person>${escapeXml(shipperName)}</Person>
+        <Phone>${escapeXml(shipperPhone)}</Phone>
+        <Company>${escapeXml(shipperName)}</Company>
+        <Address>${escapeXml(shipperAddress)}</Address>
+        <PostIndex></PostIndex>
+        <CityCode>${shipperCityCode}</CityCode>
+      </Shipper>
+      <Consignee>
+        <Person>${escapeXml(recipientName)}</Person>
+        <Phone>${escapeXml(recipientPhone)}</Phone>
+        <Company>${escapeXml(recipientName)}</Company>
+        <Address>${escapeXml(consigneeAddress)}</Address>
+        <PostIndex></PostIndex>
+        <CityCode>${consigneeCityCode}</CityCode>
+      </Consignee>
+      <Weight>${weightKg}</Weight>
+      <Package>${places}</Package>
+      <Cost>${declaredCost}</Cost>
+      <Size>
+        <Length>${lengthCm}</Length>
+        <Width>${widthCm}</Width>
+        <Height>${heightCm}</Height>
+      </Size>
+      <Description>${escapeXml(description)}</Description>
+      <CostCenter xsi:nil="true" />
+      <DeliveryCondition>None</DeliveryCondition>
+      <DeliveryComment>${escapeXml(consigneeAddress.slice(0, 200))}</DeliveryComment>
+    </CreateWaybill>
+  </soap:Body>
+</soap:Envelope>`,
+    );
+    const wb =
+      extractTag(xml, 'CreateWaybillResult')?.trim() ||
+      extractTag(xml, 'WBNumber')?.trim() ||
+      '';
+    return wb;
   }
 
   private async getOrderWaybills(credentials: InternalCarrierCredentials, orderId: number): Promise<string[]> {

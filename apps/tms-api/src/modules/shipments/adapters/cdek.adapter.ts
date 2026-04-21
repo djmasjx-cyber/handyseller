@@ -135,6 +135,29 @@ function parseCdekPrintMarker(content: string): { kind: 'orders' | 'barcodes'; u
   return { kind, uuid: m[2] };
 }
 
+function buildCdekPdfMarker(type: 'waybill' | 'label', orderUuid: string, pdf: Buffer): string {
+  return `cdek-pdf:${type}:${orderUuid}:${pdf.toString('base64')}`;
+}
+
+function parseCdekPdfMarker(content: string): { type: 'waybill' | 'label'; orderUuid: string; pdf: Buffer } | null {
+  const trimmed = content.trim();
+  if (!trimmed.startsWith('cdek-pdf:')) return null;
+  const parts = trimmed.split(':');
+  if (parts.length < 4) return null;
+  const typeRaw = parts[1];
+  const orderUuid = parts[2] ?? '';
+  const base64 = parts.slice(3).join(':');
+  const type = typeRaw === 'label' ? 'label' : typeRaw === 'waybill' ? 'waybill' : null;
+  if (!type || !orderUuid || !base64) return null;
+  try {
+    const pdf = Buffer.from(base64, 'base64');
+    if (!isLikelyPdf(pdf)) return null;
+    return { type, orderUuid, pdf };
+  } catch {
+    return null;
+  }
+}
+
 function buildCdekDocumentMarker(type: 'waybill' | 'label', orderUuid: string): string {
   return `cdek-doc:${type}:${orderUuid}`;
 }
@@ -510,6 +533,14 @@ export class CdekAdapter implements CarrierAdapter {
     context,
     shipment,
   }: CarrierDocumentDownloadInput): Promise<{ content: Buffer; mimeType: string; fileName: string }> {
+    const inlinePdf = parseCdekPdfMarker(document.content ?? '');
+    if (inlinePdf) {
+      return {
+        content: inlinePdf.pdf,
+        mimeType: 'application/pdf',
+        fileName: `${shipment.trackingNumber || shipment.id}-${inlinePdf.type}.pdf`,
+      };
+    }
     const credentials = await this.loadCredentials(context, shipment.requestId);
     if (!credentials) {
       throw new Error('CDEK document download failed: missing credentials');
@@ -581,6 +612,13 @@ export class CdekAdapter implements CarrierAdapter {
         },
       };
     }
+    const prefetchedDocs = await this.prefetchDocuments(base, token, orderUuid, {
+      ...shipment,
+      trackingNumber: cdekNumber,
+      carrierOrderNumber: cdekNumber,
+      carrierOrderReference: orderUuid,
+      status: 'CONFIRMED',
+    });
     return {
       shipmentPatch: {
         status: 'CONFIRMED',
@@ -596,8 +634,46 @@ export class CdekAdapter implements CarrierAdapter {
           occurredAt: new Date().toISOString(),
         },
       ],
-      documents: this.createDocumentStubs(orderUuid),
+      documents: prefetchedDocs,
     };
+  }
+
+  private async prefetchDocuments(
+    base: string,
+    token: string,
+    orderUuid: string,
+    shipment: ShipmentRecord,
+  ): Promise<Array<{ type: 'WAYBILL' | 'LABEL' | 'INVOICE'; title: string; content: string }>> {
+    try {
+      const [waybillUuid, labelUuid] = await Promise.all([
+        this.requestPrintJobWithRetries(base, token, 'orders', orderUuid),
+        this.requestPrintJobWithRetries(base, token, 'barcodes', orderUuid),
+      ]);
+      if (!waybillUuid || !labelUuid) {
+        return this.createDocumentStubs(orderUuid);
+      }
+      const [waybillPdf, labelPdf] = await Promise.all([
+        this.downloadPrintPdf(base, token, 'orders', waybillUuid, shipment),
+        this.downloadPrintPdf(base, token, 'barcodes', labelUuid, shipment),
+      ]);
+      return [
+        {
+          type: 'WAYBILL',
+          title: 'Транспортная накладная (CDEK)',
+          content: buildCdekPdfMarker('waybill', orderUuid, waybillPdf.content),
+        },
+        {
+          type: 'LABEL',
+          title: 'Отгрузочный ярлык (CDEK)',
+          content: buildCdekPdfMarker('label', orderUuid, labelPdf.content),
+        },
+      ];
+    } catch (error) {
+      this.logger.warn(
+        `[cdek-doc] prefetch failed orderUuid=${orderUuid} reason=${error instanceof Error ? error.message : 'n/a'}`,
+      );
+      return this.createDocumentStubs(orderUuid);
+    }
   }
 
   private async downloadPrintPdf(
