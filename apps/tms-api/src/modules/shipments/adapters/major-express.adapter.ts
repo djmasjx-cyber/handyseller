@@ -78,6 +78,12 @@ function toLocalBusinessIso(date: Date): string {
   return d.toISOString();
 }
 
+function isLikelyPdf(buffer: Buffer): boolean {
+  if (!buffer || buffer.length < 16) return false;
+  const head = buffer.subarray(0, 5).toString('ascii');
+  return head === '%PDF-';
+}
+
 function stripPostalPrefix(value: string): string {
   return value.replace(/^\s*\d{6}\s*,?\s*/u, '').trim();
 }
@@ -846,10 +852,11 @@ export class MajorExpressAdapter implements CarrierAdapter {
   }
 
   private async getWaybillPdf(credentials: InternalCarrierCredentials, wbNumber: string): Promise<Buffer> {
-    const xml = await this.majorSoapRequest(
-      credentials,
-      'Waybill_PDF',
-      `<?xml version="1.0" encoding="utf-8"?>
+    for (let i = 0; i < 10; i += 1) {
+      const xml = await this.majorSoapRequest(
+        credentials,
+        'Waybill_PDF',
+        `<?xml version="1.0" encoding="utf-8"?>
 <soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
   <soap:Body>
     <Waybill_PDF xmlns="http://ltl-ws.major-express.ru/edclients/">
@@ -857,19 +864,25 @@ export class MajorExpressAdapter implements CarrierAdapter {
     </Waybill_PDF>
   </soap:Body>
 </soap:Envelope>`,
-    );
-    const payload = (extractTag(xml, 'Waybill_PDFResult') || '').trim();
-    if (!payload) {
-      throw new Error(`Major Waybill_PDF failed: empty response for WB ${wbNumber}`);
+      );
+      const payload = (extractTag(xml, 'Waybill_PDFResult') || '').trim();
+      if (payload) {
+        const decoded = Buffer.from(payload, 'base64');
+        if (isLikelyPdf(decoded)) {
+          return decoded;
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1500));
     }
-    return Buffer.from(payload, 'base64');
+    throw new Error(`Major Waybill_PDF failed: PDF not ready for WB ${wbNumber}`);
   }
 
   private async getStickerPdf(credentials: InternalCarrierCredentials, wbNumber: string): Promise<Buffer> {
-    const xml = await this.majorSoapRequest(
-      credentials,
-      'StickerPack_PDF',
-      `<?xml version="1.0" encoding="utf-8"?>
+    for (let i = 0; i < 10; i += 1) {
+      const xml = await this.majorSoapRequest(
+        credentials,
+        'StickerPack_PDF',
+        `<?xml version="1.0" encoding="utf-8"?>
 <soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
   <soap:Body>
     <StickerPack_PDF xmlns="http://ltl-ws.major-express.ru/edclients/">
@@ -877,12 +890,17 @@ export class MajorExpressAdapter implements CarrierAdapter {
     </StickerPack_PDF>
   </soap:Body>
 </soap:Envelope>`,
-    );
-    const payload = (extractTag(xml, 'StickerPack_PDFResult') || '').trim();
-    if (!payload) {
-      throw new Error(`Major StickerPack_PDF failed: empty response for WB ${wbNumber}`);
+      );
+      const payload = (extractTag(xml, 'StickerPack_PDFResult') || '').trim();
+      if (payload) {
+        const decoded = Buffer.from(payload, 'base64');
+        if (isLikelyPdf(decoded)) {
+          return decoded;
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1500));
     }
-    return Buffer.from(payload, 'base64');
+    throw new Error(`Major StickerPack_PDF failed: PDF not ready for WB ${wbNumber}`);
   }
 
   private createDocumentStubs(

@@ -53,6 +53,11 @@ type CdekPrintResponse = {
   }>;
 };
 
+type CdekPrintJobResult =
+  | { kind: 'ok'; uuid: string }
+  | { kind: 'retry'; reason: string }
+  | { kind: 'fatal'; reason: string };
+
 function asNum(v: unknown): number | null {
   if (typeof v === 'number' && Number.isFinite(v)) return v;
   if (typeof v === 'string') {
@@ -123,6 +128,11 @@ function parseCdekDocumentMarker(content: string): { type: 'waybill' | 'label'; 
   const m = /^cdek-doc:(waybill|label):([0-9a-f-]{8,})$/i.exec(content.trim());
   if (!m) return null;
   return { type: m[1] === 'label' ? 'label' : 'waybill', orderUuid: m[2] };
+}
+
+function isCdekRequestFatalState(state: string | undefined): boolean {
+  const s = (state ?? '').trim().toUpperCase();
+  return s === 'INVALID' || s === 'FAILED' || s === 'REJECTED' || s === 'ERROR' || s === 'CANCELLED';
 }
 
 /** Только дверь-дверь: у нас нет кодов ПВЗ, тарифы «до склада» дают «Не задан офис получателя». */
@@ -570,15 +580,23 @@ export class CdekAdapter implements CarrierAdapter {
     printUuid: string,
     shipment: ShipmentRecord,
   ): Promise<{ content: Buffer; mimeType: string; fileName: string }> {
-    const res = await fetch(`${base}/v2/print/${endpoint}/${printUuid}.pdf`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: 'application/pdf',
-      },
-      cache: 'no-store',
-    }).catch(() => null);
+    let res: Response | null = null;
+    for (let i = 0; i < 12; i += 1) {
+      res = await fetch(`${base}/v2/print/${endpoint}/${printUuid}.pdf`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/pdf',
+        },
+        cache: 'no-store',
+      }).catch(() => null);
+      if (res?.ok) break;
+      // Обычно 404/202/423 до готовности PDF, поэтому не валим сразу.
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    }
     if (!res?.ok) {
-      throw new Error(`CDEK document download failed: HTTP ${res?.status ?? 'n/a'}`);
+      throw new Error(
+        `CDEK document download failed: PDF not ready for uuid=${printUuid}; HTTP ${res?.status ?? 'n/a'}`,
+      );
     }
     const arrayBuffer = await res.arrayBuffer();
     return {
@@ -594,8 +612,8 @@ export class CdekAdapter implements CarrierAdapter {
     endpoint: 'orders' | 'barcodes',
     orderUuid: string,
   ): Promise<string | null> {
-    for (let i = 0; i < 12; i += 1) {
-      const printUuid = await this.requestPrintJob(
+    for (let i = 0; i < 20; i += 1) {
+      const result = await this.requestPrintJob(
         base,
         token,
         endpoint === 'orders' ? '/v2/print/orders' : '/v2/print/barcodes',
@@ -604,7 +622,10 @@ export class CdekAdapter implements CarrierAdapter {
           copy_count: 1,
         },
       );
-      if (printUuid) return printUuid;
+      if (result.kind === 'ok') return result.uuid;
+      if (result.kind === 'fatal') {
+        throw new Error(`CDEK document download failed: ${result.reason}`);
+      }
       await new Promise((resolve) => setTimeout(resolve, 2000));
     }
     this.logger.warn(`[cdek-doc] print uuid timeout endpoint=${endpoint} orderUuid=${orderUuid}`);
@@ -670,7 +691,7 @@ export class CdekAdapter implements CarrierAdapter {
     token: string,
     path: string,
     payload: Record<string, unknown>,
-  ): Promise<string | null> {
+  ): Promise<CdekPrintJobResult> {
     const res = await fetch(`${base}${path}`, {
       method: 'POST',
       headers: {
@@ -681,10 +702,26 @@ export class CdekAdapter implements CarrierAdapter {
       body: JSON.stringify(payload),
       cache: 'no-store',
     }).catch(() => null);
-    if (!res?.ok) return null;
+    if (!res?.ok) {
+      const body = (await res?.json().catch(() => null)) as CdekPrintResponse | null;
+      const reason = cdekResponseErrorMessage(body) || `HTTP ${res?.status ?? 'n/a'}`;
+      // 4xx/5xx здесь часто временные для генерации формы; fatal только для явных ошибок в теле.
+      if ((body?.requests ?? []).some((r) => isCdekRequestFatalState(r.state))) {
+        return { kind: 'fatal', reason };
+      }
+      return { kind: 'retry', reason };
+    }
     const data = (await res.json().catch(() => null)) as CdekPrintResponse | null;
+    const fatalReq = (data?.requests ?? []).find((r) => isCdekRequestFatalState(r.state));
+    if (fatalReq) {
+      return {
+        kind: 'fatal',
+        reason: cdekResponseErrorMessage(data) || `print request state=${fatalReq.state ?? 'n/a'}`,
+      };
+    }
     const uuid = data?.entity?.uuid?.trim();
-    return uuid || null;
+    if (uuid) return { kind: 'ok', uuid };
+    return { kind: 'retry', reason: 'print uuid is not ready yet' };
   }
 
   private extractTariffCode(quoteId: string): number {
