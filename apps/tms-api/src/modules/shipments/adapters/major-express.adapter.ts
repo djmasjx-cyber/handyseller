@@ -27,6 +27,18 @@ type MajorCity = {
 type MajorCookieJar = Map<string, string>;
 type MajorServiceType = 'EXPRESS' | 'LTL';
 
+function majorSoapNs(serviceType: MajorServiceType): string {
+  return serviceType === 'LTL'
+    ? 'http://ltl-ws.major-express.ru/'
+    : 'http://ltl-ws.major-express.ru/edclients/';
+}
+
+function majorSoapEndpoint(serviceType: MajorServiceType): string {
+  return serviceType === 'LTL'
+    ? 'https://ltl-ws.major-express.ru/ed.asmx'
+    : 'https://ed.major-express.ru/edclients2.asmx';
+}
+
 function escapeXml(value: string): string {
   return value
     .replaceAll('&', '&amp;')
@@ -252,16 +264,20 @@ export class MajorExpressAdapter implements CarrierAdapter {
     requestId: string,
     context: CarrierQuoteContext,
   ): Promise<CarrierQuote[]> {
-    const byServiceType = await Promise.all([
+    const [expressCredentials, ltlCredentials] = await Promise.all([
       this.loadCredentials(context, 'EXPRESS'),
       this.loadCredentials(context, 'LTL'),
     ]);
-    const credentialsByType: Array<{ serviceType: MajorServiceType; credentials: InternalCarrierCredentials }> = [
-      { serviceType: 'EXPRESS', credentials: byServiceType[0] },
-      { serviceType: 'LTL', credentials: byServiceType[1] },
-    ].filter((item): item is { serviceType: MajorServiceType; credentials: InternalCarrierCredentials } =>
-      Boolean(item.credentials),
-    );
+    const credentialsByType: Array<{ serviceType: MajorServiceType; credentials: InternalCarrierCredentials }> = [];
+    if (expressCredentials) {
+      credentialsByType.push({ serviceType: 'EXPRESS', credentials: expressCredentials });
+    }
+    if (ltlCredentials) {
+      credentialsByType.push({ serviceType: 'LTL', credentials: ltlCredentials });
+    } else if (expressCredentials) {
+      // В кабинете Major часто один и тот же логин работает для "Экспресс" и "Сборные грузы".
+      credentialsByType.push({ serviceType: 'LTL', credentials: expressCredentials });
+    }
     if (credentialsByType.length === 0) {
       this.logger.warn(
         `Major quote skipped: missing credentials for both service types; requestId=${requestId}`,
@@ -289,7 +305,13 @@ export class MajorExpressAdapter implements CarrierAdapter {
 
     const quotes: CarrierQuote[] = [];
     for (const { serviceType, credentials } of credentialsByType) {
-      const result = await this.callCalculator(input, credentials, shipperCity.code, consigneeCity.code);
+      const result = await this.callCalculator(
+        input,
+        credentials,
+        shipperCity.code,
+        consigneeCity.code,
+        serviceType,
+      );
       if (!result) {
         this.logger.warn(
           `Major quote skipped: calculator returned empty; requestId=${requestId}; serviceType=${serviceType}; shipperCity=${shipperCity.code}; consigneeCity=${consigneeCity.code}`,
@@ -331,7 +353,7 @@ export class MajorExpressAdapter implements CarrierAdapter {
     documents?: Array<Pick<ShipmentDocumentRecord, 'type' | 'title' | 'content'>>;
   }> {
     const serviceType = this.resolveServiceTypeFromQuote(quote);
-    const credentials = await this.loadCredentials(context, serviceType);
+    const credentials = await this.loadCredentialsWithFallback(context, serviceType);
     if (!credentials) {
       throw new Error(`Major booking failed: missing credentials for ${serviceType}`);
     }
@@ -498,7 +520,7 @@ export class MajorExpressAdapter implements CarrierAdapter {
       };
     }
     const serviceType = this.resolveServiceTypeFromShipment(shipment);
-    const credentials = await this.loadCredentials(context, serviceType);
+    const credentials = await this.loadCredentialsWithFallback(context, serviceType);
     if (!credentials) {
       throw new Error(`Major document download failed: missing credentials for ${serviceType}`);
     }
@@ -543,7 +565,7 @@ export class MajorExpressAdapter implements CarrierAdapter {
       throw new Error('Major refresh failed: missing order id');
     }
     const serviceType = this.resolveServiceTypeFromShipment(shipment);
-    const credentials = await this.loadCredentials(context, serviceType);
+    const credentials = await this.loadCredentialsWithFallback(context, serviceType);
     if (!credentials) {
       throw new Error(`Major refresh failed: missing credentials for ${serviceType}`);
     }
@@ -612,6 +634,22 @@ export class MajorExpressAdapter implements CarrierAdapter {
     return (await res.json()) as InternalCarrierCredentials;
   }
 
+  private async loadCredentialsWithFallback(
+    context: CarrierQuoteContext,
+    serviceType: MajorServiceType,
+  ): Promise<InternalCarrierCredentials | null> {
+    const direct = await this.loadCredentials(context, serviceType);
+    if (direct) return direct;
+    if (serviceType === 'LTL') {
+      const express = await this.loadCredentials(context, 'EXPRESS');
+      if (express) {
+        this.logger.warn('Major LTL credentials missing; fallback to EXPRESS credentials');
+      }
+      return express;
+    }
+    return null;
+  }
+
   private async getCities(): Promise<MajorCity[]> {
     const cacheAgeMs = Date.now() - this.cityCacheLoadedAt;
     if (this.cityCache && cacheAgeMs < 1000 * 60 * 60 * 12) {
@@ -673,19 +711,20 @@ export class MajorExpressAdapter implements CarrierAdapter {
     credentials: InternalCarrierCredentials,
     shipperCityCode: number,
     consigneeCityCode: number,
+    serviceType: MajorServiceType,
   ): Promise<{ tariff: number; insurance: number; total: number; deliveryTime: number } | null> {
     const cargo = input.snapshot.cargo;
     const hasDimensions =
       cargo.lengthMm != null && cargo.widthMm != null && cargo.heightMm != null && cargo.lengthMm > 0;
 
+    const ns = majorSoapNs(serviceType);
+    const endpoint = majorSoapEndpoint(serviceType);
     const body = hasDimensions
-      ? this.buildCalculator1Body(credentials, shipperCityCode, consigneeCityCode, input)
-      : this.buildCalculatorBody(credentials, shipperCityCode, consigneeCityCode, input);
-    const soapAction = hasDimensions
-      ? '"http://ltl-ws.major-express.ru/edclients/Calculator1"'
-      : '"http://ltl-ws.major-express.ru/edclients/Calculator"';
+      ? this.buildCalculator1Body(credentials, shipperCityCode, consigneeCityCode, input, ns)
+      : this.buildCalculatorBody(credentials, shipperCityCode, consigneeCityCode, input, ns);
+    const soapAction = hasDimensions ? `"${ns}Calculator1"` : `"${ns}Calculator"`;
 
-    const res = await fetch('https://ed.major-express.ru/edclients2.asmx', {
+    const res = await fetch(endpoint, {
       method: 'POST',
       headers: {
         Authorization: `Basic ${Buffer.from(`${credentials.login}:${credentials.password}`).toString('base64')}`,
@@ -696,7 +735,9 @@ export class MajorExpressAdapter implements CarrierAdapter {
     }).catch(() => null);
 
     if (!res?.ok) {
-      this.logger.warn(`Major calculator HTTP failed: status=${res?.status ?? 'n/a'}; soapAction=${soapAction}`);
+      this.logger.warn(
+        `Major calculator HTTP failed: status=${res?.status ?? 'n/a'}; soapAction=${soapAction}; endpoint=${endpoint}; serviceType=${serviceType}`,
+      );
       return null;
     }
 
@@ -1304,13 +1345,14 @@ export class MajorExpressAdapter implements CarrierAdapter {
     shipperCityCode: number,
     consigneeCityCode: number,
     input: CreateShipmentRequestInput,
+    xmlns: string,
   ): string {
     const weightKg = Math.max(input.snapshot.cargo.weightGrams / 1000, 0.1).toFixed(3);
     const cost = Math.max(input.snapshot.cargo.declaredValueRub, 1).toFixed(2);
     return `<?xml version="1.0" encoding="utf-8"?>
 <soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
   <soap:Body>
-    <Calculator xmlns="http://ltl-ws.major-express.ru/edclients/">
+    <Calculator xmlns="${xmlns}">
       <ShipperCityCode>${shipperCityCode}</ShipperCityCode>
       <ConsigneeCityCode>${consigneeCityCode}</ConsigneeCityCode>
       <Weight>${weightKg}</Weight>
@@ -1325,6 +1367,7 @@ export class MajorExpressAdapter implements CarrierAdapter {
     shipperCityCode: number,
     consigneeCityCode: number,
     input: CreateShipmentRequestInput,
+    xmlns: string,
   ): string {
     const cargo = input.snapshot.cargo;
     const places = Math.max(Math.round(cargo.places || 1), 1);
@@ -1348,7 +1391,7 @@ export class MajorExpressAdapter implements CarrierAdapter {
     return `<?xml version="1.0" encoding="utf-8"?>
 <soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
   <soap:Body>
-    <Calculator1 xmlns="http://ltl-ws.major-express.ru/edclients/">
+    <Calculator1 xmlns="${xmlns}">
       <ShipperCityCode>${shipperCityCode}</ShipperCityCode>
       <ConsigneeCityCode>${consigneeCityCode}</ConsigneeCityCode>
       <Cost>${cost}</Cost>
