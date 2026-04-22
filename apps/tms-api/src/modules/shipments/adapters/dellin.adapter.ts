@@ -220,6 +220,7 @@ function requiredDellinFieldErrors(input: CreateShipmentRequestInput): string[] 
 type DellinDraftValidation = {
   requestId: string | null;
   state: string | null;
+  draftOnly: boolean;
 };
 
 function maskPhone(value: string): string {
@@ -437,15 +438,15 @@ export class DellinAdapter implements CarrierAdapter {
         carrierName: quote.carrierName,
         trackingNumber,
         carrierOrderReference: draft.requestId ?? undefined,
-        status: draftOnly ? 'CREATED' : 'CONFIRMED',
+        status: draft.draftOnly ? 'CREATED' : 'CONFIRMED',
         priceRub: quote.priceRub,
         etaDays: quote.etaDays,
       },
       tracking: [
         {
           shipmentId: '',
-          status: draftOnly ? 'CREATED' : 'CONFIRMED',
-          description: draftOnly
+          status: draft.draftOnly ? 'CREATED' : 'CONFIRMED',
+          description: draft.draftOnly
             ? `Черновик заявки в ДЛ проверен (inOrder=false). requestId=${draft.requestId ?? 'n/a'}`
             : `Заявка в ДЛ отправлена. requestId=${draft.requestId ?? 'n/a'}`,
           occurredAt: new Date().toISOString(),
@@ -529,9 +530,9 @@ export class DellinAdapter implements CarrierAdapter {
       ((cargo.lengthMm ?? 100) / 1000) * ((cargo.widthMm ?? 100) / 1000) * ((cargo.heightMm ?? 100) / 1000),
       0.0001,
     );
-    const draftOnly = process.env.DELLIN_DRAFT_ONLY === 'true';
+    const draftOnlyByEnv = process.env.DELLIN_DRAFT_ONLY === 'true';
 
-    const payload: Record<string, unknown> = {
+    const makePayload = (draftOnly: boolean): Record<string, unknown> => ({
       appkey: appKey,
       sessionID,
       inOrder: !draftOnly,
@@ -562,13 +563,13 @@ export class DellinAdapter implements CarrierAdapter {
         totalWeight,
         totalVolume,
       },
-    };
+    });
     if (this.dellinDebug) {
       this.logger.log(
         `[dellin-booking] payload requestId=${requestId} data=${JSON.stringify({
           appkey: appKey ? '***' : null,
           sessionID: sessionID ? '***' : null,
-          inOrder: !draftOnly,
+          inOrder: !draftOnlyByEnv,
           delivery: {
             variant: 'address',
             derival: { variant: 'address', search: truncate(fromAddress) },
@@ -596,13 +597,30 @@ export class DellinAdapter implements CarrierAdapter {
       );
     }
     const url = dellinJsonUrl(base, DELLIN_REQUEST_PATH);
-    const res = await fetch(url, {
+    let effectiveDraftOnly = draftOnlyByEnv;
+    let payload = makePayload(effectiveDraftOnly);
+    let res = await fetch(url, {
       method: 'POST',
       headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
       cache: 'no-store',
     }).catch(() => null);
-    const data = (await res?.json().catch(() => null)) as Record<string, unknown> | null;
+    let data = (await res?.json().catch(() => null)) as Record<string, unknown> | null;
+    if (!effectiveDraftOnly && res?.status === 400) {
+      // В боевом режиме ДЛ может требовать дополнительные поля; fallback в черновик, чтобы не блокировать логиста.
+      effectiveDraftOnly = true;
+      payload = makePayload(true);
+      res = await fetch(url, {
+        method: 'POST',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        cache: 'no-store',
+      }).catch(() => null);
+      data = (await res?.json().catch(() => null)) as Record<string, unknown> | null;
+      this.logger.warn(
+        `[dellin-booking] inOrder=true failed with 400, fallback to draft mode; requestId=${requestId}`,
+      );
+    }
     if (!res?.ok) {
       const details = parseDellinErrors(data).join('; ');
       if (this.dellinDebug) {
@@ -610,7 +628,10 @@ export class DellinAdapter implements CarrierAdapter {
           `[dellin-booking] request error requestId=${requestId} status=${res?.status ?? 'n/a'} raw=${JSON.stringify(data ?? {}).slice(0, 1200)}`,
         );
       }
-      throw new Error(`Dellin request failed: HTTP ${res?.status ?? 'n/a'}${details ? `; ${details}` : ''}`);
+      const raw = JSON.stringify(data ?? {}).slice(0, 400);
+      throw new Error(
+        `Dellin request failed: HTTP ${res?.status ?? 'n/a'}${details ? `; ${details}` : raw ? `; ${raw}` : ''}`,
+      );
     }
     const businessErrors = parseDellinErrors(data);
     const requestUid = firstNonEmptyString(
@@ -631,7 +652,7 @@ export class DellinAdapter implements CarrierAdapter {
         `[dellin-booking] request ok requestId=${requestId} dellinRequestId=${requestUid ?? 'n/a'} state=${state ?? 'n/a'}`,
       );
     }
-    return { requestId: requestUid, state };
+    return { requestId: requestUid, state, draftOnly: effectiveDraftOnly };
   }
 
   private async getSessionId(
