@@ -4,10 +4,16 @@ import type {
   CarrierQuote,
   CreateShipmentRequestInput,
   InternalCarrierCredentials,
+  ShipmentDocumentRecord,
   ShipmentRecord,
   TrackingEventRecord,
 } from '@handyseller/tms-sdk';
-import type { CarrierAdapter, CarrierBookInput, CarrierQuoteContext } from './base-carrier.adapter';
+import type {
+  CarrierAdapter,
+  CarrierBookInput,
+  CarrierDocumentDownloadInput,
+  CarrierQuoteContext,
+} from './base-carrier.adapter';
 
 /** Публичный калькулятор ДЛ: https://api.dellin.ru/v1/public/calculator.json (см. dev.dellin.ru, примеры интеграций). */
 const DELLIN_PUBLIC_CALCULATOR_PATH = '/v1/public/calculator';
@@ -17,6 +23,8 @@ const DELLIN_PUBLIC_KLADR_PATH = '/v2/public/kladr';
 const DELLIN_AUTH_LOGIN_PATH = '/v3/auth/login';
 /** Создание/черновик заявки на перевозку. */
 const DELLIN_REQUEST_PATH = '/v2/request';
+/** Печатные формы по заявке/накладной. */
+const DELLIN_REQUEST_PDF_PATH = '/v1/customers/request/pdf';
 
 function asNumber(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -224,6 +232,56 @@ function truncate(value: string, max = 180): string {
   return value.length > max ? `${value.slice(0, max)}…` : value;
 }
 
+function isLikelyPdf(buffer: Buffer): boolean {
+  if (!buffer || buffer.length < 16) return false;
+  return buffer.subarray(0, 5).toString('ascii') === '%PDF-';
+}
+
+function parseDellinDocMarker(content: string): { kind: 'waybill' | 'request'; requestId: string } | null {
+  const parts = (content ?? '').trim().split(':');
+  if (parts.length < 3) return null;
+  if (parts[0] !== 'dellin-doc') return null;
+  const kind = parts[1] === 'waybill' ? 'waybill' : parts[1] === 'request' ? 'request' : null;
+  const requestId = parts.slice(2).join(':').trim();
+  if (!kind || !requestId) return null;
+  return { kind, requestId };
+}
+
+function findPdfLikeString(payload: unknown): string | null {
+  if (!payload) return null;
+  if (typeof payload === 'string') return payload.trim() || null;
+  if (Array.isArray(payload)) {
+    for (const item of payload) {
+      const hit = findPdfLikeString(item);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  const obj = asObject(payload);
+  if (!obj) return null;
+  const directKeys = [
+    'pdf',
+    'file',
+    'base64',
+    'pdfBase64',
+    'content',
+    'url',
+    'link',
+    'downloadUrl',
+    'downloadURL',
+  ];
+  for (const key of directKeys) {
+    const hit = findPdfLikeString(obj[key]);
+    if (hit) return hit;
+  }
+  const nestedKeys = ['data', 'result', 'document', 'documents', 'payload'];
+  for (const key of nestedKeys) {
+    const hit = findPdfLikeString(obj[key]);
+    if (hit) return hit;
+  }
+  return null;
+}
+
 export class DellinAdapter implements CarrierAdapter {
   private readonly logger = new Logger(DellinAdapter.name);
   private readonly dellinDebug =
@@ -235,7 +293,7 @@ export class DellinAdapter implements CarrierAdapter {
     modes: ['ROAD'],
     supportedFlags: ['EXPRESS', 'CONSOLIDATED'],
     supportsTracking: false,
-    supportsBooking: process.env.DELLIN_ENABLE_BOOKING === 'true',
+    supportsBooking: process.env.DELLIN_ENABLE_BOOKING !== 'false',
     requiresCredentials: true,
   };
 
@@ -361,8 +419,9 @@ export class DellinAdapter implements CarrierAdapter {
   async book({ quote, input, context }: CarrierBookInput): Promise<{
     shipment: Omit<ShipmentRecord, 'id' | 'userId' | 'createdAt'>;
     tracking: Array<Omit<TrackingEventRecord, 'id'>>;
+    documents?: Array<Pick<ShipmentDocumentRecord, 'type' | 'title' | 'content'>>;
   }> {
-    const draftOnly = process.env.DELLIN_DRAFT_ONLY !== 'false';
+    const draftOnly = process.env.DELLIN_DRAFT_ONLY === 'true';
     const credentials = await this.loadCredentials(context, quote.requestId);
     if (!credentials) {
       throw new Error('Dellin booking failed: missing credentials');
@@ -392,6 +451,47 @@ export class DellinAdapter implements CarrierAdapter {
           occurredAt: new Date().toISOString(),
         },
       ],
+      documents: draft.requestId ? this.createDocumentStubs(draft.requestId) : undefined,
+    };
+  }
+
+  async downloadDocument({
+    shipment,
+    document,
+    context,
+  }: CarrierDocumentDownloadInput): Promise<{ content: Buffer; mimeType: string; fileName: string }> {
+    const marker = parseDellinDocMarker(document.content ?? '');
+    if (!marker) {
+      return {
+        content: Buffer.from(document.content ?? '', 'utf-8'),
+        mimeType: 'text/plain; charset=utf-8',
+        fileName: `${shipment.trackingNumber || shipment.id}-${document.type.toLowerCase()}.txt`,
+      };
+    }
+    const credentials = await this.loadCredentials(context, shipment.requestId);
+    if (!credentials) {
+      throw new Error('Dellin document download failed: missing credentials');
+    }
+    const appKey = (credentials.appKey ?? '').trim() || process.env.DELLIN_APP_KEY?.trim();
+    if (!appKey) {
+      throw new Error('Dellin document download failed: missing appKey');
+    }
+    const base = (process.env.DELLIN_API_BASE ?? 'https://api.dellin.ru').replace(/\/+$/, '');
+    const sessionID = await this.getSessionId(
+      base,
+      appKey,
+      credentials.login,
+      credentials.password,
+      shipment.requestId,
+    );
+    if (!sessionID) {
+      throw new Error('Dellin document download failed: cannot obtain sessionID');
+    }
+    const pdf = await this.fetchPrintableFormPdf(base, appKey, sessionID, marker.requestId, marker.kind);
+    return {
+      content: pdf,
+      mimeType: 'application/pdf',
+      fileName: `${marker.requestId}-dellin-${marker.kind}.pdf`,
     };
   }
 
@@ -429,7 +529,7 @@ export class DellinAdapter implements CarrierAdapter {
       ((cargo.lengthMm ?? 100) / 1000) * ((cargo.widthMm ?? 100) / 1000) * ((cargo.heightMm ?? 100) / 1000),
       0.0001,
     );
-    const draftOnly = process.env.DELLIN_DRAFT_ONLY !== 'false';
+    const draftOnly = process.env.DELLIN_DRAFT_ONLY === 'true';
 
     const payload: Record<string, unknown> = {
       appkey: appKey,
@@ -617,5 +717,93 @@ export class DellinAdapter implements CarrierAdapter {
       return null;
     }
     return (await res.json()) as InternalCarrierCredentials;
+  }
+
+  private createDocumentStubs(
+    dellinRequestId: string,
+  ): Array<Pick<ShipmentDocumentRecord, 'type' | 'title' | 'content'>> {
+    return [
+      {
+        type: 'WAYBILL',
+        title: 'Накладная Деловых Линий (PDF)',
+        content: `dellin-doc:waybill:${dellinRequestId}`,
+      },
+      {
+        type: 'LABEL',
+        title: 'Ярлык/заявка Деловых Линий (PDF)',
+        content: `dellin-doc:request:${dellinRequestId}`,
+      },
+    ];
+  }
+
+  private async fetchPrintableFormPdf(
+    base: string,
+    appKey: string,
+    sessionID: string,
+    dellinRequestId: string,
+    kind: 'waybill' | 'request',
+  ): Promise<Buffer> {
+    const url = dellinJsonUrl(base, DELLIN_REQUEST_PDF_PATH);
+    const docIds = kind === 'waybill' ? ['waybill', 'bill', 'consignmentNote'] : ['request', 'pickupRequest'];
+    const payloads: Array<Record<string, unknown>> = [];
+    for (const docID of docIds) {
+      payloads.push(
+        { appkey: appKey, sessionID, requestID: dellinRequestId, docID },
+        { appkey: appKey, sessionID, requestId: dellinRequestId, docID },
+        { appkey: appKey, sessionID, requestID: dellinRequestId, docType: docID },
+      );
+    }
+    payloads.push(
+      { appkey: appKey, sessionID, requestID: dellinRequestId },
+      { appkey: appKey, sessionID, requestId: dellinRequestId },
+    );
+    let lastError = 'unknown';
+    for (const body of payloads) {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/pdf, application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+        cache: 'no-store',
+      }).catch(() => null);
+      if (!res?.ok) {
+        const data = await res?.json().catch(() => null);
+        const details = parseDellinErrors(data).join('; ');
+        lastError = `HTTP ${res?.status ?? 'n/a'}${details ? `; ${details}` : ''}`;
+        continue;
+      }
+      const ctype = (res.headers.get('content-type') ?? '').toLowerCase();
+      if (ctype.includes('application/pdf')) {
+        const pdf = Buffer.from(await res.arrayBuffer());
+        if (isLikelyPdf(pdf)) return pdf;
+      }
+      const payload = await res.json().catch(() => null);
+      const hint = findPdfLikeString(payload);
+      if (!hint) {
+        lastError = `no pdf payload; ${parseDellinErrors(payload).join('; ')}`;
+        continue;
+      }
+      if (/^https?:\/\//i.test(hint)) {
+        const fileRes = await fetch(hint, {
+          headers: { Accept: 'application/pdf' },
+          cache: 'no-store',
+        }).catch(() => null);
+        if (!fileRes?.ok) {
+          lastError = `pdf link fetch failed HTTP ${fileRes?.status ?? 'n/a'}`;
+          continue;
+        }
+        const pdf = Buffer.from(await fileRes.arrayBuffer());
+        if (isLikelyPdf(pdf)) return pdf;
+        lastError = 'linked file is not a valid PDF';
+        continue;
+      }
+      const cleaned = hint.replace(/^data:application\/pdf;base64,/i, '').replace(/\s+/g, '');
+      const pdf = Buffer.from(cleaned, 'base64');
+      if (isLikelyPdf(pdf)) return pdf;
+      lastError = 'base64 payload is not a valid PDF';
+    }
+    throw new Error(`Dellin document download failed: ${lastError}`);
   }
 }

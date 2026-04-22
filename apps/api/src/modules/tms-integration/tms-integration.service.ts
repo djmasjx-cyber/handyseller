@@ -282,7 +282,7 @@ export class TmsIntegrationService {
         await this.validateCdekCredentials(login, password);
       } else if (connection.carrierCode === 'DELLIN') {
         const appKey = connection.appKey ? this.crypto.decrypt(connection.appKey) : null;
-        await this.validateDellinCredentials(appKey);
+        await this.validateDellinCredentials(appKey, login, password);
       }
     } catch (e) {
       lastError = e instanceof Error ? e.message : String(e);
@@ -574,7 +574,11 @@ export class TmsIntegrationService {
     }
   }
 
-  private async validateDellinCredentials(appKey: string | null): Promise<void> {
+  private async validateDellinCredentials(
+    appKey: string | null,
+    login: string,
+    password: string,
+  ): Promise<void> {
     const key = (appKey ?? '').trim();
     if (!key) {
       throw new BadRequestException('Для Деловых Линий отсутствует appKey.');
@@ -595,6 +599,36 @@ export class TmsIntegrationService {
         : null);
     if (!res.ok || !cities || cities.length === 0) {
       throw new BadRequestException('Деловые Линии: appKey не прошёл проверку.');
+    }
+    if (!login.trim() || !password.trim()) {
+      throw new BadRequestException('Для Деловых Линий отсутствуют login/password ЛК.');
+    }
+    const authRes = await fetch(`${base}/v3/auth/login.json`, {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ appkey: key, login, password }),
+    }).catch((error) => {
+      throw new BadRequestException(`Не удалось пройти авторизацию API Деловых Линий: ${String(error)}`);
+    });
+    const authData = (await authRes.json().catch(() => ({}))) as Record<string, unknown>;
+    const sessionID =
+      (typeof authData.sessionID === 'string' && authData.sessionID) ||
+      (typeof authData.sessionId === 'string' && authData.sessionId) ||
+      (typeof (authData.data as Record<string, unknown> | undefined)?.sessionID === 'string' &&
+        ((authData.data as Record<string, unknown>).sessionID as string)) ||
+      (typeof (authData.data as Record<string, unknown> | undefined)?.sessionId === 'string' &&
+        ((authData.data as Record<string, unknown>).sessionId as string)) ||
+      '';
+    if (!authRes.ok || !sessionID) {
+      const details =
+        (Array.isArray(authData.errors) ? authData.errors.join('; ') : null) ||
+        (typeof authData.errors === 'string' ? authData.errors : null) ||
+        (typeof authData.error === 'string' ? authData.error : null);
+      throw new BadRequestException(
+        details
+          ? `Деловые Линии: ошибка авторизации (${details}).`
+          : 'Деловые Линии: login/password не прошли проверку.',
+      );
     }
   }
 
