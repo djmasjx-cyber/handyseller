@@ -184,6 +184,23 @@ function parseDellinErrors(payload: unknown): string[] {
     }
     const obj = asObject(node);
     if (!obj) return;
+    const code = typeof obj.code === 'number' || typeof obj.code === 'string' ? String(obj.code) : null;
+    const title = typeof obj.title === 'string' ? obj.title.trim() : '';
+    const detail = typeof obj.detail === 'string' ? obj.detail.trim() : '';
+    const fields = Array.isArray(obj.fields)
+      ? obj.fields
+          .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+          .map((v) => v.trim())
+      : [];
+    if (code || title || detail || fields.length > 0) {
+      const parts = [
+        code ? `code=${code}` : null,
+        title || null,
+        detail || null,
+        fields.length > 0 ? `fields=${fields.join(',')}` : null,
+      ].filter(Boolean);
+      if (parts.length > 0) out.push(parts.join(' | '));
+    }
     push(obj.message);
     push(obj.error);
     push(obj.hint);
