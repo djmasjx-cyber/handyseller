@@ -23,6 +23,10 @@ type FailedJobRow = {
   payload: unknown;
   next_run_at: string;
 };
+type IdempotencyRow = {
+  response_payload: unknown;
+};
+type WebhookSubRow = { payload: unknown };
 
 @Injectable()
 export class TmsStoreService implements OnModuleInit {
@@ -108,6 +112,31 @@ export class TmsStoreService implements OnModuleInit {
         request_payload JSONB,
         response_payload JSONB,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS tms_api_idempotency (
+        scope_key TEXT PRIMARY KEY,
+        response_payload JSONB NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS tms_partner_webhook_subscription (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        payload JSONB NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS tms_partner_webhook_delivery (
+        id BIGSERIAL PRIMARY KEY,
+        subscription_id TEXT NOT NULL,
+        event_id TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        status TEXT NOT NULL,
+        attempt INTEGER NOT NULL DEFAULT 1,
+        response_code INTEGER,
+        error_message TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        payload JSONB
       );
     `);
   }
@@ -361,6 +390,115 @@ export class TmsStoreService implements OnModuleInit {
       [jobId],
     );
     return (res.rowCount ?? 0) > 0;
+  }
+
+  async loadIdempotencyResponse(scopeKey: string): Promise<unknown | null> {
+    if (!this.pool) return null;
+    const rows = await this.pool.query<IdempotencyRow>(
+      `SELECT response_payload
+       FROM tms_api_idempotency
+       WHERE scope_key = $1
+       LIMIT 1`,
+      [scopeKey],
+    );
+    if ((rows.rowCount ?? 0) < 1) return null;
+    return rows.rows[0]?.response_payload ?? null;
+  }
+
+  async saveIdempotencyResponse(scopeKey: string, responsePayload: unknown): Promise<void> {
+    if (!this.pool) return;
+    await this.pool.query(
+      `INSERT INTO tms_api_idempotency(scope_key, response_payload, updated_at)
+       VALUES ($1, $2::jsonb, NOW())
+       ON CONFLICT (scope_key) DO UPDATE
+       SET response_payload = EXCLUDED.response_payload,
+           updated_at = NOW()`,
+      [scopeKey, JSON.stringify(responsePayload)],
+    );
+  }
+
+  async loadWebhookSubscriptions(): Promise<
+    Array<{
+      id: string;
+      userId: string;
+      callbackUrl: string;
+      status: 'ACTIVE' | 'DISABLED';
+      createdAt: string;
+      updatedAt: string;
+      secretMasked: string;
+      signingSecret: string;
+    }>
+  > {
+    if (!this.pool) return [];
+    const rows = await this.pool.query<WebhookSubRow>('SELECT payload FROM tms_partner_webhook_subscription');
+    return rows.rows.map(
+      (r) =>
+        r.payload as {
+          id: string;
+          userId: string;
+          callbackUrl: string;
+          status: 'ACTIVE' | 'DISABLED';
+          createdAt: string;
+          updatedAt: string;
+          secretMasked: string;
+          signingSecret: string;
+        },
+    );
+  }
+
+  async saveWebhookSubscription(record: {
+    id: string;
+    userId: string;
+    callbackUrl: string;
+    status: 'ACTIVE' | 'DISABLED';
+    createdAt: string;
+    updatedAt: string;
+    secretMasked: string;
+    signingSecret: string;
+  }): Promise<void> {
+    if (!this.pool) return;
+    await this.pool.query(
+      `INSERT INTO tms_partner_webhook_subscription(id, user_id, status, payload, updated_at)
+       VALUES ($1, $2, $3, $4::jsonb, NOW())
+       ON CONFLICT (id) DO UPDATE
+       SET status = EXCLUDED.status,
+           payload = EXCLUDED.payload,
+           updated_at = NOW()`,
+      [record.id, record.userId, record.status, JSON.stringify(record)],
+    );
+  }
+
+  async deleteWebhookSubscription(id: string): Promise<void> {
+    if (!this.pool) return;
+    await this.pool.query('DELETE FROM tms_partner_webhook_subscription WHERE id = $1', [id]);
+  }
+
+  async appendWebhookDeliveryLog(record: {
+    subscriptionId: string;
+    eventId: string;
+    eventType: string;
+    status: 'SUCCESS' | 'FAILED';
+    attempt: number;
+    responseCode?: number | null;
+    errorMessage?: string | null;
+    payload?: unknown;
+  }): Promise<void> {
+    if (!this.pool) return;
+    await this.pool.query(
+      `INSERT INTO tms_partner_webhook_delivery(
+        subscription_id, event_id, event_type, status, attempt, response_code, error_message, payload
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)`,
+      [
+        record.subscriptionId,
+        record.eventId,
+        record.eventType,
+        record.status,
+        Math.max(1, record.attempt),
+        record.responseCode ?? null,
+        record.errorMessage?.slice(0, 800) ?? null,
+        record.payload ? JSON.stringify(record.payload) : null,
+      ],
+    );
   }
 }
 

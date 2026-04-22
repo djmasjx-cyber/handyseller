@@ -22,6 +22,7 @@ import { CdekAdapter } from './adapters/cdek.adapter';
 import type { CarrierAdapter } from './adapters/base-carrier.adapter';
 import { TmsStoreService } from './storage/tms-store.service';
 import { ObjectStorageService } from './storage/object-storage.service';
+import { createHmac, randomBytes } from 'crypto';
 
 @Injectable()
 export class ShipmentsService implements OnModuleInit {
@@ -34,6 +35,20 @@ export class ShipmentsService implements OnModuleInit {
   private readonly shipments = new Map<string, ShipmentRecord>();
   private readonly tracking = new Map<string, TrackingEventRecord[]>();
   private readonly documents = new Map<string, ShipmentDocumentRecord[]>();
+  private readonly idempotencyFallback = new Map<string, unknown>();
+  private readonly webhookSubscriptions = new Map<
+    string,
+    {
+      id: string;
+      userId: string;
+      callbackUrl: string;
+      status: 'ACTIVE' | 'DISABLED';
+      createdAt: string;
+      updatedAt: string;
+      secretMasked: string;
+      signingSecret: string;
+    }
+  >();
   private readonly routingPolicies: RoutingPolicyRecord[] = [
     {
       id: 'manual-assist',
@@ -64,6 +79,7 @@ export class ShipmentsService implements OnModuleInit {
       this.store.loadTracking(),
       this.store.loadDocuments(),
     ]);
+    const subscriptions = await this.store.loadWebhookSubscriptions();
     for (const item of requests) this.requests.set(item.id, item);
     for (const item of shipments) this.shipments.set(item.id, item);
     for (const item of tracking) {
@@ -81,6 +97,7 @@ export class ShipmentsService implements OnModuleInit {
         void this.objectStorage.putBuffer(objectKey, marker.buffer);
       }
     }
+    for (const item of subscriptions) this.webhookSubscriptions.set(item.id, item);
   }
 
   listCarriers(): CarrierDescriptor[] {
@@ -107,6 +124,276 @@ export class ShipmentsService implements OnModuleInit {
     return [...this.shipments.values()]
       .filter((shipment) => shipment.userId === userId)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  getShipment(userId: string, shipmentId: string): ShipmentRecord {
+    const shipment = this.shipments.get(shipmentId);
+    if (!shipment || shipment.userId !== userId) {
+      throw new NotFoundException('Отгрузка не найдена');
+    }
+    return shipment;
+  }
+
+  getShipmentByExternalOrderId(
+    userId: string,
+    externalOrderId: string,
+    orderType?: 'CLIENT_ORDER' | 'INTERNAL_TRANSFER' | 'SUPPLIER_PICKUP',
+  ): {
+    requestId: string;
+    shipment: ShipmentRecord | null;
+    status: ShipmentRequestRecord['status'] | ShipmentRecord['status'];
+    externalOrderId: string;
+    orderType: 'CLIENT_ORDER' | 'INTERNAL_TRANSFER' | 'SUPPLIER_PICKUP' | null;
+  } {
+    const normalizedExternalOrderId = externalOrderId.trim();
+    if (!normalizedExternalOrderId) {
+      throw new BadRequestException('externalOrderId обязателен');
+    }
+    const request = [...this.requests.values()]
+      .filter((item) => item.userId === userId)
+      .find(
+        (item) =>
+          item.integration?.externalOrderId === normalizedExternalOrderId &&
+          (!orderType || item.integration?.orderType === orderType),
+      );
+    if (!request) {
+      throw new NotFoundException('Заявка с externalOrderId не найдена');
+    }
+    const shipment = [...this.shipments.values()].find((item) => item.userId === userId && item.requestId === request.id) ?? null;
+    return {
+      requestId: request.id,
+      shipment,
+      status: shipment?.status ?? request.status,
+      externalOrderId: request.integration?.externalOrderId ?? normalizedExternalOrderId,
+      orderType: request.integration?.orderType ?? null,
+    };
+  }
+
+  listShipmentsByIntegration(
+    userId: string,
+    filter?: {
+      externalOrderId?: string;
+      orderType?: 'CLIENT_ORDER' | 'INTERNAL_TRANSFER' | 'SUPPLIER_PICKUP';
+      limit?: number;
+      cursor?: string;
+      updatedSince?: string;
+    },
+  ): {
+    items: Array<{
+      requestId: string;
+      shipmentId: string | null;
+      status: ShipmentRequestRecord['status'] | ShipmentRecord['status'];
+      externalOrderId: string;
+      orderType: 'CLIENT_ORDER' | 'INTERNAL_TRANSFER' | 'SUPPLIER_PICKUP' | null;
+      shipment: ShipmentRecord | null;
+    }>;
+    nextCursor: string | null;
+  } {
+    const externalOrderId = filter?.externalOrderId?.trim();
+    const orderType = filter?.orderType;
+    const safeLimit = Math.max(1, Math.min(100, filter?.limit ?? 20));
+    const cursor = filter?.cursor?.trim();
+    const updatedSinceTs = filter?.updatedSince ? Date.parse(filter.updatedSince) : NaN;
+    const hasUpdatedSince = Number.isFinite(updatedSinceTs);
+
+    const all = [...this.requests.values()]
+      .filter((item) => item.userId === userId)
+      .filter((item) => (externalOrderId ? item.integration?.externalOrderId === externalOrderId : true))
+      .filter((item) => (orderType ? item.integration?.orderType === orderType : true))
+      .filter((item) => Boolean(item.integration?.externalOrderId))
+      .filter((item) => {
+        if (!hasUpdatedSince) return true;
+        return Date.parse(item.updatedAt) >= updatedSinceTs;
+      })
+      .map((request) => {
+        const shipment = [...this.shipments.values()].find((item) => item.userId === userId && item.requestId === request.id) ?? null;
+        const sortDate = shipment?.createdAt ?? request.updatedAt;
+        return {
+          requestId: request.id,
+          shipmentId: shipment?.id ?? null,
+          status: shipment?.status ?? request.status,
+          externalOrderId: request.integration?.externalOrderId ?? '',
+          orderType: request.integration?.orderType ?? null,
+          shipment,
+          sortKey: `${sortDate}|${request.id}`,
+        };
+      })
+      .sort((a, b) => b.sortKey.localeCompare(a.sortKey));
+
+    const startIndex = cursor ? all.findIndex((item) => item.sortKey === cursor) + 1 : 0;
+    const itemsWithMeta = all.slice(Math.max(0, startIndex), Math.max(0, startIndex) + safeLimit);
+    const next = all[Math.max(0, startIndex) + safeLimit];
+    return {
+      items: itemsWithMeta.map(({ sortKey: _sortKey, ...item }) => item),
+      nextCursor: next?.sortKey ?? null,
+    };
+  }
+
+  listWebhookSubscriptions(userId: string): Array<{
+    id: string;
+    callbackUrl: string;
+    status: 'ACTIVE' | 'DISABLED';
+    createdAt: string;
+    updatedAt: string;
+    secretMasked: string;
+  }> {
+    return [...this.webhookSubscriptions.values()]
+      .filter((item) => item.userId === userId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .map((item) => ({
+        id: item.id,
+        callbackUrl: item.callbackUrl,
+        status: item.status,
+        createdAt: item.createdAt,
+        updatedAt: item.updatedAt,
+        secretMasked: item.secretMasked,
+      }));
+  }
+
+  async createWebhookSubscription(userId: string, callbackUrl: string): Promise<{
+    id: string;
+    callbackUrl: string;
+    status: 'ACTIVE' | 'DISABLED';
+    createdAt: string;
+    updatedAt: string;
+    secretMasked: string;
+    signingSecret: string;
+  }> {
+    let parsed: URL;
+    try {
+      parsed = new URL(callbackUrl.trim());
+    } catch {
+      throw new BadRequestException('Некорректный callbackUrl');
+    }
+    if (parsed.protocol !== 'https:') {
+      throw new BadRequestException('callbackUrl должен быть HTTPS');
+    }
+    const now = new Date().toISOString();
+    const id = `whsub_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const signingSecret = `hs_whsec_${randomBytes(24).toString('base64url')}`;
+    const record = {
+      id,
+      userId,
+      callbackUrl: parsed.toString(),
+      status: 'ACTIVE' as const,
+      createdAt: now,
+      updatedAt: now,
+      secretMasked: `${signingSecret.slice(0, 12)}...`,
+      signingSecret,
+    };
+    this.webhookSubscriptions.set(id, record);
+    await this.store.saveWebhookSubscription(record);
+    return { ...record, signingSecret };
+  }
+
+  async rotateWebhookSubscriptionSecret(userId: string, subscriptionId: string): Promise<{
+    id: string;
+    callbackUrl: string;
+    status: 'ACTIVE' | 'DISABLED';
+    createdAt: string;
+    updatedAt: string;
+    secretMasked: string;
+    signingSecret: string;
+  }> {
+    const existing = this.webhookSubscriptions.get(subscriptionId);
+    if (!existing || existing.userId !== userId) {
+      throw new NotFoundException('Webhook subscription не найдена');
+    }
+    const signingSecret = `hs_whsec_${randomBytes(24).toString('base64url')}`;
+    const updated = {
+      ...existing,
+      updatedAt: new Date().toISOString(),
+      signingSecret,
+      secretMasked: `${signingSecret.slice(0, 12)}...`,
+    };
+    this.webhookSubscriptions.set(subscriptionId, updated);
+    await this.store.saveWebhookSubscription(updated);
+    return {
+      id: updated.id,
+      callbackUrl: updated.callbackUrl,
+      status: updated.status,
+      createdAt: updated.createdAt,
+      updatedAt: updated.updatedAt,
+      secretMasked: updated.secretMasked,
+      signingSecret,
+    };
+  }
+
+  async deleteWebhookSubscription(userId: string, subscriptionId: string): Promise<{ ok: true }> {
+    const existing = this.webhookSubscriptions.get(subscriptionId);
+    if (!existing || existing.userId !== userId) {
+      throw new NotFoundException('Webhook subscription не найдена');
+    }
+    this.webhookSubscriptions.delete(subscriptionId);
+    await this.store.deleteWebhookSubscription(subscriptionId);
+    return { ok: true };
+  }
+
+  async deliverWebhookEvent(payload: {
+    subscriptionId: string;
+    eventType: string;
+    eventId: string;
+    occurredAt: string;
+    updatedAt: string;
+    attempt: number;
+    data: unknown;
+  }): Promise<void> {
+    const sub = this.webhookSubscriptions.get(payload.subscriptionId);
+    if (!sub || sub.status !== 'ACTIVE' || !sub.signingSecret) return;
+    const body = JSON.stringify({
+      id: payload.eventId,
+      type: payload.eventType,
+      occurredAt: payload.occurredAt,
+      updatedAt: payload.updatedAt,
+      data: payload.data,
+    });
+    const signature = createHmac('sha256', sub.signingSecret).update(body, 'utf8').digest('hex');
+    try {
+      const response = await fetch(sub.callbackUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Handyseller-Event': payload.eventType,
+          'X-Handyseller-Signature': `sha256=${signature}`,
+        },
+        body,
+      });
+      if (!response.ok) {
+        await this.store.appendWebhookDeliveryLog({
+          subscriptionId: sub.id,
+          eventId: payload.eventId,
+          eventType: payload.eventType,
+          status: 'FAILED',
+          attempt: payload.attempt,
+          responseCode: response.status,
+          errorMessage: `HTTP ${response.status}`,
+          payload: payload.data,
+        });
+        throw new BadRequestException(`Webhook delivery failed with status ${response.status}`);
+      }
+      await this.store.appendWebhookDeliveryLog({
+        subscriptionId: sub.id,
+        eventId: payload.eventId,
+        eventType: payload.eventType,
+        status: 'SUCCESS',
+        attempt: payload.attempt,
+        responseCode: response.status,
+        payload: payload.data,
+      });
+    } catch (error) {
+      if (!(error instanceof BadRequestException)) {
+        await this.store.appendWebhookDeliveryLog({
+          subscriptionId: sub.id,
+          eventId: payload.eventId,
+          eventType: payload.eventType,
+          status: 'FAILED',
+          attempt: payload.attempt,
+          errorMessage: error instanceof Error ? error.message : String(error),
+          payload: payload.data,
+        });
+      }
+      throw error;
+    }
   }
 
   async listClientOrders(
@@ -196,6 +483,7 @@ export class ShipmentsService implements OnModuleInit {
       status: 'DRAFT',
       snapshot: input.snapshot,
       draft: input.draft,
+      integration: input.integration,
       createdAt: now,
       updatedAt: now,
     };
@@ -206,6 +494,17 @@ export class ShipmentsService implements OnModuleInit {
       request: this.requests.get(id)!,
       quotes,
     };
+  }
+
+  async createFromCoreOrderIdempotent(
+    userId: string,
+    input: CreateShipmentRequestInput,
+    idempotencyKey?: string | null,
+    authToken?: string | null,
+  ): Promise<CreateShipmentRequestResult> {
+    const scopeKey = this.buildIdempotencyScopeKey(userId, 'create', idempotencyKey);
+    if (!scopeKey) return this.createFromCoreOrder(userId, input, authToken);
+    return this.withIdempotency(scopeKey, () => this.createFromCoreOrder(userId, input, authToken));
   }
 
   async refreshQuotes(
@@ -438,7 +737,25 @@ export class ShipmentsService implements OnModuleInit {
     request.updatedAt = new Date().toISOString();
     this.requests.set(requestId, request);
     void this.store.saveRequest(request);
+    await this.enqueuePartnerWebhookEvents(userId, 'shipment.confirmed', {
+      requestId,
+      shipmentId: shipment.id,
+      trackingNumber: shipment.trackingNumber,
+      status: shipment.status,
+      carrierId: shipment.carrierId,
+    });
     return shipment;
+  }
+
+  async confirmSelectedQuoteIdempotent(
+    userId: string,
+    requestId: string,
+    idempotencyKey?: string | null,
+    authToken?: string | null,
+  ): Promise<ShipmentRecord> {
+    const scopeKey = this.buildIdempotencyScopeKey(userId, `confirm:${requestId}`, idempotencyKey);
+    if (!scopeKey) return this.confirmSelectedQuote(userId, requestId, authToken);
+    return this.withIdempotency(scopeKey, () => this.confirmSelectedQuote(userId, requestId, authToken));
   }
 
   getTracking(userId: string, shipmentId: string): TrackingEventRecord[] {
@@ -528,6 +845,7 @@ export class ShipmentsService implements OnModuleInit {
     }
 
     const updated: ShipmentRecord = { ...shipment, ...refreshed.shipmentPatch };
+    const statusChanged = updated.status !== shipment.status;
     this.shipments.set(shipmentId, updated);
     void this.store.saveShipment(updated);
 
@@ -566,6 +884,16 @@ export class ShipmentsService implements OnModuleInit {
       this.logger.log(
         `[slo] documents_updated shipmentId=${shipmentId} carrier=${shipment.carrierId} count=${merged.length}`,
       );
+    }
+    if (statusChanged || refreshed.tracking?.length || refreshed.documents?.length) {
+      await this.enqueuePartnerWebhookEvents(userId, 'shipment.updated', {
+        requestId: shipment.requestId,
+        shipmentId,
+        status: updated.status,
+        trackingNumber: updated.trackingNumber,
+        trackingEventsAdded: refreshed.tracking?.length ?? 0,
+        documentsUpdated: refreshed.documents?.length ?? 0,
+      });
     }
     return updated;
   }
@@ -639,5 +967,48 @@ export class ShipmentsService implements OnModuleInit {
     }
     const data = await res.json().catch(() => []);
     return Array.isArray(data) ? data : [];
+  }
+
+  private buildIdempotencyScopeKey(userId: string, operation: string, idempotencyKey?: string | null): string | null {
+    const trimmed = (idempotencyKey ?? '').trim();
+    if (!trimmed) return null;
+    return `${userId}:${operation}:${trimmed}`;
+  }
+
+  private async withIdempotency<T>(scopeKey: string, compute: () => Promise<T>): Promise<T> {
+    const inMemory = this.idempotencyFallback.get(scopeKey);
+    if (inMemory !== undefined) {
+      return inMemory as T;
+    }
+    const fromStore = await this.store.loadIdempotencyResponse(scopeKey);
+    if (fromStore !== null) {
+      this.idempotencyFallback.set(scopeKey, fromStore);
+      return fromStore as T;
+    }
+    const result = await compute();
+    this.idempotencyFallback.set(scopeKey, result);
+    await this.store.saveIdempotencyResponse(scopeKey, result);
+    return result;
+  }
+
+  private async enqueuePartnerWebhookEvents(
+    userId: string,
+    eventType: 'shipment.confirmed' | 'shipment.updated',
+    data: Record<string, unknown>,
+  ): Promise<void> {
+    const subscriptions = [...this.webhookSubscriptions.values()].filter(
+      (item) => item.userId === userId && item.status === 'ACTIVE',
+    );
+    const occurredAt = new Date().toISOString();
+    const updatedAt = occurredAt;
+    for (const sub of subscriptions) {
+      const eventId = `ev_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      await this.store.enqueueSyncJob({
+        id: `job_wh_${sub.id}_${eventId}`,
+        kind: 'deliver_partner_webhook',
+        idempotencyKey: `wh:${sub.id}:${eventId}`,
+        payload: { subscriptionId: sub.id, eventType, eventId, occurredAt, updatedAt, attempt: 1, data },
+      });
+    }
   }
 }

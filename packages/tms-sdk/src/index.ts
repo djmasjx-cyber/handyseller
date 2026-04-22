@@ -7,6 +7,7 @@ export type CarrierCode = 'MAJOR_EXPRESS' | 'DELLIN' | 'CDEK';
 export type CarrierServiceType = 'EXPRESS' | 'LTL';
 
 export type OrderLogisticsScenario = 'MARKETPLACE_RC' | 'CARRIER_DELIVERY';
+export type PartnerOrderType = 'CLIENT_ORDER' | 'INTERNAL_TRANSFER' | 'SUPPLIER_PICKUP';
 
 export type TmsOrderStatus =
   | 'NO_REQUEST'
@@ -141,6 +142,10 @@ export interface ShipmentRequestRecord {
   createdAt: string;
   updatedAt: string;
   selectedQuoteId?: string;
+  integration?: {
+    externalOrderId?: string;
+    orderType?: PartnerOrderType;
+  };
 }
 
 export interface ShipmentRecord {
@@ -234,6 +239,10 @@ export interface InternalCarrierCredentials {
 export interface CreateShipmentRequestInput {
   snapshot: CoreOrderSnapshot;
   draft: ShipmentRequestDraft;
+  integration?: {
+    externalOrderId?: string;
+    orderType?: PartnerOrderType;
+  };
 }
 
 export interface CreateShipmentRequestResult {

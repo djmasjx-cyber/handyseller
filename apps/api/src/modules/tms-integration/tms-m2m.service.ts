@@ -149,13 +149,14 @@ info:
   title: HandySeller TMS External API
   version: 1.0.0
   description: |
-    Machine-to-machine доступ к TMS через OAuth2 **client_credentials**.
+    Единый API для сайта и 1С через OAuth2 **client_credentials**.
     Базовый URL совпадает с вашим API HandySeller (префикс \`/api\`).
 
     Поток:
     1. В личном кабинете создайте интеграцию (получите \`client_id\` и \`client_secret\` один раз).
     2. \`POST /api/tms/oauth/token\` — обмен на короткоживущий JWT.
-    3. Запросы к \`/api/tms/...\` на сервис tms-api (через тот же хост, что и веб-приложение) с \`Authorization: Bearer <access_token>\`.
+    3. Используйте \`/api/tms/v1/...\` для интеграции партнера (оценка/создание/подтверждение/статусы).
+    4. Для write-операций передавайте \`Idempotency-Key\`.
 
 servers:
   - url: https://api.handyseller.ru/api
@@ -207,6 +208,215 @@ paths:
       responses:
         '200':
           description: OK
+
+  /tms/v1/shipments/estimate:
+    post:
+      summary: Рассчитать варианты доставки
+      tags: [TMS v1]
+      security: [bearerAuth]
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          schema: { type: string }
+          required: false
+          description: Рекомендуется для retry-safe поведения
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateShipmentRequestInput'
+      responses:
+        '200':
+          description: Варианты доставки рассчитаны
+
+  /tms/v1/shipments:
+    get:
+      summary: Список отгрузок партнера (батч синхронизация)
+      tags: [TMS v1]
+      security: [bearerAuth]
+      parameters:
+        - in: query
+          name: externalOrderId
+          schema: { type: string }
+        - in: query
+          name: orderType
+          schema:
+            type: string
+            enum: [CLIENT_ORDER, INTERNAL_TRANSFER, SUPPLIER_PICKUP]
+        - in: query
+          name: updatedSince
+          schema: { type: string, format: date-time }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - in: query
+          name: cursor
+          schema: { type: string }
+      responses:
+        '200':
+          description: Пагинированный список
+    post:
+      summary: Создать shipment-request партнера
+      tags: [TMS v1]
+      security: [bearerAuth]
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          schema: { type: string }
+          required: false
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateShipmentRequestInput'
+      responses:
+        '200':
+          description: Заявка создана
+
+  /tms/v1/shipments/{id}:
+    get:
+      summary: Получить shipment по внутреннему id
+      tags: [TMS v1]
+      security: [bearerAuth]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Shipment snapshot
+
+  /tms/v1/shipments/{id}/confirm:
+    post:
+      summary: Подтвердить выбранный тариф и забронировать у перевозчика
+      tags: [TMS v1]
+      security: [bearerAuth]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+        - in: header
+          name: Idempotency-Key
+          schema: { type: string }
+          required: false
+      responses:
+        '200':
+          description: Shipment подтвержден, возвращается trackingNumber
+
+  /tms/v1/shipments/{id}/select:
+    post:
+      summary: Выбрать тариф по quoteId
+      tags: [TMS v1]
+      security: [bearerAuth]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [quoteId]
+              properties:
+                quoteId: { type: string }
+      responses:
+        '200':
+          description: Тариф выбран
+
+  /tms/v1/shipments/{id}/events:
+    get:
+      summary: Нормализованные tracking-события
+      tags: [TMS v1]
+      security: [bearerAuth]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Список событий
+
+  /tms/v1/shipments/by-external/{externalOrderId}:
+    get:
+      summary: Найти shipment по внешнему номеру заказа партнера
+      tags: [TMS v1]
+      security: [bearerAuth]
+      parameters:
+        - in: path
+          name: externalOrderId
+          required: true
+          schema: { type: string }
+        - in: query
+          name: orderType
+          schema:
+            type: string
+            enum: [CLIENT_ORDER, INTERNAL_TRANSFER, SUPPLIER_PICKUP]
+      responses:
+        '200':
+          description: Связка request/shipment по внешнему id
+
+  /tms/v1/webhooks/subscriptions:
+    get:
+      summary: Список webhook-подписок партнера
+      tags: [TMS v1]
+      security: [bearerAuth]
+      responses:
+        '200':
+          description: Список подписок
+    post:
+      summary: Создать webhook-подписку партнера
+      tags: [TMS v1]
+      security: [bearerAuth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [callbackUrl]
+              properties:
+                callbackUrl:
+                  type: string
+                  format: uri
+      responses:
+        '200':
+          description: Подписка создана
+
+  /tms/v1/webhooks/subscriptions/{id}:
+    delete:
+      summary: Удалить webhook-подписку
+      tags: [TMS v1]
+      security: [bearerAuth]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Подписка удалена
+
+  /tms/v1/webhooks/subscriptions/{id}/rotate-secret:
+    post:
+      summary: Ротация webhook signing secret
+      tags: [TMS v1]
+      security: [bearerAuth]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Новый signing secret выпущен
 
   /tms/client-orders:
     get:
@@ -278,4 +488,24 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+  schemas:
+    CreateShipmentRequestInput:
+      type: object
+      required: [snapshot, draft]
+      properties:
+        snapshot:
+          type: object
+          description: Снимок заказа (товары, адреса, контакты)
+          additionalProperties: true
+        draft:
+          type: object
+          description: Черновик маршрута и сервисные флаги
+          additionalProperties: true
+        integration:
+          type: object
+          properties:
+            externalOrderId: { type: string }
+            orderType:
+              type: string
+              enum: [CLIENT_ORDER, INTERNAL_TRANSFER, SUPPLIER_PICKUP]
 `;

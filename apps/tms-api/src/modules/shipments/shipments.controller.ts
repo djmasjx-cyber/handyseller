@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Param, Post, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Headers, Param, Post, Query, Res, UseGuards } from '@nestjs/common';
 import type { CreateShipmentRequestInput } from '@handyseller/tms-sdk';
 import type { Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -49,7 +49,7 @@ export class ShipmentsController {
     @Headers('authorization') authorization?: string,
   ) {
     const authToken = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
-    return this.shipmentsService.createFromCoreOrder(userId, input, authToken);
+    return this.shipmentsService.createFromCoreOrderIdempotent(userId, input, null, authToken);
   }
 
   @Get('shipment-requests/:id/quotes')
@@ -86,7 +86,144 @@ export class ShipmentsController {
     @Headers('authorization') authorization?: string,
   ) {
     const authToken = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
-    return this.shipmentsService.confirmSelectedQuote(userId, requestId, authToken);
+    return this.shipmentsService.confirmSelectedQuoteIdempotent(userId, requestId, null, authToken);
+  }
+
+  @Post('v1/shipments/estimate')
+  @TmsAccess('write')
+  async v1Estimate(
+    @CurrentUser('userId') userId: string,
+    @Body() input: CreateShipmentRequestInput,
+    @Headers('authorization') authorization?: string,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ) {
+    const authToken = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
+    const result = await this.shipmentsService.createFromCoreOrderIdempotent(userId, input, idempotencyKey, authToken);
+    return {
+      shipmentRequestId: result.request.id,
+      status: result.request.status,
+      externalOrderId: result.request.integration?.externalOrderId ?? null,
+      orderType: result.request.integration?.orderType ?? null,
+      options: result.quotes.map((quote) => ({
+        quoteId: quote.id,
+        carrierId: quote.carrierId,
+        carrierName: quote.carrierName,
+        serviceFlags: quote.serviceFlags,
+        etaDays: quote.etaDays,
+        totalPriceRub: quote.priceRub,
+      })),
+    };
+  }
+
+  @Post('v1/shipments')
+  @TmsAccess('write')
+  async v1CreateShipment(
+    @CurrentUser('userId') userId: string,
+    @Body() input: CreateShipmentRequestInput,
+    @Headers('authorization') authorization?: string,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ) {
+    const authToken = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
+    const result = await this.shipmentsService.createFromCoreOrderIdempotent(userId, input, idempotencyKey, authToken);
+    return {
+      shipmentRequestId: result.request.id,
+      status: result.request.status,
+      selectedQuoteId: result.request.selectedQuoteId ?? null,
+      externalOrderId: result.request.integration?.externalOrderId ?? null,
+      orderType: result.request.integration?.orderType ?? null,
+      quotes: result.quotes,
+    };
+  }
+
+  @Post('v1/shipments/:id/confirm')
+  @TmsAccess('write')
+  v1ConfirmShipment(
+    @CurrentUser('userId') userId: string,
+    @Param('id') requestId: string,
+    @Headers('authorization') authorization?: string,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ) {
+    const authToken = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
+    return this.shipmentsService.confirmSelectedQuoteIdempotent(userId, requestId, idempotencyKey, authToken);
+  }
+
+  @Post('v1/shipments/:id/select')
+  @TmsAccess('write')
+  v1SelectQuote(
+    @CurrentUser('userId') userId: string,
+    @Param('id') requestId: string,
+    @Body('quoteId') quoteId: string,
+  ) {
+    return this.shipmentsService.selectQuote(userId, requestId, quoteId);
+  }
+
+  @Get('v1/shipments/:id')
+  @TmsAccess('read')
+  v1GetShipment(@CurrentUser('userId') userId: string, @Param('id') shipmentId: string) {
+    return this.shipmentsService.getShipment(userId, shipmentId);
+  }
+
+  @Get('v1/shipments/:id/events')
+  @TmsAccess('read')
+  v1GetShipmentEvents(@CurrentUser('userId') userId: string, @Param('id') shipmentId: string) {
+    return this.shipmentsService.getTracking(userId, shipmentId);
+  }
+
+  @Get('v1/shipments/by-external/:externalOrderId')
+  @TmsAccess('read')
+  v1GetShipmentByExternalOrderId(
+    @CurrentUser('userId') userId: string,
+    @Param('externalOrderId') externalOrderId: string,
+    @Query('orderType') orderType?: 'CLIENT_ORDER' | 'INTERNAL_TRANSFER' | 'SUPPLIER_PICKUP',
+  ) {
+    return this.shipmentsService.getShipmentByExternalOrderId(userId, externalOrderId, orderType);
+  }
+
+  @Get('v1/shipments')
+  @TmsAccess('read')
+  v1ListShipments(
+    @CurrentUser('userId') userId: string,
+    @Query('externalOrderId') externalOrderId?: string,
+    @Query('orderType') orderType?: 'CLIENT_ORDER' | 'INTERNAL_TRANSFER' | 'SUPPLIER_PICKUP',
+    @Query('limit') limit?: string,
+    @Query('cursor') cursor?: string,
+    @Query('updatedSince') updatedSince?: string,
+  ) {
+    const parsedLimit = limit ? Number.parseInt(limit, 10) : undefined;
+    return this.shipmentsService.listShipmentsByIntegration(userId, {
+      externalOrderId,
+      orderType,
+      limit: Number.isFinite(parsedLimit) ? parsedLimit : undefined,
+      cursor,
+      updatedSince,
+    });
+  }
+
+  @Get('v1/webhooks/subscriptions')
+  @TmsAccess('read')
+  v1ListWebhookSubscriptions(@CurrentUser('userId') userId: string) {
+    return this.shipmentsService.listWebhookSubscriptions(userId);
+  }
+
+  @Post('v1/webhooks/subscriptions')
+  @TmsAccess('write')
+  v1CreateWebhookSubscription(
+    @CurrentUser('userId') userId: string,
+    @Body('callbackUrl') callbackUrl: string,
+  ) {
+    return this.shipmentsService.createWebhookSubscription(userId, callbackUrl);
+  }
+
+  @Delete('v1/webhooks/subscriptions/:id')
+  @TmsAccess('write')
+  v1DeleteWebhookSubscription(@CurrentUser('userId') userId: string, @Param('id') id: string) {
+    return this.shipmentsService.deleteWebhookSubscription(userId, id);
+  }
+
+  @Post('v1/webhooks/subscriptions/:id/rotate-secret')
+  @TmsAccess('write')
+  v1RotateWebhookSubscriptionSecret(@CurrentUser('userId') userId: string, @Param('id') id: string) {
+    return this.shipmentsService.rotateWebhookSubscriptionSecret(userId, id);
   }
 
   @Get('shipments')
