@@ -157,6 +157,7 @@ export interface ShipmentRecord {
   trackingNumber: string;
   carrierOrderNumber?: string;
   carrierOrderReference?: string;
+  serviceType?: CarrierServiceType;
   status: ShipmentStatus;
   priceRub: number;
   etaDays: number;

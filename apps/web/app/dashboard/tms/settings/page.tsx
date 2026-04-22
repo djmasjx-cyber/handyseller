@@ -47,6 +47,7 @@ export default function TmsSettingsPage() {
   const [accountLabel, setAccountLabel] = useState("")
   const [contractLabel, setContractLabel] = useState("")
   const [carrierCode, setCarrierCode] = useState<"MAJOR_EXPRESS" | "DELLIN" | "CDEK">("MAJOR_EXPRESS")
+  const [serviceType, setServiceType] = useState<"EXPRESS" | "LTL">("EXPRESS")
   const [login, setLogin] = useState("")
   const [password, setPassword] = useState("")
   const [appKey, setAppKey] = useState("")
@@ -146,7 +147,7 @@ export default function TmsSettingsPage() {
         },
         body: JSON.stringify({
           carrierCode,
-          serviceType: "EXPRESS",
+          serviceType: carrierCode === "MAJOR_EXPRESS" ? serviceType : "EXPRESS",
           accountLabel,
           contractLabel,
           ...(carrierCode === "DELLIN" && appKey.trim() ? { appKey: appKey.trim() } : {}),
@@ -304,6 +305,7 @@ curl -X POST "${window.location.origin}/api/tms/v1/shipments/<REQUEST_ID>/confir
               value={carrierCode}
               onChange={(e) => {
                 setCarrierCode(e.target.value as "MAJOR_EXPRESS" | "DELLIN" | "CDEK")
+                setServiceType("EXPRESS")
                 setAppKey("")
               }}
               className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
@@ -316,6 +318,26 @@ curl -X POST "${window.location.origin}/api/tms/v1/shipments/<REQUEST_ID>/confir
           <div className="space-y-2">
             <Label htmlFor="accountLabel">Название учётки</Label>
             <Input id="accountLabel" value={accountLabel} onChange={(e) => setAccountLabel(e.target.value)} placeholder="Например, Основной договор" />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="serviceType">Тип сервиса</Label>
+            <select
+              id="serviceType"
+              value={serviceType}
+              onChange={(e) => setServiceType(e.target.value as "EXPRESS" | "LTL")}
+              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+              disabled={carrierCode !== "MAJOR_EXPRESS"}
+            >
+              <option value="EXPRESS">Экспресс</option>
+              <option value="LTL">Сборный груз (LTL)</option>
+            </select>
+            {carrierCode === "MAJOR_EXPRESS" ? (
+              <p className="text-xs text-muted-foreground">
+                Для Major сохраните 2 учётки (EXPRESS и LTL), чтобы видеть оба тарифа на сравнении.
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground">Для этого перевозчика используется режим EXPRESS.</p>
+            )}
           </div>
           <div className="space-y-2">
             <Label htmlFor="contractLabel">Договор / комментарий</Label>

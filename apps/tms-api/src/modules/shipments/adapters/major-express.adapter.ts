@@ -25,6 +25,7 @@ type MajorCity = {
 };
 
 type MajorCookieJar = Map<string, string>;
+type MajorServiceType = 'EXPRESS' | 'LTL';
 
 function escapeXml(value: string): string {
   return value
@@ -251,9 +252,20 @@ export class MajorExpressAdapter implements CarrierAdapter {
     requestId: string,
     context: CarrierQuoteContext,
   ): Promise<CarrierQuote[]> {
-    const credentials = await this.loadCredentials(context);
-    if (!credentials) {
-      this.logger.warn(`Major quote skipped: missing credentials context; requestId=${requestId}`);
+    const byServiceType = await Promise.all([
+      this.loadCredentials(context, 'EXPRESS'),
+      this.loadCredentials(context, 'LTL'),
+    ]);
+    const credentialsByType: Array<{ serviceType: MajorServiceType; credentials: InternalCarrierCredentials }> = [
+      { serviceType: 'EXPRESS', credentials: byServiceType[0] },
+      { serviceType: 'LTL', credentials: byServiceType[1] },
+    ].filter((item): item is { serviceType: MajorServiceType; credentials: InternalCarrierCredentials } =>
+      Boolean(item.credentials),
+    );
+    if (credentialsByType.length === 0) {
+      this.logger.warn(
+        `Major quote skipped: missing credentials for both service types; requestId=${requestId}`,
+      );
       return [];
     }
 
@@ -275,41 +287,42 @@ export class MajorExpressAdapter implements CarrierAdapter {
       return [];
     }
 
-    const result = await this.callCalculator(input, credentials, shipperCity.code, consigneeCity.code);
-    if (!result) {
-      this.logger.warn(
-        `Major quote skipped: calculator returned empty; requestId=${requestId}; shipperCity=${shipperCity.code}; consigneeCity=${consigneeCity.code}`,
-      );
-      return [];
+    const quotes: CarrierQuote[] = [];
+    for (const { serviceType, credentials } of credentialsByType) {
+      const result = await this.callCalculator(input, credentials, shipperCity.code, consigneeCity.code);
+      if (!result) {
+        this.logger.warn(
+          `Major quote skipped: calculator returned empty; requestId=${requestId}; serviceType=${serviceType}; shipperCity=${shipperCity.code}; consigneeCity=${consigneeCity.code}`,
+        );
+        continue;
+      }
+      const serviceFlags = serviceType === 'LTL' ? (['CONSOLIDATED'] as const) : (['EXPRESS'] as const);
+      const computedPrice = result.total > 0 ? result.total : result.tariff + result.insurance;
+      const totalSource = result.total > 0 ? 'итог из ответа Major' : 'tariff + insurance';
+      const serviceLabel = serviceType === 'LTL' ? 'сборный груз' : 'экспресс';
+      quotes.push({
+        id: `${requestId}:${this.descriptor.id}:${serviceType.toLowerCase()}`,
+        requestId,
+        carrierId: this.descriptor.id,
+        carrierName: this.descriptor.name,
+        mode: this.descriptor.modes[0],
+        priceRub: computedPrice,
+        etaDays: result.deliveryTime,
+        serviceFlags: [...serviceFlags],
+        notes: `${credentials.accountLabel ?? 'Клиентский договор'} · ${serviceLabel} · ${shipperCity.name} -> ${consigneeCity.name} · итог ${computedPrice.toFixed(2)} ₽ (${totalSource}), тариф ${result.tariff.toFixed(2)} ₽, страх. ${result.insurance.toFixed(2)} ₽`,
+        priceDetails: {
+          source: result.total > 0 ? 'carrier_total' : 'computed',
+          totalRub: computedPrice,
+          tariffRub: result.tariff,
+          insuranceRub: result.insurance,
+          extrasRub: Math.max(computedPrice - (result.tariff + result.insurance), 0),
+          currency: 'RUB',
+          comment: `Major SOAP Calculator/Calculator1 (${serviceType})`,
+        },
+        score: Math.round((100000 / Math.max(computedPrice, 1)) * 100) / 100,
+      });
     }
-
-    const serviceFlags = input.draft.serviceFlags.filter((flag) =>
-      this.descriptor.supportedFlags.includes(flag),
-    );
-
-    const computedPrice = result.total > 0 ? result.total : result.tariff + result.insurance;
-    const totalSource = result.total > 0 ? 'итог из ответа Major' : 'tariff + insurance';
-    return [{
-      id: `${requestId}:${this.descriptor.id}`,
-      requestId,
-      carrierId: this.descriptor.id,
-      carrierName: this.descriptor.name,
-      mode: this.descriptor.modes[0],
-      priceRub: computedPrice,
-      etaDays: result.deliveryTime,
-      serviceFlags,
-      notes: `${credentials.accountLabel ?? 'Клиентский договор'} · ${shipperCity.name} -> ${consigneeCity.name} · итог ${computedPrice.toFixed(2)} ₽ (${totalSource}), тариф ${result.tariff.toFixed(2)} ₽, страх. ${result.insurance.toFixed(2)} ₽`,
-      priceDetails: {
-        source: result.total > 0 ? 'carrier_total' : 'computed',
-        totalRub: computedPrice,
-        tariffRub: result.tariff,
-        insuranceRub: result.insurance,
-        extrasRub: Math.max(computedPrice - (result.tariff + result.insurance), 0),
-        currency: 'RUB',
-        comment: 'Major SOAP Calculator/Calculator1',
-      },
-      score: Math.round((100000 / Math.max(computedPrice, 1)) * 100) / 100,
-    }];
+    return quotes;
   }
 
   async book({ quote, input, context }: CarrierBookInput): Promise<{
@@ -317,9 +330,10 @@ export class MajorExpressAdapter implements CarrierAdapter {
     tracking: Array<Omit<TrackingEventRecord, 'id'>>;
     documents?: Array<Pick<ShipmentDocumentRecord, 'type' | 'title' | 'content'>>;
   }> {
-    const credentials = await this.loadCredentials(context);
+    const serviceType = this.resolveServiceTypeFromQuote(quote);
+    const credentials = await this.loadCredentials(context, serviceType);
     if (!credentials) {
-      throw new Error('Major booking failed: missing credentials');
+      throw new Error(`Major booking failed: missing credentials for ${serviceType}`);
     }
     const requiredErrors = this.requiredBookingFields(input);
     if (requiredErrors.length > 0) {
@@ -415,6 +429,7 @@ export class MajorExpressAdapter implements CarrierAdapter {
         requestId: quote.requestId,
         carrierId: quote.carrierId,
         carrierName: quote.carrierName,
+        serviceType,
         trackingNumber,
         carrierOrderReference: String(orderId),
         carrierOrderNumber: waybillNumber || undefined,
@@ -452,7 +467,10 @@ export class MajorExpressAdapter implements CarrierAdapter {
     }
     const cachedMeta = parseMajorPdfMarkerMeta(content);
     if (cachedMeta) {
-      const credentials = await this.loadCredentials(context);
+      const credentials = await this.loadCredentials(
+        context,
+        this.resolveServiceTypeFromShipment(shipment),
+      );
       if (!credentials) {
         throw new Error('Major document download failed: missing credentials');
       }
@@ -479,9 +497,10 @@ export class MajorExpressAdapter implements CarrierAdapter {
         fileName: `${shipment.trackingNumber || shipment.id}-${document.type.toLowerCase()}.txt`,
       };
     }
-    const credentials = await this.loadCredentials(context);
+    const serviceType = this.resolveServiceTypeFromShipment(shipment);
+    const credentials = await this.loadCredentials(context, serviceType);
     if (!credentials) {
-      throw new Error('Major document download failed: missing credentials');
+      throw new Error(`Major document download failed: missing credentials for ${serviceType}`);
     }
     if (kind === 'waybill') {
       const pdf = await this.getWaybillPdf(credentials, wb);
@@ -523,9 +542,10 @@ export class MajorExpressAdapter implements CarrierAdapter {
     if (!orderIdRaw || !Number.isInteger(orderId) || orderId <= 0) {
       throw new Error('Major refresh failed: missing order id');
     }
-    const credentials = await this.loadCredentials(context);
+    const serviceType = this.resolveServiceTypeFromShipment(shipment);
+    const credentials = await this.loadCredentials(context, serviceType);
     if (!credentials) {
-      throw new Error('Major refresh failed: missing credentials');
+      throw new Error(`Major refresh failed: missing credentials for ${serviceType}`);
     }
     const waybills = await this.getOrderWaybills(credentials, orderId);
     const waybillNumber = waybills[0]?.trim() || shipment.carrierOrderNumber?.trim() || '';
@@ -559,6 +579,7 @@ export class MajorExpressAdapter implements CarrierAdapter {
 
   private async loadCredentials(
     context: CarrierQuoteContext,
+    serviceType: MajorServiceType = 'EXPRESS',
   ): Promise<InternalCarrierCredentials | null> {
     if (!context.authToken) {
       return null;
@@ -571,7 +592,7 @@ export class MajorExpressAdapter implements CarrierAdapter {
     }
 
     const res = await fetch(
-      `${coreBase}/api/tms/carrier-connections/internal/MAJOR_EXPRESS/default?serviceType=EXPRESS`,
+      `${coreBase}/api/tms/carrier-connections/internal/MAJOR_EXPRESS/default?serviceType=${serviceType}`,
       {
         headers: {
           Authorization: `Bearer ${context.authToken}`,
@@ -583,7 +604,7 @@ export class MajorExpressAdapter implements CarrierAdapter {
 
     if (!res?.ok) {
       this.logger.warn(
-        `Major credentials fetch failed: status=${res?.status ?? 'n/a'}; coreBase=${coreBase}`,
+        `Major credentials fetch failed: status=${res?.status ?? 'n/a'}; serviceType=${serviceType}; coreBase=${coreBase}`,
       );
       return null;
     }
@@ -1263,6 +1284,19 @@ export class MajorExpressAdapter implements CarrierAdapter {
     if (/курьер|выдано|out for delivery/.test(text)) return 'OUT_FOR_DELIVERY';
     if (/транзит|прибыл|отправлен|принят/.test(text)) return 'IN_TRANSIT';
     return 'CONFIRMED';
+  }
+
+  private resolveServiceTypeFromQuote(quote: CarrierQuote): MajorServiceType {
+    const fromId = quote.id.toLowerCase();
+    if (fromId.endsWith(':ltl')) return 'LTL';
+    if (quote.serviceFlags.includes('CONSOLIDATED') && !quote.serviceFlags.includes('EXPRESS')) {
+      return 'LTL';
+    }
+    return 'EXPRESS';
+  }
+
+  private resolveServiceTypeFromShipment(shipment: ShipmentRecord): MajorServiceType {
+    return shipment.serviceType === 'LTL' ? 'LTL' : 'EXPRESS';
   }
 
   private buildCalculatorBody(
