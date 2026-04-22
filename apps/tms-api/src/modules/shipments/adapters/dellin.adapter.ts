@@ -532,11 +532,13 @@ export class DellinAdapter implements CarrierAdapter {
     );
     const draftOnlyByEnv = process.env.DELLIN_DRAFT_ONLY === 'true';
 
+    const deliveryType = input.draft.serviceFlags.includes('EXPRESS') ? 'express' : 'auto';
     const makePayload = (draftOnly: boolean): Record<string, unknown> => ({
       appkey: appKey,
       sessionID,
       inOrder: !draftOnly,
       delivery: {
+        deliveryType: { type: deliveryType },
         variant: 'address',
         derival: { variant: 'address', address: { search: fromAddress } },
         arrival: { variant: 'address', address: { search: toAddress } },
@@ -571,6 +573,7 @@ export class DellinAdapter implements CarrierAdapter {
           sessionID: sessionID ? '***' : null,
           inOrder: !draftOnlyByEnv,
           delivery: {
+            deliveryType: { type: deliveryType },
             variant: 'address',
             derival: { variant: 'address', search: truncate(fromAddress) },
             arrival: { variant: 'address', search: truncate(toAddress) },
