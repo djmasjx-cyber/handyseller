@@ -1,0 +1,187 @@
+{
+  "info": {
+    "name": "HandySeller TMS Partner API",
+    "_postman_id": "4f41726f-c8df-443d-a8e5-1dacf5135f45",
+    "description": "Unified partner flow for site/1C integration: OAuth, estimate, create, select, confirm, statuses, webhooks.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "OAuth Token",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"grant_type\": \"client_credentials\",\n  \"client_id\": \"{{client_id}}\",\n  \"client_secret\": \"{{client_secret}}\"\n}"
+        },
+        "url": "{{api_base_url}}/tms/oauth/token"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const json = pm.response.json();",
+              "if (json.access_token) pm.collectionVariables.set('access_token', json.access_token);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Estimate",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{access_token}}" },
+          { "key": "Idempotency-Key", "value": "estimate-{{external_order_id}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"snapshot\": {\n    \"sourceSystem\": \"HANDYSELLER_CORE\",\n    \"userId\": \"{{user_id}}\",\n    \"coreOrderId\": \"ord_{{external_order_id}}\",\n    \"coreOrderNumber\": \"{{external_order_id}}\",\n    \"marketplace\": \"OWN_SITE\",\n    \"createdAt\": \"2026-01-01T10:00:00.000Z\",\n    \"originLabel\": \"Москва, Склад 1\",\n    \"destinationLabel\": \"Казань, ул. Пример 1\",\n    \"cargo\": {\n      \"weightGrams\": 1500,\n      \"widthMm\": 200,\n      \"lengthMm\": 300,\n      \"heightMm\": 150,\n      \"places\": 1,\n      \"declaredValueRub\": 10000\n    },\n    \"itemSummary\": [\n      { \"productId\": \"p1\", \"title\": \"Товар\", \"quantity\": 1, \"weightGrams\": 1500 }\n    ]\n  },\n  \"draft\": {\n    \"originLabel\": \"Москва, Склад 1\",\n    \"destinationLabel\": \"Казань, ул. Пример 1\",\n    \"serviceFlags\": [\"EXPRESS\"]\n  },\n  \"integration\": {\n    \"externalOrderId\": \"{{external_order_id}}\",\n    \"orderType\": \"{{order_type}}\"\n  }\n}"
+        },
+        "url": "{{api_base_url}}/tms/v1/shipments/estimate"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const json = pm.response.json();",
+              "if (json.shipmentRequestId) pm.collectionVariables.set('request_id', json.shipmentRequestId);",
+              "if (json.options && json.options[0] && json.options[0].quoteId) pm.collectionVariables.set('quote_id', json.options[0].quoteId);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Select Quote",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{access_token}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": { "mode": "raw", "raw": "{ \"quoteId\": \"{{quote_id}}\" }" },
+        "url": "{{api_base_url}}/tms/v1/shipments/{{request_id}}/select"
+      }
+    },
+    {
+      "name": "Confirm",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{access_token}}" },
+          { "key": "Idempotency-Key", "value": "confirm-{{external_order_id}}" }
+        ],
+        "url": "{{api_base_url}}/tms/v1/shipments/{{request_id}}/confirm"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const json = pm.response.json();",
+              "if (json.id) pm.collectionVariables.set('shipment_id', json.id);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Get Shipment",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+        "url": "{{api_base_url}}/tms/v1/shipments/{{shipment_id}}"
+      }
+    },
+    {
+      "name": "Get Events",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+        "url": "{{api_base_url}}/tms/v1/shipments/{{shipment_id}}/events"
+      }
+    },
+    {
+      "name": "Find By External",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+        "url": "{{api_base_url}}/tms/v1/shipments/by-external/{{external_order_id}}?orderType={{order_type}}"
+      }
+    },
+    {
+      "name": "Batch Sync",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+        "url": "{{api_base_url}}/tms/v1/shipments?updatedSince={{updated_since}}&limit=20"
+      }
+    },
+    {
+      "name": "Create Webhook Subscription",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{access_token}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": { "mode": "raw", "raw": "{ \"callbackUrl\": \"{{callback_url}}\" }" },
+        "url": "{{api_base_url}}/tms/v1/webhooks/subscriptions"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const json = pm.response.json();",
+              "if (json.id) pm.collectionVariables.set('webhook_subscription_id', json.id);",
+              "if (json.signingSecret) pm.collectionVariables.set('webhook_signing_secret', json.signingSecret);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Rotate Webhook Secret",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+        "url": "{{api_base_url}}/tms/v1/webhooks/subscriptions/{{webhook_subscription_id}}/rotate-secret"
+      }
+    },
+    {
+      "name": "Delete Webhook Subscription",
+      "request": {
+        "method": "DELETE",
+        "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+        "url": "{{api_base_url}}/tms/v1/webhooks/subscriptions/{{webhook_subscription_id}}"
+      }
+    }
+  ],
+  "variable": [
+    { "key": "api_base_url", "value": "https://api.handyseller.ru/api" },
+    { "key": "client_id", "value": "" },
+    { "key": "client_secret", "value": "" },
+    { "key": "access_token", "value": "" },
+    { "key": "user_id", "value": "u_1" },
+    { "key": "external_order_id", "value": "1C-ORDER-1001" },
+    { "key": "order_type", "value": "CLIENT_ORDER" },
+    { "key": "request_id", "value": "" },
+    { "key": "quote_id", "value": "" },
+    { "key": "shipment_id", "value": "" },
+    { "key": "updated_since", "value": "2026-01-01T00:00:00.000Z" },
+    { "key": "callback_url", "value": "https://partner.example.com/tms/events" },
+    { "key": "webhook_subscription_id", "value": "" },
+    { "key": "webhook_signing_secret", "value": "" }
+  ]
+}

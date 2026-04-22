@@ -53,6 +53,8 @@ export default function TmsSettingsPage() {
   const [m2mItems, setM2mItems] = useState<TmsIntegrationClient[]>([])
   const [m2mLabel, setM2mLabel] = useState("")
   const [m2mSecretOnce, setM2mSecretOnce] = useState<string | null>(null)
+  const [copiedTokenCurl, setCopiedTokenCurl] = useState(false)
+  const [copiedV1FlowCurl, setCopiedV1FlowCurl] = useState(false)
   const [credentialsFormVersion, setCredentialsFormVersion] = useState(0)
   const [checkingAll, setCheckingAll] = useState(false)
   const [checkingById, setCheckingById] = useState<Record<string, boolean>>({})
@@ -233,6 +235,50 @@ export default function TmsSettingsPage() {
     }
   }
 
+  const copyTokenCurl = async () => {
+    const cmd = `curl -X POST "${window.location.origin}/api/tms/oauth/token" \\
+  -H "Content-Type: application/json" \\
+  -d '{"grant_type":"client_credentials","client_id":"<CLIENT_ID>","client_secret":"<CLIENT_SECRET>"}'`
+    try {
+      await navigator.clipboard.writeText(cmd)
+      setCopiedTokenCurl(true)
+      setTimeout(() => setCopiedTokenCurl(false), 2000)
+    } catch {
+      setError("Не удалось скопировать curl-команду")
+    }
+  }
+
+  const copyV1FlowCurl = async () => {
+    const cmd = `# 1) Estimate (save shipmentRequestId + quoteId from response)
+curl -X POST "${window.location.origin}/api/tms/v1/shipments/estimate" \\
+  -H "Authorization: Bearer <ACCESS_TOKEN>" \\
+  -H "Idempotency-Key: estimate-<EXTERNAL_ORDER_ID>" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "snapshot": { "sourceSystem": "HANDYSELLER_CORE", "userId": "<USER_ID>", "coreOrderId": "ord_<EXTERNAL_ORDER_ID>", "coreOrderNumber": "<EXTERNAL_ORDER_ID>", "marketplace": "OWN_SITE", "createdAt": "2026-01-01T10:00:00.000Z", "originLabel": "Москва, Склад 1", "destinationLabel": "Казань, ул. Пример 1", "cargo": { "weightGrams": 1500, "widthMm": 200, "lengthMm": 300, "heightMm": 150, "places": 1, "declaredValueRub": 10000 }, "itemSummary": [{ "productId": "p1", "title": "Товар", "quantity": 1, "weightGrams": 1500 }] },
+    "draft": { "originLabel": "Москва, Склад 1", "destinationLabel": "Казань, ул. Пример 1", "serviceFlags": ["EXPRESS"] },
+    "integration": { "externalOrderId": "<EXTERNAL_ORDER_ID>", "orderType": "CLIENT_ORDER" }
+  }'
+
+# 2) Select quote
+curl -X POST "${window.location.origin}/api/tms/v1/shipments/<REQUEST_ID>/select" \\
+  -H "Authorization: Bearer <ACCESS_TOKEN>" \\
+  -H "Content-Type: application/json" \\
+  -d '{"quoteId":"<QUOTE_ID>"}'
+
+# 3) Confirm
+curl -X POST "${window.location.origin}/api/tms/v1/shipments/<REQUEST_ID>/confirm" \\
+  -H "Authorization: Bearer <ACCESS_TOKEN>" \\
+  -H "Idempotency-Key: confirm-<EXTERNAL_ORDER_ID>"`
+    try {
+      await navigator.clipboard.writeText(cmd)
+      setCopiedV1FlowCurl(true)
+      setTimeout(() => setCopiedV1FlowCurl(false), 2000)
+    } catch {
+      setError("Не удалось скопировать v1 flow")
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-16">
@@ -346,8 +392,8 @@ export default function TmsSettingsPage() {
         <CardHeader>
           <CardTitle>Внешние системы (API TMS)</CardTitle>
           <CardDescription>
-            Для ERP, WMS и собственных сервисов: OAuth2 client credentials, короткоживущие токены, секрет хранится
-            только в виде хэша. Подробности — в{" "}
+            Подключение для ERP/1С/WMS занимает 10-15 минут: OAuth2 client credentials, короткоживущие токены,
+            идемпотентные операции и webhook-подписки. Полная спецификация — в{" "}
             <a className="underline" href="/api/tms/openapi.yaml" target="_blank" rel="noreferrer">
               OpenAPI (YAML)
             </a>
@@ -355,6 +401,41 @@ export default function TmsSettingsPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          <div className="rounded-lg border bg-muted/20 p-4 space-y-3 text-sm">
+            <p className="font-medium">Быстрый старт интеграции</p>
+            <ol className="list-decimal space-y-1 pl-5 text-muted-foreground">
+              <li>Создайте API-клиента ниже и сохраните `client_id` + `client_secret`.</li>
+              <li>Получите токен через `POST /api/tms/oauth/token`.</li>
+              <li>Работайте только через `v1` flow: `estimate` -&gt; `select` -&gt; `confirm` -&gt; `status/events`.</li>
+            </ol>
+            <div className="flex flex-wrap gap-2">
+              <a
+                className="inline-flex items-center rounded-md border px-3 py-2 text-xs font-medium hover:bg-muted"
+                href="/api/tms/openapi.yaml"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Открыть OpenAPI
+              </a>
+              <a
+                className="inline-flex items-center rounded-md border px-3 py-2 text-xs font-medium hover:bg-muted"
+                href="/tms/TMS-Partner-API.postman_collection.json"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Скачать Postman коллекцию
+              </a>
+              <Button type="button" variant="outline" size="sm" onClick={copyTokenCurl}>
+                {copiedTokenCurl ? "Скопировано" : "Скопировать curl для токена"}
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={copyV1FlowCurl}>
+                {copiedV1FlowCurl ? "Скопировано" : "Скопировать curl v1 flow"}
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Для надежности всегда передавайте заголовок `Idempotency-Key` в write-запросах.
+            </p>
+          </div>
           {m2mSecretOnce ? (
             <div className="rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-sm">
               <p className="font-medium text-amber-900 dark:text-amber-100">Сохраните client_secret сейчас</p>
