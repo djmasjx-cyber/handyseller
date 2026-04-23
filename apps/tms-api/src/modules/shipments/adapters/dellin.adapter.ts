@@ -705,6 +705,7 @@ export class DellinAdapter implements CarrierAdapter {
         sender: {
           counteragent: {
             uid: requesterUid,
+            form: {},
             name: shipperName,
             phone: shipperPhone,
           },
@@ -715,6 +716,7 @@ export class DellinAdapter implements CarrierAdapter {
         receiver: {
           counteragent: {
             uid: requesterUid,
+            form: {},
             name: recipientName,
             phone: recipientPhone,
           },
