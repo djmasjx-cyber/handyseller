@@ -159,7 +159,7 @@ info:
     4. Для write-операций передавайте \`Idempotency-Key\`.
 
 servers:
-  - url: https://app.handyseller.ru/api
+  - url: https://api.handyseller.ru/api
     description: Production
   - url: http://localhost:4000/api
     description: Local API

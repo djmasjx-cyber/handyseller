@@ -33,6 +33,10 @@ function isPublicOpenApiRoute(req: NextRequest, path: string[]): boolean {
   return req.method === "GET" && path.length === 1 && path[0] === "openapi.yaml"
 }
 
+function isPublicOAuthTokenRoute(req: NextRequest, path: string[]): boolean {
+  return req.method === "POST" && path.length === 2 && path[0] === "oauth" && path[1] === "token"
+}
+
 /** `Response.text()` перекодирует тело в UTF-8 и портит бинарные ответы (PDF, стикеры и т.д.). */
 function isBinaryUpstreamContentType(contentType: string | null): boolean {
   if (!contentType) return false
@@ -69,8 +73,8 @@ function buildUpstreamResponseHeaders(res: Response): Headers {
 
 async function proxy(req: NextRequest, path: string[]) {
   const token = getToken(req)
-  const publicSpec = isPublicOpenApiRoute(req, path)
-  if (!token && !publicSpec) {
+  const isPublicRoute = isPublicOpenApiRoute(req, path) || isPublicOAuthTokenRoute(req, path)
+  if (!token && !isPublicRoute) {
     return NextResponse.json({ error: "Не авторизован" }, { status: 401 })
   }
 

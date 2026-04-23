@@ -12,7 +12,7 @@ Operational playbook for diagnosing and resolving carrier integration issues (CD
 
 ## Fast triage (5 minutes)
 1. Confirm API entrypoint currently used by partner/client:
-   - temporary canonical: `https://app.handyseller.ru/api`
+   - canonical: `https://api.handyseller.ru/api`
 2. Reproduce once with the same request and capture:
    - carrier
    - requestId / shipmentId
@@ -129,5 +129,5 @@ Operational playbook for diagnosing and resolving carrier integration issues (CD
 
 ## Automation tip
 - Add cron or CI schedule:
-  - `*/15 * * * * ACCESS_TOKEN=... API_BASE_URL=https://app.handyseller.ru/api npm run slo:tms:check`
+  - `*/15 * * * * ACCESS_TOKEN=... API_BASE_URL=https://api.handyseller.ru/api npm run slo:tms:check`
 - Any non-zero exit code from the check should open/raise an incident.

@@ -30,7 +30,7 @@ BODY='{"userId":"u_123","shipmentId":"shp_123","status":"IN_TRANSIT"}'
 SECRET='replace-me'
 SIG=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$SECRET" -hex | sed 's/^.* //')
 
-curl -X POST "https://app.handyseller.ru/api/tms/carrier-webhooks?carrier=dellin&eventType=status.updated&eventId=evt-123" \
+curl -X POST "https://api.handyseller.ru/api/tms/carrier-webhooks?carrier=dellin&eventType=status.updated&eventId=evt-123" \
   -H "Content-Type: application/json" \
   -H "x-handyseller-carrier-signature: sha256=$SIG" \
   -d "$BODY"

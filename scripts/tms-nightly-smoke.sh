@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Nightly smoke checks for HandySeller TMS API.
 # Optional env:
-#   API_BASE_URL            default: https://app.handyseller.ru/api
+#   API_BASE_URL            default: https://api.handyseller.ru/api
 #   CLIENT_ID/CLIENT_SECRET for full partner e2e flow
 #   USER_ID                 default: u_smoke
 #   ORDER_TYPE              default: CLIENT_ORDER
@@ -11,7 +11,7 @@ set -euo pipefail
 #   NIGHTLY_CARRIERS        default: cdek,major-express
 #   DOWNLOAD_DOC            default: true
 
-API_BASE_URL="${API_BASE_URL:-https://app.handyseller.ru/api}"
+API_BASE_URL="${API_BASE_URL:-https://api.handyseller.ru/api}"
 API_ORIGIN="${API_BASE_URL%/api}"
 USER_ID="${USER_ID:-u_smoke}"
 ORDER_TYPE="${ORDER_TYPE:-CLIENT_ORDER}"

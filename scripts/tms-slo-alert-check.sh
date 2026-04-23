@@ -5,7 +5,7 @@ set -euo pipefail
 # Non-zero exit code means SLO breach candidate.
 #
 # Optional env:
-#   API_BASE_URL                           default: https://app.handyseller.ru/api
+#   API_BASE_URL                           default: https://api.handyseller.ru/api
 #   ACCESS_TOKEN                           bearer token for /tms/slo/metrics
 #   STALE_HOURS                            default: 24
 #   WEBHOOK_WINDOW_HOURS                   default: 24
@@ -16,7 +16,7 @@ set -euo pipefail
 #   MAX_QUOTE_P95_MS                       default: 120000
 #   MAX_CONFIRM_P95_MS                     default: 180000
 
-API_BASE_URL="${API_BASE_URL:-https://app.handyseller.ru/api}"
+API_BASE_URL="${API_BASE_URL:-https://api.handyseller.ru/api}"
 ACCESS_TOKEN="${ACCESS_TOKEN:-}"
 STALE_HOURS="${STALE_HOURS:-24}"
 WEBHOOK_WINDOW_HOURS="${WEBHOOK_WINDOW_HOURS:-24}"

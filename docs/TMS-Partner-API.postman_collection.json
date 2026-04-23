@@ -177,7 +177,7 @@
     }
   ],
   "variable": [
-    { "key": "api_base_url", "value": "https://app.handyseller.ru/api" },
+    { "key": "api_base_url", "value": "https://api.handyseller.ru/api" },
     { "key": "client_id", "value": "" },
     { "key": "client_secret", "value": "" },
     { "key": "access_token", "value": "" },

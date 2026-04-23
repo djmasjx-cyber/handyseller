@@ -1,7 +1,7 @@
 #!/bin/bash
 # Настройка домена handyseller.ru на VM: порты 80/443, SSL (Let's Encrypt)
 #
-# Требуется: DNS уже указывает на VM (A-запись @ и www)
+# Требуется: DNS уже указывает на VM (A-записи @, www, app, api)
 #            Порты 80, 443 открыты в группе безопасности Yandex Cloud
 #
 # Использование:
@@ -63,7 +63,7 @@ if ! command -v certbot &>/dev/null; then
 fi
 
 echo "Получение SSL-сертификата..."
-sudo certbot certonly --webroot -w /var/www/html -d handyseller.ru -d www.handyseller.ru \
+sudo certbot certonly --webroot -w /var/www/html -d handyseller.ru -d www.handyseller.ru -d app.handyseller.ru -d api.handyseller.ru \
   --non-interactive --agree-tos --email "$EMAIL" \
   --preferred-challenges http
 
