@@ -292,6 +292,12 @@ function normalizeDellinPhone(value: string | null | undefined): string {
   return `7${digits.padStart(10, '0').slice(-10)}`;
 }
 
+function isDellinUid(value: string | null | undefined): boolean {
+  const v = (value ?? '').trim();
+  if (!v) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+}
+
 function isLikelyPdf(buffer: Buffer): boolean {
   if (!buffer || buffer.length < 16) return false;
   return buffer.subarray(0, 5).toString('ascii') === '%PDF-';
@@ -579,11 +585,13 @@ export class DellinAdapter implements CarrierAdapter {
     const recipientPhoneRaw = input.snapshot.contacts?.recipient?.phone?.trim();
     const shipperPhone = normalizeDellinPhone(shipperPhoneRaw);
     const recipientPhone = normalizeDellinPhone(recipientPhoneRaw);
-    const requesterUid =
-      auth.requesterUid?.trim() ||
-      process.env.DELLIN_REQUESTER_UID?.trim() ||
-      shipperPhone ||
-      requestId;
+    const requesterUidCandidate = auth.requesterUid?.trim() || process.env.DELLIN_REQUESTER_UID?.trim() || '';
+    if (!isDellinUid(requesterUidCandidate)) {
+      throw new Error(
+        'Dellin booking failed: отсутствует валидный UID контрагента (members.requester.uid). Укажите DELLIN_REQUESTER_UID или проверьте ответ auth/login.',
+      );
+    }
+    const requesterUid = requesterUidCandidate;
     const missingFields = requiredDellinFieldErrors(input);
     if (missingFields.length > 0) {
       throw new Error(
@@ -614,17 +622,17 @@ export class DellinAdapter implements CarrierAdapter {
         requester: { role: 'sender', uid: requesterUid },
         sender: {
           counteragent: {
-            customForm: { name: 'ООО' },
+            customForm: { formName: 'ООО', countryUID: '643', juridical: true },
             name: shipperName,
             phone: shipperPhone,
           },
-          dataForReceipt: {},
+          dataForReceipt: { send: false },
           contactPersons: [{ name: shipperName }],
           phoneNumbers: [{ number: shipperPhone }],
         },
         receiver: {
           counteragent: {
-            customForm: { name: 'ФЛ' },
+            customForm: { formName: 'ФЛ', countryUID: '643', juridical: false },
             name: recipientName,
             phone: recipientPhone,
           },
