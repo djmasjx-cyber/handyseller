@@ -172,7 +172,7 @@ function parseDellinRequesterUid(payload: unknown): string | null {
   const root = asObject(payload);
   if (!root) return null;
   const data = asObject(root.data);
-  return (
+  const direct =
     firstNonEmptyString(
       root.requesterUID,
       root.requesterUid,
@@ -188,8 +188,51 @@ function parseDellinRequesterUid(payload: unknown): string | null {
       data?.uid,
       data?.userUID,
       data?.userUid,
-    ) ?? null
-  );
+    ) ?? null;
+  if (isDellinUid(direct)) return direct;
+
+  // Fallback: рекурсивно ищем UID по всему auth payload, т.к. формат ответа ДЛ может отличаться по аккаунтам.
+  const seen = new Set<unknown>();
+  const walk = (node: unknown): string | null => {
+    if (!node || seen.has(node)) return null;
+    if (typeof node === 'string') {
+      return isDellinUid(node) ? node.trim() : null;
+    }
+    if (Array.isArray(node)) {
+      seen.add(node);
+      for (const item of node) {
+        const hit = walk(item);
+        if (hit) return hit;
+      }
+      return null;
+    }
+    const obj = asObject(node);
+    if (!obj) return null;
+    seen.add(obj);
+    // Сначала пробуем ключи, где обычно лежит UID.
+    const priorityKeys = [
+      'requesterUID',
+      'requesterUid',
+      'counteragentUID',
+      'counteragentUid',
+      'uid',
+      'userUID',
+      'userUid',
+      'senderUID',
+      'senderUid',
+    ];
+    for (const key of priorityKeys) {
+      const val = obj[key];
+      if (typeof val === 'string' && isDellinUid(val)) return val.trim();
+    }
+    // Затем обходим все поля.
+    for (const val of Object.values(obj)) {
+      const hit = walk(val);
+      if (hit) return hit;
+    }
+    return null;
+  };
+  return walk(root);
 }
 
 function parseDellinErrors(payload: unknown): string[] {
