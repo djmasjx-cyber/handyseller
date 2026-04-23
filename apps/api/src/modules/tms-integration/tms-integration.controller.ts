@@ -19,22 +19,25 @@ import { CreateTmsEstimateOrderDto } from './dto/create-tms-estimate-order.dto';
 import { RejectTmsM2mJwtGuard } from './guards/reject-tms-m2m-jwt.guard';
 
 @Controller('tms')
-@UseGuards(JwtAuthGuard, RejectTmsM2mJwtGuard)
+@UseGuards(JwtAuthGuard)
 export class TmsIntegrationController {
   constructor(private readonly tmsIntegrationService: TmsIntegrationService) {}
 
   @Get('orders/candidates')
+  @UseGuards(RejectTmsM2mJwtGuard)
   listCandidates(@CurrentUser('userId') userId: string) {
     return this.tmsIntegrationService.listOrderCandidates(userId);
   }
 
   @Get('orders/:id/snapshot')
+  @UseGuards(RejectTmsM2mJwtGuard)
   snapshot(@CurrentUser('userId') userId: string, @Param('id') orderId: string) {
     return this.tmsIntegrationService.buildOrderSnapshot(userId, orderId);
   }
 
   /** Ручной заказ MANUAL для оценки доставки (груз + адреса). */
   @Post('orders/tms-estimate')
+  @UseGuards(RejectTmsM2mJwtGuard)
   createTmsEstimate(
     @CurrentUser('userId') userId: string,
     @Body() dto: CreateTmsEstimateOrderDto,
@@ -43,11 +46,13 @@ export class TmsIntegrationController {
   }
 
   @Get('carrier-connections')
+  @UseGuards(RejectTmsM2mJwtGuard)
   listCarrierConnections(@CurrentUser('userId') userId: string) {
     return this.tmsIntegrationService.listCarrierConnections(userId);
   }
 
   @Post('carrier-connections')
+  @UseGuards(RejectTmsM2mJwtGuard)
   upsertCarrierConnection(
     @CurrentUser('userId') userId: string,
     @Body() input: UpsertCarrierConnectionDto,
@@ -56,16 +61,19 @@ export class TmsIntegrationController {
   }
 
   @Delete('carrier-connections/:id')
+  @UseGuards(RejectTmsM2mJwtGuard)
   deleteCarrierConnection(@CurrentUser('userId') userId: string, @Param('id') id: string) {
     return this.tmsIntegrationService.deleteCarrierConnection(userId, id);
   }
 
   @Post('carrier-connections/:id/check')
+  @UseGuards(RejectTmsM2mJwtGuard)
   checkCarrierConnection(@CurrentUser('userId') userId: string, @Param('id') id: string) {
     return this.tmsIntegrationService.checkCarrierConnection(userId, id);
   }
 
   @Post('carrier-connections/check-all')
+  @UseGuards(RejectTmsM2mJwtGuard)
   checkAllCarrierConnections(@CurrentUser('userId') userId: string) {
     return this.tmsIntegrationService.checkAllCarrierConnections(userId);
   }
