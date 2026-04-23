@@ -485,6 +485,13 @@ export class ShipmentsService implements OnModuleInit {
     };
   }
 
+  private percentile(values: number[], p: number): number {
+    if (!values.length) return 0;
+    const sorted = [...values].sort((a, b) => a - b);
+    const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1));
+    return sorted[index] ?? 0;
+  }
+
   async getSloMetrics(
     userId: string,
     options?: { staleHours?: number; webhookWindowHours?: number },
@@ -510,6 +517,15 @@ export class ShipmentsService implements OnModuleInit {
       failed: number;
       successRate: number;
     };
+    latency: {
+      quoteMs: { p50: number; p95: number; avg: number; samples: number };
+      confirmMs: { p50: number; p95: number; avg: number; samples: number };
+    };
+    carrierErrors: {
+      windowHours: number;
+      totalFailed: number;
+      byCarrier: Array<{ carrier: string; failed: number; rate: number }>;
+    };
   }> {
     const staleHours = Math.max(1, Math.min(24 * 30, Math.floor(options?.staleHours ?? 24)));
     const webhookWindowHours = Math.max(1, Math.min(24 * 30, Math.floor(options?.webhookWindowHours ?? 24)));
@@ -527,12 +543,32 @@ export class ShipmentsService implements OnModuleInit {
       (item) => item.userId === userId && item.status === 'ACTIVE',
     ).length;
 
-    const [syncJobs, webhookDelivery] = await Promise.all([
+    const [syncJobs, webhookDelivery, failedByCarrier] = await Promise.all([
       this.store.getSyncJobStats(),
       this.store.getWebhookDeliveryStats(webhookWindowHours),
+      this.store.getCarrierFailedJobStats(webhookWindowHours),
     ]);
     const totalDeliveries = webhookDelivery.success + webhookDelivery.failed;
     const successRate = totalDeliveries > 0 ? webhookDelivery.success / totalDeliveries : 1;
+    const quoteDurations = requests
+      .filter((item) => item.status === 'QUOTED' || item.status === 'BOOKED')
+      .map((item) => Date.parse(item.updatedAt) - Date.parse(item.createdAt))
+      .filter((ms) => Number.isFinite(ms) && ms >= 0);
+    const confirmDurations = shipments
+      .map((shipment) => {
+        const request = this.requests.get(shipment.requestId);
+        if (!request) return null;
+        const ms = Date.parse(shipment.createdAt) - Date.parse(request.createdAt);
+        return Number.isFinite(ms) && ms >= 0 ? ms : null;
+      })
+      .filter((ms): ms is number => ms != null);
+    const quoteAvg = quoteDurations.length
+      ? quoteDurations.reduce((sum, value) => sum + value, 0) / quoteDurations.length
+      : 0;
+    const confirmAvg = confirmDurations.length
+      ? confirmDurations.reduce((sum, value) => sum + value, 0) / confirmDurations.length
+      : 0;
+    const carrierFailedTotal = failedByCarrier.reduce((sum, row) => sum + row.failed, 0);
 
     return {
       generatedAt: new Date().toISOString(),
@@ -551,6 +587,29 @@ export class ShipmentsService implements OnModuleInit {
         success: webhookDelivery.success,
         failed: webhookDelivery.failed,
         successRate: Number(successRate.toFixed(4)),
+      },
+      latency: {
+        quoteMs: {
+          p50: Math.round(this.percentile(quoteDurations, 50)),
+          p95: Math.round(this.percentile(quoteDurations, 95)),
+          avg: Math.round(quoteAvg),
+          samples: quoteDurations.length,
+        },
+        confirmMs: {
+          p50: Math.round(this.percentile(confirmDurations, 50)),
+          p95: Math.round(this.percentile(confirmDurations, 95)),
+          avg: Math.round(confirmAvg),
+          samples: confirmDurations.length,
+        },
+      },
+      carrierErrors: {
+        windowHours: webhookWindowHours,
+        totalFailed: carrierFailedTotal,
+        byCarrier: failedByCarrier.map((row) => ({
+          carrier: row.carrier,
+          failed: row.failed,
+          rate: Number((carrierFailedTotal > 0 ? row.failed / carrierFailedTotal : 0).toFixed(4)),
+        })),
       },
     };
   }

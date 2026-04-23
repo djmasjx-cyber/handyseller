@@ -29,6 +29,7 @@ type IdempotencyRow = {
 type WebhookSubRow = { payload: unknown };
 type StatusCountRow = { status: string; count: string };
 type WebhookDeliveryCountRow = { status: string; count: string };
+type CarrierFailedCountRow = { carrier: string | null; count: string };
 
 @Injectable()
 export class TmsStoreService implements OnModuleInit {
@@ -539,6 +540,24 @@ export class TmsStoreService implements OnModuleInit {
       if (status === 'FAILED') out.failed = value;
     }
     return out;
+  }
+
+  async getCarrierFailedJobStats(hours = 24): Promise<Array<{ carrier: string; failed: number }>> {
+    if (!this.pool) return [];
+    const safeHours = Math.max(1, Math.min(24 * 30, Math.floor(hours)));
+    const rows = await this.pool.query<CarrierFailedCountRow>(
+      `SELECT COALESCE(NULLIF(carrier, ''), 'unknown') AS carrier, COUNT(*)::text AS count
+       FROM tms_sync_job
+       WHERE status = 'FAILED'
+         AND next_run_at >= NOW() - make_interval(hours => $1::int)
+       GROUP BY COALESCE(NULLIF(carrier, ''), 'unknown')
+       ORDER BY COUNT(*) DESC`,
+      [safeHours],
+    );
+    return rows.rows.map((row) => ({
+      carrier: row.carrier || 'unknown',
+      failed: Number.parseInt(row.count, 10) || 0,
+    }));
   }
 }
 

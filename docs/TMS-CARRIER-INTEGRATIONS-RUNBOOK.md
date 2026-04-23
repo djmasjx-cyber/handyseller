@@ -113,6 +113,21 @@ Operational playbook for diagnosing and resolving carrier integration issues (CD
     - `CLIENT_ID=... CLIENT_SECRET=... NIGHTLY_CARRIERS=cdek,major-express npm run smoke:tms:nightly`
 - Read aggregate SLO metrics:
   - `GET /api/tms/slo/metrics?staleHours=24&webhookWindowHours=24`
+- Run SLO alert gate:
+  - `ACCESS_TOKEN=... npm run slo:tms:check`
 - Smoke output format:
   - success: `PASS carrier=<id> requestId=<requestId> shipmentId=<shipmentId>`
   - fail-fast: `FAIL step=<step> reason=<auth|validation|timeout|doc_not_ready|carrier|unknown>`
+
+## Alert thresholds (recommended)
+- `staleShipments` > `50` for `24h` window.
+- `webhookDelivery.successRate` < `0.95` for `24h` window.
+- `syncJobs.failed` > `20`.
+- `latency.quoteMs.p95` > `120000`.
+- `latency.confirmMs.p95` > `180000`.
+- dominant `carrierErrors.byCarrier[0].rate` > `0.70`.
+
+## Automation tip
+- Add cron or CI schedule:
+  - `*/15 * * * * ACCESS_TOKEN=... API_BASE_URL=https://app.handyseller.ru/api npm run slo:tms:check`
+- Any non-zero exit code from the check should open/raise an incident.

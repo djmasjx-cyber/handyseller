@@ -30,7 +30,8 @@
     "setup:cloud": "./scripts/setup-cloud-dev.sh",
     "dev:api:mdb": "./scripts/start-api-mdb.sh",
     "deploy": "bash scripts/run-deploy.sh",
-    "smoke:tms:nightly": "bash scripts/tms-nightly-smoke.sh"
+    "smoke:tms:nightly": "bash scripts/tms-nightly-smoke.sh",
+    "slo:tms:check": "bash scripts/tms-slo-alert-check.sh"
   },
   "engines": {
     "node": ">=18"
