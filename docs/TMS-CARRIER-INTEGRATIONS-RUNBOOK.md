@@ -8,6 +8,7 @@ Operational playbook for diagnosing and resolving carrier integration issues (CD
 - Booking flow (`confirm shipment`)
 - Documents flow (`waybill/label download`)
 - Tracking refresh flow
+- Carrier inbound webhooks (`carrier -> TMS`)
 
 ## Fast triage (5 minutes)
 1. Confirm API entrypoint currently used by partner/client:
@@ -46,6 +47,15 @@ Operational playbook for diagnosing and resolving carrier integration issues (CD
 - Verify document marker exists and resolves to PDF on download.
 - If PDF is delayed, retry according to carrier-specific readiness windows.
 
+### 5) Inbound carrier webhooks
+- Endpoint: `POST /api/tms/carrier-webhooks?carrier=<code>&eventType=<type>&eventId=<id>`
+- Signature header: `x-handyseller-carrier-signature: sha256=<hex>`
+- Secret source (priority):
+  - `TMS_CARRIER_WEBHOOK_SECRET_<CARRIER>`
+  - `TMS_CARRIER_WEBHOOK_SHARED_SECRET`
+- If no secret is configured, endpoint denies requests by design.
+- Incoming events are queued via `ingest_carrier_webhook` and processed asynchronously.
+
 ## Carrier-specific notes
 
 ### Dellin
@@ -74,3 +84,9 @@ Operational playbook for diagnosing and resolving carrier integration issues (CD
 - Confirm success rate > 95% by carrier.
 - Document download success rate > 95% for confirmed shipments.
 - No unresolved stale shipments beyond agreed SLA window.
+
+## Daily operations
+- Run nightly smoke manually when needed:
+  - `npm run smoke:tms:nightly`
+- Read aggregate SLO metrics:
+  - `GET /api/tms/slo/metrics?staleHours=24&webhookWindowHours=24`
