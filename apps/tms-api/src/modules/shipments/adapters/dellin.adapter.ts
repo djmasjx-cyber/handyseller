@@ -837,6 +837,15 @@ export class DellinAdapter implements CarrierAdapter {
           line.includes('members.sender.counteragent.form') ||
           line.includes('members.receiver.counteragent.form'),
       );
+    const counteragentPresenceError = (errors: string[]): boolean =>
+      errors.some(
+        (line) =>
+          line.includes('code=110004') &&
+          (line.includes('members.sender.counteragentID') ||
+            line.includes('members.sender.counteragent') ||
+            line.includes('members.receiver.counteragentID') ||
+            line.includes('members.receiver.counteragent')),
+      );
     const discoveredForm = await this.resolveCounteragentForm(
       base,
       appKey,
@@ -1053,9 +1062,9 @@ export class DellinAdapter implements CarrierAdapter {
             `[dellin-booking] request error requestId=${requestId} produceDate=${produceDate} form=${formChoice.label} status=${res?.status ?? 'n/a'} raw=${JSON.stringify(data ?? {}).slice(0, 1200)}`,
           );
         }
-        if (formError(businessErrors) && formIdx < formAttempts.length - 1) {
+        if ((formError(businessErrors) || counteragentPresenceError(businessErrors)) && formIdx < formAttempts.length - 1) {
           this.logger.warn(
-            `[dellin-booking] counteragent.form rejected, retrying with next form profile requestId=${requestId} produceDate=${produceDate} current=${formChoice.label}`,
+            `[dellin-booking] counteragent profile rejected, retrying with next form profile requestId=${requestId} produceDate=${produceDate} current=${formChoice.label}`,
           );
           continue;
         }
