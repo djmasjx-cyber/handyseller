@@ -419,6 +419,30 @@ function findDellinFormByUid(node: unknown, uid: string): unknown {
   return null;
 }
 
+function findDellinCounteragentIdByUid(node: unknown, uid: string): number | null {
+  if (!node) return null;
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      const hit = findDellinCounteragentIdByUid(item, uid);
+      if (hit != null) return hit;
+    }
+    return null;
+  }
+  if (typeof node !== 'object') return null;
+  const obj = node as Record<string, unknown>;
+  const candidateUid = firstNonEmptyString(obj.uid, obj.counteragentUID, obj.counteragentUid);
+  if (candidateUid?.trim() === uid.trim()) {
+    const idRaw = obj.id ?? obj.counteragentID ?? obj.counteragentId;
+    if (typeof idRaw === 'number' && Number.isInteger(idRaw)) return idRaw;
+    if (typeof idRaw === 'string' && /^\d+$/u.test(idRaw.trim())) return parseInt(idRaw.trim(), 10);
+  }
+  for (const value of Object.values(obj)) {
+    const hit = findDellinCounteragentIdByUid(value, uid);
+    if (hit != null) return hit;
+  }
+  return null;
+}
+
 function extractDellinFormVariants(value: unknown): DellinCounteragentForm[] {
   if (value == null) return [];
   const out: DellinCounteragentForm[] = [];
@@ -559,6 +583,7 @@ export class DellinAdapter implements CarrierAdapter {
   private readonly dellinDebug =
     process.env.TMS_DELLIN_DEBUG === '1' || process.env.TMS_DELLIN_DEBUG === 'true';
   private readonly counteragentFormCache = new Map<string, { value: DellinCounteragentForm; expiresAt: number }>();
+  private readonly counteragentIdCache = new Map<string, { value: number | null; expiresAt: number }>();
   readonly descriptor: CarrierDescriptor = {
     id: 'dellin',
     code: 'DELLIN',
@@ -854,6 +879,14 @@ export class DellinAdapter implements CarrierAdapter {
       requestId,
       traceId,
     );
+    const discoveredCounteragentId = await this.resolveCounteragentId(
+      base,
+      appKey,
+      sessionID,
+      requesterUidSafe,
+      requestId,
+      traceId,
+    );
     const senderCandidates: DellinCounteragentForm[] = [];
     for (const variant of extractDellinFormVariants(discoveredForm)) {
       pushUniqueForm(senderCandidates, variant);
@@ -916,7 +949,9 @@ export class DellinAdapter implements CarrierAdapter {
       members: {
         requester: { role: 'sender', uid: requesterUid },
         sender: {
-          ...(useCounteragentIdOnly ? { counteragentID: requesterUid } : {}),
+          ...(useCounteragentIdOnly && discoveredCounteragentId != null
+            ? { counteragentID: discoveredCounteragentId }
+            : {}),
           ...(useSenderReceiverCounteragent
             ? {
                 counteragent: {
@@ -932,7 +967,9 @@ export class DellinAdapter implements CarrierAdapter {
           phoneNumbers: [{ number: shipperPhone }],
         },
         receiver: {
-          ...(useCounteragentIdOnly ? { counteragentID: requesterUid } : {}),
+          ...(useCounteragentIdOnly && discoveredCounteragentId != null
+            ? { counteragentID: discoveredCounteragentId }
+            : {}),
           ...(useSenderReceiverCounteragent
             ? {
                 counteragent: {
@@ -1226,6 +1263,39 @@ export class DellinAdapter implements CarrierAdapter {
       this.logger.log(`[dellin-booking] counteragent form resolved requestId=${requestId} form=${formLog}`);
     }
     return resolved;
+  }
+
+  private async resolveCounteragentId(
+    base: string,
+    appKey: string,
+    sessionID: string,
+    requesterUid: string,
+    requestId: string,
+    traceId?: string | null,
+  ): Promise<number | null> {
+    const cacheKey = `${appKey}:${sessionID}:${requesterUid}`;
+    const now = Date.now();
+    const cached = this.counteragentIdCache.get(cacheKey);
+    if (cached && cached.expiresAt > now) return cached.value;
+
+    const url = dellinJsonUrl(base, DELLIN_COUNTERAGENTS_PATH);
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: withRequestIdHeaders({ Accept: 'application/json', 'Content-Type': 'application/json' }, traceId ?? requestId),
+      body: JSON.stringify({ appkey: appKey, sessionID, fullInfo: true }),
+      cache: 'no-store',
+    }).catch(() => null);
+    if (!res?.ok) {
+      this.counteragentIdCache.set(cacheKey, { value: null, expiresAt: now + 5 * 60_000 });
+      return null;
+    }
+    const data = (await res.json().catch(() => null)) as unknown;
+    const id = findDellinCounteragentIdByUid(data, requesterUid);
+    this.counteragentIdCache.set(cacheKey, { value: id, expiresAt: now + 10 * 60_000 });
+    if (this.dellinDebug && id != null) {
+      this.logger.log(`[dellin-booking] counteragent id resolved requestId=${requestId} id=${id}`);
+    }
+    return id;
   }
 
   private async resolveKladrCode(
