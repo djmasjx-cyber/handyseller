@@ -858,23 +858,36 @@ export class DellinAdapter implements CarrierAdapter {
       pushUniqueForm(receiverCandidates, fallback);
     }
     pushUniqueForm(receiverCandidates, null);
-    const formAttempts: Array<{ sender: DellinCounteragentForm; receiver: DellinCounteragentForm; label: string }> = [];
+    const formAttempts: Array<{
+      sender: DellinCounteragentForm;
+      receiver: DellinCounteragentForm;
+      useSenderReceiverCounteragent: boolean;
+      label: string;
+    }> = [];
     for (const sender of senderCandidates) {
       for (const receiver of receiverCandidates) {
         if (formAttempts.length >= 12) break;
         formAttempts.push({
           sender,
           receiver,
+          useSenderReceiverCounteragent: true,
           label: `sender=${sender == null ? 'null' : typeof sender === 'object' ? 'object' : String(sender)};receiver=${receiver == null ? 'null' : typeof receiver === 'object' ? 'object' : String(receiver)}`,
         });
       }
       if (formAttempts.length >= 12) break;
     }
+    formAttempts.push({
+      sender: null,
+      receiver: null,
+      useSenderReceiverCounteragent: false,
+      label: 'no-sender-receiver-counteragent',
+    });
     const makePayload = (
       draftOnly: boolean,
       produceDate: string,
       senderForm: DellinCounteragentForm,
       receiverForm: DellinCounteragentForm,
+      useSenderReceiverCounteragent: boolean,
     ): Record<string, unknown> => ({
       appkey: appKey,
       sessionID,
@@ -883,23 +896,31 @@ export class DellinAdapter implements CarrierAdapter {
       members: {
         requester: { role: 'sender', uid: requesterUid },
         sender: {
-          counteragent: {
-            uid: requesterUid,
-            ...(senderForm != null ? { form: senderForm } : {}),
-            name: shipperName,
-            phone: shipperPhone,
-          },
+          ...(useSenderReceiverCounteragent
+            ? {
+                counteragent: {
+                  uid: requesterUid,
+                  ...(senderForm != null ? { form: senderForm } : {}),
+                  name: shipperName,
+                  phone: shipperPhone,
+                },
+              }
+            : {}),
           dataForReceipt: { send: false },
           contactPersons: [{ name: shipperName }],
           phoneNumbers: [{ number: shipperPhone }],
         },
         receiver: {
-          counteragent: {
-            uid: requesterUid,
-            ...(receiverForm != null ? { form: receiverForm } : {}),
-            name: recipientName,
-            phone: recipientPhone,
-          },
+          ...(useSenderReceiverCounteragent
+            ? {
+                counteragent: {
+                  uid: requesterUid,
+                  ...(receiverForm != null ? { form: receiverForm } : {}),
+                  name: recipientName,
+                  phone: recipientPhone,
+                },
+              }
+            : {}),
           contactPersons: [{ name: recipientName }],
           phoneNumbers: [{ number: recipientPhone }],
         },
@@ -937,7 +958,13 @@ export class DellinAdapter implements CarrierAdapter {
       for (let formIdx = 0; formIdx < formAttempts.length; formIdx += 1) {
         const formChoice = formAttempts[formIdx];
         let effectiveDraftOnly = draftOnlyByEnv;
-        let payload = makePayload(effectiveDraftOnly, produceDate, formChoice.sender, formChoice.receiver);
+        let payload = makePayload(
+          effectiveDraftOnly,
+          produceDate,
+          formChoice.sender,
+          formChoice.receiver,
+          formChoice.useSenderReceiverCounteragent,
+        );
         if (this.dellinDebug) {
           this.logger.log(
             `[dellin-booking] payload requestId=${requestId} attempt=${idx + 1} produceDate=${produceDate} form=${formChoice.label} data=${JSON.stringify({
@@ -968,7 +995,13 @@ export class DellinAdapter implements CarrierAdapter {
         let data = (await res?.json().catch(() => null)) as Record<string, unknown> | null;
         if (!effectiveDraftOnly && res?.status === 400) {
           effectiveDraftOnly = true;
-          payload = makePayload(true, produceDate, formChoice.sender, formChoice.receiver);
+          payload = makePayload(
+            true,
+            produceDate,
+            formChoice.sender,
+            formChoice.receiver,
+            formChoice.useSenderReceiverCounteragent,
+          );
           res = await fetch(url, {
             method: 'POST',
             headers: withRequestIdHeaders({ Accept: 'application/json', 'Content-Type': 'application/json' }, traceId ?? requestId),
