@@ -168,6 +168,30 @@ function parseDellinSessionId(payload: unknown): string | null {
   );
 }
 
+function parseDellinRequesterUid(payload: unknown): string | null {
+  const root = asObject(payload);
+  if (!root) return null;
+  const data = asObject(root.data);
+  return (
+    firstNonEmptyString(
+      root.requesterUID,
+      root.requesterUid,
+      root.counteragentUID,
+      root.counteragentUid,
+      root.uid,
+      root.userUID,
+      root.userUid,
+      data?.requesterUID,
+      data?.requesterUid,
+      data?.counteragentUID,
+      data?.counteragentUid,
+      data?.uid,
+      data?.userUID,
+      data?.userUid,
+    ) ?? null
+  );
+}
+
 function parseDellinErrors(payload: unknown): string[] {
   const root = asObject(payload);
   if (!root) return [];
@@ -238,6 +262,11 @@ type DellinDraftValidation = {
   requestId: string | null;
   state: string | null;
   draftOnly: boolean;
+};
+
+type DellinAuthSession = {
+  sessionID: string;
+  requesterUid: string | null;
 };
 
 function maskPhone(value: string): string {
@@ -508,16 +537,17 @@ export class DellinAdapter implements CarrierAdapter {
       throw new Error('Dellin document download failed: missing appKey');
     }
     const base = (process.env.DELLIN_API_BASE ?? 'https://api.dellin.ru').replace(/\/+$/, '');
-    const sessionID = await this.getSessionId(
+    const auth = await this.getSessionAuth(
       base,
       appKey,
       credentials.login,
       credentials.password,
       shipment.requestId,
     );
-    if (!sessionID) {
+    if (!auth) {
       throw new Error('Dellin document download failed: cannot obtain sessionID');
     }
+    const sessionID = auth.sessionID;
     const pdf = await this.fetchPrintableFormPdf(base, appKey, sessionID, marker.requestId, marker.kind);
     return {
       content: pdf,
@@ -537,8 +567,9 @@ export class DellinAdapter implements CarrierAdapter {
       throw new Error('Dellin booking failed: missing login/password');
     }
     const base = (process.env.DELLIN_API_BASE ?? 'https://api.dellin.ru').replace(/\/+$/, '');
-    const sessionID = await this.getSessionId(base, appKey, credentials.login, credentials.password, requestId);
-    if (!sessionID) throw new Error('Dellin booking failed: cannot obtain sessionID');
+    const auth = await this.getSessionAuth(base, appKey, credentials.login, credentials.password, requestId);
+    if (!auth) throw new Error('Dellin booking failed: cannot obtain sessionID');
+    const sessionID = auth.sessionID;
 
     const fromAddress = (input.draft.originLabel || input.snapshot.originLabel || '').trim();
     const toAddress = (input.draft.destinationLabel || input.snapshot.destinationLabel || '').trim();
@@ -548,6 +579,11 @@ export class DellinAdapter implements CarrierAdapter {
     const recipientPhoneRaw = input.snapshot.contacts?.recipient?.phone?.trim();
     const shipperPhone = normalizeDellinPhone(shipperPhoneRaw);
     const recipientPhone = normalizeDellinPhone(recipientPhoneRaw);
+    const requesterUid =
+      auth.requesterUid?.trim() ||
+      process.env.DELLIN_REQUESTER_UID?.trim() ||
+      shipperPhone ||
+      requestId;
     const missingFields = requiredDellinFieldErrors(input);
     if (missingFields.length > 0) {
       throw new Error(
@@ -575,7 +611,7 @@ export class DellinAdapter implements CarrierAdapter {
       inOrder: !draftOnly,
       payment: { type: 'cash', primaryPayer: 'sender' },
       members: {
-        requester: { role: 'sender', uid: 'sender' },
+        requester: { role: 'sender', uid: requesterUid },
         sender: {
           counteragent: {
             customForm: { name: 'ООО' },
@@ -635,7 +671,7 @@ export class DellinAdapter implements CarrierAdapter {
             arrival: { variant: 'address', search: truncate(toAddress) },
           },
           members: {
-            requester: 'sender',
+            requester: { role: 'sender', uid: requesterUid ? '***' : null },
             sender: {
               name: truncate(shipperName ?? ''),
               phone: maskPhone(shipperPhoneRaw ?? ''),
@@ -716,13 +752,13 @@ export class DellinAdapter implements CarrierAdapter {
     return { requestId: requestUid, state, draftOnly: effectiveDraftOnly };
   }
 
-  private async getSessionId(
+  private async getSessionAuth(
     base: string,
     appKey: string,
     login: string,
     password: string,
     requestId: string,
-  ): Promise<string | null> {
+  ): Promise<DellinAuthSession | null> {
     const url = dellinJsonUrl(base, DELLIN_AUTH_LOGIN_PATH);
     const res = await fetch(url, {
       method: 'POST',
@@ -741,7 +777,12 @@ export class DellinAdapter implements CarrierAdapter {
     if (this.dellinDebug) {
       this.logger.log(`[dellin-booking] auth ok requestId=${requestId}`);
     }
-    return parseDellinSessionId(data);
+    const sessionID = parseDellinSessionId(data);
+    if (!sessionID) return null;
+    return {
+      sessionID,
+      requesterUid: parseDellinRequesterUid(data),
+    };
   }
 
   private async resolveKladrCode(

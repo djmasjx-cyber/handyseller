@@ -1,0 +1,76 @@
+# TMS Carrier Integrations Runbook
+
+## Purpose
+Operational playbook for diagnosing and resolving carrier integration issues (CDEK, Major, Dellin) in production.
+
+## Scope
+- Quote flow (`refresh quotes`)
+- Booking flow (`confirm shipment`)
+- Documents flow (`waybill/label download`)
+- Tracking refresh flow
+
+## Fast triage (5 minutes)
+1. Confirm API entrypoint currently used by partner/client:
+   - temporary canonical: `https://app.handyseller.ru/api`
+2. Reproduce once with the same request and capture:
+   - carrier
+   - requestId / shipmentId
+   - exact error text
+3. Classify by error family:
+   - `400` validation/schema (payload mismatch)
+   - `401/403` auth/credentials
+   - `404` resource timing or wrong identifiers
+   - `5xx` carrier outage / transport failure
+   - timeout/network
+
+## Standard checks by layer
+
+### 1) Credentials and connectivity
+- In TMS settings, run "check connection" for the carrier.
+- Verify carrier-specific credentials:
+  - CDEK: `client_id/client_secret`
+  - Major: login/password and service type routing (EXPRESS/LTL)
+  - Dellin: appKey + login/password session auth
+
+### 2) Request payload validity
+- For `HTTP 400`, inspect parsed carrier errors with `code/detail/fields`.
+- Patch payload by required fields instead of guessing.
+- Re-run single request and verify next blocking field.
+
+### 3) Booking status and idempotency
+- Ensure write requests include `Idempotency-Key`.
+- On repeated confirms, verify no duplicate shipment side effects.
+
+### 4) Documents
+- Confirm booking produced carrier order reference.
+- Verify document marker exists and resolves to PDF on download.
+- If PDF is delayed, retry according to carrier-specific readiness windows.
+
+## Carrier-specific notes
+
+### Dellin
+- `v2/request` is strict on payload typing and required nested fields.
+- Typical blockers:
+  - `members.*` structure typing
+  - phone format (`7XXXXXXXXXX`)
+  - `delivery` date/time and requester/payment blocks
+- For temporary continuity, draft fallback may be used if configured.
+
+### Major
+- EXPRESS and LTL use different SOAP routing/namespaces.
+- Ensure quotes are generated from the correct service channel.
+
+### CDEK
+- Print/doc generation can lag behind booking acceptance.
+- Use retry polling before treating doc generation as failed.
+
+## Escalation matrix
+- L1 Support: reproduce, classify, gather requestId + exact error.
+- L2 Integration engineer: payload mapping fix, credential/session flow, adapter logic.
+- L3 Platform owner: DNS, ingress, TLS, global endpoint/certificate issues.
+
+## Definition of healthy state
+- Quote success rate > 95% by carrier.
+- Confirm success rate > 95% by carrier.
+- Document download success rate > 95% for confirmed shipments.
+- No unresolved stale shipments beyond agreed SLA window.
