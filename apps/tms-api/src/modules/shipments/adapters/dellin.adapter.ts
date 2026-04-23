@@ -575,19 +575,20 @@ export class DellinAdapter implements CarrierAdapter {
       inOrder: !draftOnly,
       payment: { type: 'cash', primaryPayer: 'sender' },
       members: {
-        requester: { role: 'sender' },
+        requester: { role: 'sender', uid: 'sender' },
         sender: {
           counteragent: {
-            customForm: 'ООО',
+            customForm: { name: 'ООО' },
             name: shipperName,
             phone: shipperPhone,
           },
+          dataForReceipt: {},
           contactPersons: [{ name: shipperName }],
           phoneNumbers: [{ number: shipperPhone }],
         },
         receiver: {
           counteragent: {
-            customForm: 'ФЛ',
+            customForm: { name: 'ФЛ' },
             name: recipientName,
             phone: recipientPhone,
           },
