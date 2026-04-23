@@ -23,6 +23,8 @@ const DELLIN_PUBLIC_KLADR_PATH = '/v2/public/kladr';
 const DELLIN_AUTH_LOGIN_PATH = '/v3/auth/login';
 /** Создание/черновик заявки на перевозку. */
 const DELLIN_REQUEST_PATH = '/v2/request';
+/** Справочник контрагентов (включая ОПФ/form) для текущей сессии. */
+const DELLIN_COUNTERAGENTS_PATH = '/v2/counteragents';
 /** Печатные формы по заявке/накладной. */
 const DELLIN_REQUEST_PDF_PATH = '/v1/customers/request/pdf';
 
@@ -375,6 +377,46 @@ function isValidHm(value: string | null | undefined): boolean {
   return /^([01]\d|2[0-3]):[0-5]\d$/u.test(value.trim());
 }
 
+type DellinCounteragentForm = 'juridical' | 'person' | 'individual' | 'legal' | null;
+
+function collectDellinForms(node: unknown, out: Set<string>): void {
+  if (!node) return;
+  if (Array.isArray(node)) {
+    for (const item of node) collectDellinForms(item, out);
+    return;
+  }
+  if (typeof node !== 'object') return;
+  const obj = node as Record<string, unknown>;
+  const form = obj.form;
+  if (typeof form === 'string' && form.trim()) out.add(form.trim());
+  for (const value of Object.values(obj)) {
+    collectDellinForms(value, out);
+  }
+}
+
+function findDellinFormByUid(node: unknown, uid: string): string | null {
+  if (!node) return null;
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      const hit = findDellinFormByUid(item, uid);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  if (typeof node !== 'object') return null;
+  const obj = node as Record<string, unknown>;
+  const candidateUid = firstNonEmptyString(obj.uid, obj.counteragentUID, obj.counteragentUid);
+  if (candidateUid?.trim() === uid.trim()) {
+    const form = firstNonEmptyString(obj.form);
+    if (form) return form;
+  }
+  for (const value of Object.values(obj)) {
+    const hit = findDellinFormByUid(value, uid);
+    if (hit) return hit;
+  }
+  return null;
+}
+
 function isDellinUid(value: string | null | undefined): boolean {
   const v = (value ?? '').trim();
   if (!v) return false;
@@ -475,6 +517,7 @@ export class DellinAdapter implements CarrierAdapter {
   private readonly logger = new Logger(DellinAdapter.name);
   private readonly dellinDebug =
     process.env.TMS_DELLIN_DEBUG === '1' || process.env.TMS_DELLIN_DEBUG === 'true';
+  private readonly counteragentFormCache = new Map<string, { value: string | null; expiresAt: number }>();
   readonly descriptor: CarrierDescriptor = {
     id: 'dellin',
     code: 'DELLIN',
@@ -719,6 +762,7 @@ export class DellinAdapter implements CarrierAdapter {
         'Dellin booking failed: отсутствует валидный UID контрагента (members.requester.uid). Укажите DELLIN_REQUESTER_UID или проверьте ответ auth/login.',
       );
     }
+    const requesterUidSafe = requesterUid as string;
     const missingFields = requiredDellinFieldErrors(input);
     if (missingFields.length > 0) {
       throw new Error(
@@ -745,7 +789,35 @@ export class DellinAdapter implements CarrierAdapter {
     const produceDateAttempts = Array.from({ length: 7 }, (_, idx) => addDaysYmd(preferredProduceDate, idx));
     const produceDateError = (errors: string[]): boolean =>
       errors.some((line) => line.includes('code=180012') || line.includes('delivery.derival.produceDate'));
-    const makePayload = (draftOnly: boolean, produceDate: string): Record<string, unknown> => ({
+    const formError = (errors: string[]): boolean =>
+      errors.some(
+        (line) =>
+          line.includes('code=180007') ||
+          line.includes('members.sender.counteragent.form') ||
+          line.includes('members.receiver.counteragent.form'),
+      );
+    const discoveredForm = await this.resolveCounteragentForm(
+      base,
+      appKey,
+      sessionID,
+      requesterUidSafe,
+      requestId,
+      traceId,
+    );
+    const formAttempts: Array<{ sender: DellinCounteragentForm; receiver: DellinCounteragentForm; label: string }> = [
+      ...(discoveredForm
+        ? [{ sender: discoveredForm as DellinCounteragentForm, receiver: discoveredForm as DellinCounteragentForm, label: `counteragents:${discoveredForm}` }]
+        : []),
+      { sender: 'juridical', receiver: 'person', label: 'juridical/person' },
+      { sender: null, receiver: null, label: 'omit-form' },
+      { sender: 'legal', receiver: 'individual', label: 'legal/individual' },
+    ];
+    const makePayload = (
+      draftOnly: boolean,
+      produceDate: string,
+      senderForm: DellinCounteragentForm,
+      receiverForm: DellinCounteragentForm,
+    ): Record<string, unknown> => ({
       appkey: appKey,
       sessionID,
       inOrder: !draftOnly,
@@ -755,7 +827,7 @@ export class DellinAdapter implements CarrierAdapter {
         sender: {
           counteragent: {
             uid: requesterUid,
-            form: 'juridical',
+            ...(senderForm ? { form: senderForm } : {}),
             name: shipperName,
             phone: shipperPhone,
           },
@@ -766,7 +838,7 @@ export class DellinAdapter implements CarrierAdapter {
         receiver: {
           counteragent: {
             uid: requesterUid,
-            form: 'person',
+            ...(receiverForm ? { form: receiverForm } : {}),
             name: recipientName,
             phone: recipientPhone,
           },
@@ -804,79 +876,89 @@ export class DellinAdapter implements CarrierAdapter {
     let lastRaw = '';
     for (let idx = 0; idx < produceDateAttempts.length; idx += 1) {
       const produceDate = produceDateAttempts[idx];
-      let effectiveDraftOnly = draftOnlyByEnv;
-      let payload = makePayload(effectiveDraftOnly, produceDate);
-      if (this.dellinDebug) {
-        this.logger.log(
-          `[dellin-booking] payload requestId=${requestId} attempt=${idx + 1} produceDate=${produceDate} data=${JSON.stringify({
-            appkey: appKey ? '***' : null,
-            sessionID: sessionID ? '***' : null,
-            inOrder: !effectiveDraftOnly,
-            delivery: {
-              deliveryType: { type: deliveryType },
-              variant: 'address',
-              derival: {
+      for (let formIdx = 0; formIdx < formAttempts.length; formIdx += 1) {
+        const formChoice = formAttempts[formIdx];
+        let effectiveDraftOnly = draftOnlyByEnv;
+        let payload = makePayload(effectiveDraftOnly, produceDate, formChoice.sender, formChoice.receiver);
+        if (this.dellinDebug) {
+          this.logger.log(
+            `[dellin-booking] payload requestId=${requestId} attempt=${idx + 1} produceDate=${produceDate} form=${formChoice.label} data=${JSON.stringify({
+              appkey: appKey ? '***' : null,
+              sessionID: sessionID ? '***' : null,
+              inOrder: !effectiveDraftOnly,
+              delivery: {
+                deliveryType: { type: deliveryType },
                 variant: 'address',
-                produceDate,
-                time: { worktimeStart: '09:00', worktimeEnd: '18:00' },
-                search: truncate(fromAddress),
+                derival: {
+                  variant: 'address',
+                  produceDate,
+                  time: { worktimeStart: '09:00', worktimeEnd: '18:00' },
+                  search: truncate(fromAddress),
+                },
+                arrival: { variant: 'address', search: truncate(toAddress) },
               },
-              arrival: { variant: 'address', search: truncate(toAddress) },
-            },
-          })}`,
-        );
-      }
-      let res = await fetch(url, {
-        method: 'POST',
-        headers: withRequestIdHeaders({ Accept: 'application/json', 'Content-Type': 'application/json' }, traceId ?? requestId),
-        body: JSON.stringify(payload),
-        cache: 'no-store',
-      }).catch(() => null);
-      let data = (await res?.json().catch(() => null)) as Record<string, unknown> | null;
-      if (!effectiveDraftOnly && res?.status === 400) {
-        effectiveDraftOnly = true;
-        payload = makePayload(true, produceDate);
-        res = await fetch(url, {
+              forms: formChoice,
+            })}`,
+          );
+        }
+        let res = await fetch(url, {
           method: 'POST',
           headers: withRequestIdHeaders({ Accept: 'application/json', 'Content-Type': 'application/json' }, traceId ?? requestId),
           body: JSON.stringify(payload),
           cache: 'no-store',
         }).catch(() => null);
-        data = (await res?.json().catch(() => null)) as Record<string, unknown> | null;
-        this.logger.warn(
-          `[dellin-booking] inOrder=true failed with 400, fallback to draft mode; requestId=${requestId}; produceDate=${produceDate}`,
-        );
-      }
-      const businessErrors = parseDellinErrors(data);
-      const requestUid = firstNonEmptyString(
-        data?.requestID,
-        data?.requestId,
-        asObject(data?.data)?.requestID,
-        asObject(data?.data)?.requestId,
-      );
-      const state = firstNonEmptyString(data?.state, asObject(data?.data)?.state);
-      if (res?.ok && requestUid) {
-        if (this.dellinDebug) {
-          this.logger.log(
-            `[dellin-booking] request ok requestId=${requestId} dellinRequestId=${requestUid} state=${state ?? 'n/a'} produceDate=${produceDate}`,
+        let data = (await res?.json().catch(() => null)) as Record<string, unknown> | null;
+        if (!effectiveDraftOnly && res?.status === 400) {
+          effectiveDraftOnly = true;
+          payload = makePayload(true, produceDate, formChoice.sender, formChoice.receiver);
+          res = await fetch(url, {
+            method: 'POST',
+            headers: withRequestIdHeaders({ Accept: 'application/json', 'Content-Type': 'application/json' }, traceId ?? requestId),
+            body: JSON.stringify(payload),
+            cache: 'no-store',
+          }).catch(() => null);
+          data = (await res?.json().catch(() => null)) as Record<string, unknown> | null;
+          this.logger.warn(
+            `[dellin-booking] inOrder=true failed with 400, fallback to draft mode; requestId=${requestId}; produceDate=${produceDate}; form=${formChoice.label}`,
           );
         }
-        return { requestId: requestUid, state, draftOnly: effectiveDraftOnly };
-      }
+        const businessErrors = parseDellinErrors(data);
+        const requestUid = firstNonEmptyString(
+          data?.requestID,
+          data?.requestId,
+          asObject(data?.data)?.requestID,
+          asObject(data?.data)?.requestId,
+        );
+        const state = firstNonEmptyString(data?.state, asObject(data?.data)?.state);
+        if (res?.ok && requestUid) {
+          if (this.dellinDebug) {
+            this.logger.log(
+              `[dellin-booking] request ok requestId=${requestId} dellinRequestId=${requestUid} state=${state ?? 'n/a'} produceDate=${produceDate} form=${formChoice.label}`,
+            );
+          }
+          return { requestId: requestUid, state, draftOnly: effectiveDraftOnly };
+        }
 
-      lastStatus = res?.status ?? null;
-      lastErrors = businessErrors;
-      lastRaw = JSON.stringify(data ?? {}).slice(0, 400);
-      if (this.dellinDebug) {
-        this.logger.warn(
-          `[dellin-booking] request error requestId=${requestId} produceDate=${produceDate} status=${res?.status ?? 'n/a'} raw=${JSON.stringify(data ?? {}).slice(0, 1200)}`,
-        );
-      }
-      if (!produceDateError(businessErrors)) {
-        const details = businessErrors.join('; ');
-        throw new Error(
-          `Dellin request failed: HTTP ${res?.status ?? 'n/a'}${details ? `; ${details}` : lastRaw ? `; ${lastRaw}` : ''}`,
-        );
+        lastStatus = res?.status ?? null;
+        lastErrors = businessErrors;
+        lastRaw = JSON.stringify(data ?? {}).slice(0, 400);
+        if (this.dellinDebug) {
+          this.logger.warn(
+            `[dellin-booking] request error requestId=${requestId} produceDate=${produceDate} form=${formChoice.label} status=${res?.status ?? 'n/a'} raw=${JSON.stringify(data ?? {}).slice(0, 1200)}`,
+          );
+        }
+        if (formError(businessErrors) && formIdx < formAttempts.length - 1) {
+          this.logger.warn(
+            `[dellin-booking] counteragent.form rejected, retrying with next form profile requestId=${requestId} produceDate=${produceDate} current=${formChoice.label}`,
+          );
+          continue;
+        }
+        if (!produceDateError(businessErrors)) {
+          const details = businessErrors.join('; ');
+          throw new Error(
+            `Dellin request failed: HTTP ${res?.status ?? 'n/a'}${details ? `; ${details}` : lastRaw ? `; ${lastRaw}` : ''}`,
+          );
+        }
       }
       this.logger.warn(
         `[dellin-booking] produceDate unavailable, retrying next day requestId=${requestId} produceDate=${produceDate}`,
@@ -987,6 +1069,47 @@ export class DellinAdapter implements CarrierAdapter {
     }
     this.logger.warn(`[dellin-booking] counteragent uid probe failed requestId=${requestId}`);
     return null;
+  }
+
+  private async resolveCounteragentForm(
+    base: string,
+    appKey: string,
+    sessionID: string,
+    requesterUid: string,
+    requestId: string,
+    traceId?: string | null,
+  ): Promise<string | null> {
+    const cacheKey = `${appKey}:${sessionID}:${requesterUid}`;
+    const now = Date.now();
+    const cached = this.counteragentFormCache.get(cacheKey);
+    if (cached && cached.expiresAt > now) return cached.value;
+
+    const url = dellinJsonUrl(base, DELLIN_COUNTERAGENTS_PATH);
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: withRequestIdHeaders({ Accept: 'application/json', 'Content-Type': 'application/json' }, traceId ?? requestId),
+      body: JSON.stringify({ appkey: appKey, sessionID, fullInfo: true }),
+      cache: 'no-store',
+    }).catch(() => null);
+    if (!res?.ok) {
+      this.logger.warn(
+        `[dellin-booking] counteragents form lookup failed requestId=${requestId} status=${res?.status ?? 'n/a'}`,
+      );
+      this.counteragentFormCache.set(cacheKey, { value: null, expiresAt: now + 5 * 60_000 });
+      return null;
+    }
+    const data = (await res.json().catch(() => null)) as unknown;
+    const exactForm = findDellinFormByUid(data, requesterUid);
+    const resolved = exactForm ?? (() => {
+      const known = new Set<string>();
+      collectDellinForms(data, known);
+      return [...known][0] ?? null;
+    })();
+    this.counteragentFormCache.set(cacheKey, { value: resolved, expiresAt: now + 10 * 60_000 });
+    if (this.dellinDebug && resolved) {
+      this.logger.log(`[dellin-booking] counteragent form resolved requestId=${requestId} form=${resolved}`);
+    }
+    return resolved;
   }
 
   private async resolveKladrCode(
