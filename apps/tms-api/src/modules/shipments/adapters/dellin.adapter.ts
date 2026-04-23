@@ -40,6 +40,15 @@ function dellinJsonUrl(base: string, path: string): string {
   return `${base}${p}.json`;
 }
 
+function withRequestIdHeaders(
+  headers: Record<string, string>,
+  requestId?: string | null,
+): Record<string, string> {
+  const trimmed = (requestId ?? '').trim();
+  if (!trimmed) return headers;
+  return { ...headers, 'x-request-id': trimmed };
+}
+
 function stripPostalPrefix(value: string): string {
   return value.replace(/^\s*\d{6}\s*,?\s*/u, '').trim();
 }
@@ -451,6 +460,7 @@ export class DellinAdapter implements CarrierAdapter {
     requestId: string,
     context: CarrierQuoteContext,
   ): Promise<CarrierQuote[]> {
+    const traceId = context.requestId ?? requestId;
     const credentials = await this.loadCredentials(context, requestId);
     if (!credentials) {
       this.logger.warn(`Dellin quote skipped: missing credentials context; requestId=${requestId}`);
@@ -526,7 +536,7 @@ export class DellinAdapter implements CarrierAdapter {
       }
       const res = await fetch(calcUrl, {
         method: 'POST',
-        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        headers: withRequestIdHeaders({ Accept: 'application/json', 'Content-Type': 'application/json' }, traceId),
         body: JSON.stringify(calcBody),
         cache: 'no-store',
       }).catch(() => null);
@@ -571,11 +581,12 @@ export class DellinAdapter implements CarrierAdapter {
     documents?: Array<Pick<ShipmentDocumentRecord, 'type' | 'title' | 'content'>>;
   }> {
     const draftOnly = process.env.DELLIN_DRAFT_ONLY === 'true';
+    const traceId = context.requestId ?? quote.requestId;
     const credentials = await this.loadCredentials(context, quote.requestId);
     if (!credentials) {
       throw new Error('Dellin booking failed: missing credentials');
     }
-    const draft = await this.validateDraftRequest(input, credentials, quote.requestId);
+    const draft = await this.validateDraftRequest(input, credentials, quote.requestId, traceId);
     const trackingNumber = draft.requestId
       ? `DELLIN-REQ-${draft.requestId}`
       : `DELLIN-PENDING-${Date.now().toString().slice(-6)}`;
@@ -609,6 +620,7 @@ export class DellinAdapter implements CarrierAdapter {
     document,
     context,
   }: CarrierDocumentDownloadInput): Promise<{ content: Buffer; mimeType: string; fileName: string }> {
+    const traceId = context.requestId ?? shipment.requestId;
     const marker = parseDellinDocMarker(document.content ?? '');
     if (!marker) {
       return {
@@ -632,12 +644,13 @@ export class DellinAdapter implements CarrierAdapter {
       credentials.login,
       credentials.password,
       shipment.requestId,
+      traceId,
     );
     if (!auth) {
       throw new Error('Dellin document download failed: cannot obtain sessionID');
     }
     const sessionID = auth.sessionID;
-    const pdf = await this.fetchPrintableFormPdf(base, appKey, sessionID, marker.requestId, marker.kind);
+    const pdf = await this.fetchPrintableFormPdf(base, appKey, sessionID, marker.requestId, marker.kind, traceId);
     return {
       content: pdf,
       mimeType: 'application/pdf',
@@ -649,6 +662,7 @@ export class DellinAdapter implements CarrierAdapter {
     input: CreateShipmentRequestInput,
     credentials: InternalCarrierCredentials,
     requestId: string,
+    traceId?: string | null,
   ): Promise<DellinDraftValidation> {
     const appKey = (credentials.appKey ?? '').trim() || process.env.DELLIN_APP_KEY?.trim();
     if (!appKey) throw new Error('Dellin booking failed: missing appKey');
@@ -656,7 +670,7 @@ export class DellinAdapter implements CarrierAdapter {
       throw new Error('Dellin booking failed: missing login/password');
     }
     const base = (process.env.DELLIN_API_BASE ?? 'https://api.dellin.ru').replace(/\/+$/, '');
-    const auth = await this.getSessionAuth(base, appKey, credentials.login, credentials.password, requestId);
+    const auth = await this.getSessionAuth(base, appKey, credentials.login, credentials.password, requestId, traceId);
     if (!auth) throw new Error('Dellin booking failed: cannot obtain sessionID');
     const sessionID = auth.sessionID;
 
@@ -790,7 +804,7 @@ export class DellinAdapter implements CarrierAdapter {
     let payload = makePayload(effectiveDraftOnly);
     let res = await fetch(url, {
       method: 'POST',
-      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      headers: withRequestIdHeaders({ Accept: 'application/json', 'Content-Type': 'application/json' }, traceId ?? requestId),
       body: JSON.stringify(payload),
       cache: 'no-store',
     }).catch(() => null);
@@ -801,7 +815,7 @@ export class DellinAdapter implements CarrierAdapter {
       payload = makePayload(true);
       res = await fetch(url, {
         method: 'POST',
-        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        headers: withRequestIdHeaders({ Accept: 'application/json', 'Content-Type': 'application/json' }, traceId ?? requestId),
         body: JSON.stringify(payload),
         cache: 'no-store',
       }).catch(() => null);
@@ -850,11 +864,15 @@ export class DellinAdapter implements CarrierAdapter {
     login: string,
     password: string,
     requestId: string,
+    traceId?: string | null,
   ): Promise<DellinAuthSession | null> {
     const url = dellinJsonUrl(base, DELLIN_AUTH_LOGIN_PATH);
     const res = await fetch(url, {
       method: 'POST',
-      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      headers: withRequestIdHeaders(
+        { Accept: 'application/json', 'Content-Type': 'application/json' },
+        traceId ?? requestId,
+      ),
       body: JSON.stringify({ appkey: appKey, login, password }),
       cache: 'no-store',
     }).catch(() => null);
@@ -910,7 +928,10 @@ export class DellinAdapter implements CarrierAdapter {
       // Try POST first.
       const postRes = await fetch(url, {
         method: 'POST',
-        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        headers: withRequestIdHeaders(
+          { Accept: 'application/json', 'Content-Type': 'application/json' },
+          requestId,
+        ),
         body: JSON.stringify({ appkey: appKey, sessionID }),
         cache: 'no-store',
       }).catch(() => null);
@@ -925,7 +946,7 @@ export class DellinAdapter implements CarrierAdapter {
       q.searchParams.set('sessionID', sessionID);
       const getRes = await fetch(q.toString(), {
         method: 'GET',
-        headers: { Accept: 'application/json' },
+        headers: withRequestIdHeaders({ Accept: 'application/json' }, requestId),
         cache: 'no-store',
       }).catch(() => null);
       if (getRes?.ok) {
@@ -949,7 +970,7 @@ export class DellinAdapter implements CarrierAdapter {
       if (!q) continue;
       const res = await fetch(url, {
         method: 'POST',
-        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        headers: withRequestIdHeaders({ Accept: 'application/json', 'Content-Type': 'application/json' }, requestId),
         body: JSON.stringify({ appkey: appKey, q, limit: 8 }),
         cache: 'no-store',
       }).catch(() => null);
@@ -983,6 +1004,7 @@ export class DellinAdapter implements CarrierAdapter {
       headers: {
         Authorization: `Bearer ${context.authToken}`,
         'x-tms-internal-key': internalKey,
+        ...withRequestIdHeaders({}, context.requestId ?? requestId),
       },
       cache: 'no-store',
     }).catch(() => null);
@@ -1018,6 +1040,7 @@ export class DellinAdapter implements CarrierAdapter {
     sessionID: string,
     dellinRequestId: string,
     kind: 'waybill' | 'request',
+    traceId?: string | null,
   ): Promise<Buffer> {
     const url = dellinJsonUrl(base, DELLIN_REQUEST_PDF_PATH);
     const docIds = kind === 'waybill' ? ['waybill', 'bill', 'consignmentNote'] : ['request', 'pickupRequest'];
@@ -1037,10 +1060,10 @@ export class DellinAdapter implements CarrierAdapter {
     for (const body of payloads) {
       const res = await fetch(url, {
         method: 'POST',
-        headers: {
-          Accept: 'application/pdf, application/json',
-          'Content-Type': 'application/json',
-        },
+        headers: withRequestIdHeaders(
+          { Accept: 'application/pdf, application/json', 'Content-Type': 'application/json' },
+          traceId ?? dellinRequestId,
+        ),
         body: JSON.stringify(body),
         cache: 'no-store',
       }).catch(() => null);
@@ -1063,7 +1086,7 @@ export class DellinAdapter implements CarrierAdapter {
       }
       if (/^https?:\/\//i.test(hint)) {
         const fileRes = await fetch(hint, {
-          headers: { Accept: 'application/pdf' },
+          headers: withRequestIdHeaders({ Accept: 'application/pdf' }, traceId ?? dellinRequestId),
           cache: 'no-store',
         }).catch(() => null);
         if (!fileRes?.ok) {

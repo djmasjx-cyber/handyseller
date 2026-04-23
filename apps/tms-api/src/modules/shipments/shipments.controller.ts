@@ -12,6 +12,12 @@ import { ShipmentsService } from './shipments.service';
 export class ShipmentsController {
   constructor(private readonly shipmentsService: ShipmentsService) {}
 
+  private resolveRequestId(headerValue?: string): string {
+    const trimmed = (headerValue ?? '').trim();
+    if (trimmed) return trimmed.slice(0, 128);
+    return `tms_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  }
+
   @Get('overview')
   overview(@CurrentUser('userId') userId: string) {
     return this.shipmentsService.getOverview(userId);
@@ -62,9 +68,16 @@ export class ShipmentsController {
     @CurrentUser('userId') userId: string,
     @Body() input: CreateShipmentRequestInput,
     @Headers('authorization') authorization?: string,
+    @Headers('x-request-id') requestId?: string,
   ) {
     const authToken = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
-    return this.shipmentsService.createFromCoreOrderIdempotent(userId, input, null, authToken);
+    return this.shipmentsService.createFromCoreOrderIdempotent(
+      userId,
+      input,
+      null,
+      authToken,
+      this.resolveRequestId(requestId),
+    );
   }
 
   @Get('shipment-requests/:id/quotes')
@@ -77,10 +90,11 @@ export class ShipmentsController {
   refreshQuotes(
     @CurrentUser('userId') userId: string,
     @Headers('authorization') authorization: string | undefined,
+    @Headers('x-request-id') inboundRequestId: string | undefined,
     @Param('id') requestId: string,
   ) {
     const authToken = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
-    return this.shipmentsService.refreshQuotes(userId, requestId, authToken);
+    return this.shipmentsService.refreshQuotes(userId, requestId, authToken, this.resolveRequestId(inboundRequestId));
   }
 
   @Post('shipment-requests/:id/select-quote')
@@ -99,9 +113,16 @@ export class ShipmentsController {
     @CurrentUser('userId') userId: string,
     @Param('id') requestId: string,
     @Headers('authorization') authorization?: string,
+    @Headers('x-request-id') inboundRequestId?: string,
   ) {
     const authToken = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
-    return this.shipmentsService.confirmSelectedQuoteIdempotent(userId, requestId, null, authToken);
+    return this.shipmentsService.confirmSelectedQuoteIdempotent(
+      userId,
+      requestId,
+      null,
+      authToken,
+      this.resolveRequestId(inboundRequestId),
+    );
   }
 
   @Post('v1/shipments/estimate')
@@ -111,9 +132,16 @@ export class ShipmentsController {
     @Body() input: CreateShipmentRequestInput,
     @Headers('authorization') authorization?: string,
     @Headers('idempotency-key') idempotencyKey?: string,
+    @Headers('x-request-id') requestId?: string,
   ) {
     const authToken = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
-    const result = await this.shipmentsService.createFromCoreOrderIdempotent(userId, input, idempotencyKey, authToken);
+    const result = await this.shipmentsService.createFromCoreOrderIdempotent(
+      userId,
+      input,
+      idempotencyKey,
+      authToken,
+      this.resolveRequestId(requestId),
+    );
     return {
       shipmentRequestId: result.request.id,
       status: result.request.status,
@@ -137,9 +165,16 @@ export class ShipmentsController {
     @Body() input: CreateShipmentRequestInput,
     @Headers('authorization') authorization?: string,
     @Headers('idempotency-key') idempotencyKey?: string,
+    @Headers('x-request-id') requestId?: string,
   ) {
     const authToken = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
-    const result = await this.shipmentsService.createFromCoreOrderIdempotent(userId, input, idempotencyKey, authToken);
+    const result = await this.shipmentsService.createFromCoreOrderIdempotent(
+      userId,
+      input,
+      idempotencyKey,
+      authToken,
+      this.resolveRequestId(requestId),
+    );
     return {
       shipmentRequestId: result.request.id,
       status: result.request.status,
@@ -157,9 +192,16 @@ export class ShipmentsController {
     @Param('id') requestId: string,
     @Headers('authorization') authorization?: string,
     @Headers('idempotency-key') idempotencyKey?: string,
+    @Headers('x-request-id') inboundRequestId?: string,
   ) {
     const authToken = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
-    return this.shipmentsService.confirmSelectedQuoteIdempotent(userId, requestId, idempotencyKey, authToken);
+    return this.shipmentsService.confirmSelectedQuoteIdempotent(
+      userId,
+      requestId,
+      idempotencyKey,
+      authToken,
+      this.resolveRequestId(inboundRequestId),
+    );
   }
 
   @Post('v1/shipments/:id/select')
@@ -262,9 +304,10 @@ export class ShipmentsController {
     @CurrentUser('userId') userId: string,
     @Param('id') shipmentId: string,
     @Headers('authorization') authorization?: string,
+    @Headers('x-request-id') requestId?: string,
   ) {
     const authToken = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
-    return this.shipmentsService.refreshShipment(userId, shipmentId, authToken);
+    return this.shipmentsService.refreshShipment(userId, shipmentId, authToken, this.resolveRequestId(requestId));
   }
 
   @Get('shipments/:shipmentId/documents/:documentId/file')
@@ -273,10 +316,13 @@ export class ShipmentsController {
     @Param('shipmentId') shipmentId: string,
     @Param('documentId') documentId: string,
     @Headers('authorization') authorization: string | undefined,
+    @Headers('x-request-id') requestId: string | undefined,
     @Res() res: Response,
   ) {
     const authToken = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
-    const file = await this.shipmentsService.downloadDocument(userId, shipmentId, documentId, authToken);
+    const resolvedRequestId = this.resolveRequestId(requestId);
+    const file = await this.shipmentsService.downloadDocument(userId, shipmentId, documentId, authToken, resolvedRequestId);
+    res.setHeader('x-request-id', resolvedRequestId);
     res.setHeader('Content-Type', file.mimeType);
     res.setHeader('Content-Disposition', `inline; filename="${file.fileName.replace(/"/g, '')}"`);
     res.send(file.content);

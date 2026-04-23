@@ -10,6 +10,7 @@ import type {
 export interface CarrierQuoteContext {
   userId: string;
   authToken?: string | null;
+  requestId?: string | null;
 }
 
 export interface CarrierBookInput {

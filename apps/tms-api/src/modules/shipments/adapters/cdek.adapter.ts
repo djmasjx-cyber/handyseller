@@ -209,6 +209,15 @@ function getCdekOrderType(): 1 | 2 {
   return 2;
 }
 
+function withRequestIdHeaders(
+  headers: Record<string, string>,
+  requestId?: string | null,
+): Record<string, string> {
+  const trimmed = (requestId ?? '').trim();
+  if (!trimmed) return headers;
+  return { ...headers, 'x-request-id': trimmed };
+}
+
 export class CdekAdapter implements CarrierAdapter {
   private readonly logger = new Logger(CdekAdapter.name);
   readonly descriptor: CarrierDescriptor = {
@@ -234,11 +243,13 @@ export class CdekAdapter implements CarrierAdapter {
 
     const base = (process.env.CDEK_API_BASE ?? 'https://api.cdek.ru').replace(/\/+$/, '');
     const orderType = getCdekOrderType();
-    const fromCode = await this.resolveCityCode(base, token, input.draft.originLabel || input.snapshot.originLabel);
+    const traceId = context.requestId ?? requestId;
+    const fromCode = await this.resolveCityCode(base, token, input.draft.originLabel || input.snapshot.originLabel, traceId);
     const toCode = await this.resolveCityCode(
       base,
       token,
       input.draft.destinationLabel || input.snapshot.destinationLabel,
+      traceId,
     );
     if (!fromCode || !toCode) {
       this.logger.warn(
@@ -267,6 +278,7 @@ export class CdekAdapter implements CarrierAdapter {
         Authorization: `Bearer ${token}`,
         Accept: 'application/json',
         'Content-Type': 'application/json',
+        ...withRequestIdHeaders({}, traceId),
       },
       body: JSON.stringify(payload),
       cache: 'no-store',
@@ -326,7 +338,12 @@ export class CdekAdapter implements CarrierAdapter {
     return quotes.sort((a, b) => a.priceRub - b.priceRub);
   }
 
-  private async resolveCityCode(base: string, token: string, label: string | null | undefined): Promise<number | null> {
+  private async resolveCityCode(
+    base: string,
+    token: string,
+    label: string | null | undefined,
+    requestId?: string | null,
+  ): Promise<number | null> {
     const candidates = cdekCityCandidates(label);
     for (const city of candidates) {
       const url = new URL('/v2/location/cities', base);
@@ -334,7 +351,7 @@ export class CdekAdapter implements CarrierAdapter {
       url.searchParams.set('city', city);
       url.searchParams.set('size', '1');
       const res = await fetch(url.toString(), {
-        headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+        headers: withRequestIdHeaders({ Authorization: `Bearer ${token}`, Accept: 'application/json' }, requestId),
         cache: 'no-store',
       }).catch(() => null);
       if (!res?.ok) continue;
@@ -359,6 +376,7 @@ export class CdekAdapter implements CarrierAdapter {
       throw new Error('CDEK booking failed: auth error');
     }
     const base = (process.env.CDEK_API_BASE ?? 'https://api.cdek.ru').replace(/\/+$/, '');
+    const traceId = context.requestId ?? quote.requestId;
     const tariffCode = this.extractTariffCode(quote.id);
     const orderNumber = (input.snapshot.coreOrderNumber || '').trim();
     if (!orderNumber) {
@@ -417,8 +435,8 @@ export class CdekAdapter implements CarrierAdapter {
       100,
       itemsTotalWeightGrams,
     );
-    const fromCode = await this.resolveCityCode(base, token, fromAddress);
-    const toCode = await this.resolveCityCode(base, token, toAddress);
+    const fromCode = await this.resolveCityCode(base, token, fromAddress, traceId);
+    const toCode = await this.resolveCityCode(base, token, toAddress, traceId);
     if (!fromCode || !toCode) {
       throw new Error('CDEK booking failed: cannot resolve city code for origin/destination');
     }
@@ -463,6 +481,7 @@ export class CdekAdapter implements CarrierAdapter {
         Authorization: `Bearer ${token}`,
         Accept: 'application/json',
         'Content-Type': 'application/json',
+        ...withRequestIdHeaders({}, traceId),
       },
       body: JSON.stringify(payload),
       cache: 'no-store',
@@ -563,6 +582,7 @@ export class CdekAdapter implements CarrierAdapter {
       throw new Error('CDEK document download failed: auth error');
     }
     const base = (process.env.CDEK_API_BASE ?? 'https://api.cdek.ru').replace(/\/+$/, '');
+    const traceId = context.requestId ?? shipment.requestId;
     const stub = parseCdekDocumentMarker(document.content ?? '');
     if (stub) {
       const endpoint = stub.type === 'waybill' ? 'orders' : 'barcodes';
@@ -572,11 +592,11 @@ export class CdekAdapter implements CarrierAdapter {
       if (!printUuid) {
         throw new Error(`CDEK document download failed: ${endpoint} print uuid not ready`);
       }
-      return this.downloadPrintPdf(base, token, endpoint, printUuid, shipment);
+      return this.downloadPrintPdf(base, token, endpoint, printUuid, shipment, traceId);
     }
     const marker = parseCdekPrintMarker(document.content ?? '');
     if (marker) {
-      return this.downloadPrintPdf(base, token, marker.kind, marker.uuid, shipment);
+      return this.downloadPrintPdf(base, token, marker.kind, marker.uuid, shipment, traceId);
     }
     return {
       content: Buffer.from(document.content ?? '', 'utf-8'),
@@ -608,7 +628,8 @@ export class CdekAdapter implements CarrierAdapter {
       throw new Error('CDEK refresh failed: auth error');
     }
     const base = (process.env.CDEK_API_BASE ?? 'https://api.cdek.ru').replace(/\/+$/, '');
-    const order = await this.fetchOrderByUuid(base, token, orderUuid);
+    const traceId = context.requestId ?? shipment.requestId;
+    const order = await this.fetchOrderByUuid(base, token, orderUuid, traceId);
     if (!order) {
       throw new Error(`CDEK refresh failed: order not found by uuid ${orderUuid}`);
     }
@@ -716,6 +737,7 @@ export class CdekAdapter implements CarrierAdapter {
     endpoint: 'orders' | 'barcodes',
     printUuid: string,
     shipment: ShipmentRecord,
+    requestId?: string | null,
   ): Promise<{ content: Buffer; mimeType: string; fileName: string }> {
     let res: Response | null = null;
     for (let i = 0; i < 16; i += 1) {
@@ -723,6 +745,7 @@ export class CdekAdapter implements CarrierAdapter {
         headers: {
           Authorization: `Bearer ${token}`,
           Accept: 'application/pdf',
+          ...withRequestIdHeaders({}, requestId),
         },
         cache: 'no-store',
       }).catch(() => null);
@@ -855,11 +878,16 @@ export class CdekAdapter implements CarrierAdapter {
     return await this.fetchOrderByUuid(base, token, uuid);
   }
 
-  private async fetchOrderByUuid(base: string, token: string, uuid: string): Promise<CdekOrderResponse | null> {
-    const headers = {
+  private async fetchOrderByUuid(
+    base: string,
+    token: string,
+    uuid: string,
+    requestId?: string | null,
+  ): Promise<CdekOrderResponse | null> {
+    const headers = withRequestIdHeaders({
       Authorization: `Bearer ${token}`,
       Accept: 'application/json',
-    };
+    }, requestId);
     const pathUrl = `${base}/v2/orders/${encodeURIComponent(uuid)}`;
     let res = await fetch(pathUrl, { headers, cache: 'no-store' }).catch(() => null);
     if (res?.status === 404) {
@@ -929,6 +957,7 @@ export class CdekAdapter implements CarrierAdapter {
       headers: {
         Authorization: `Bearer ${context.authToken}`,
         'x-tms-internal-key': internalKey,
+        ...withRequestIdHeaders({}, context.requestId ?? requestId),
       },
       cache: 'no-store',
     }).catch(() => null);
@@ -952,7 +981,7 @@ export class CdekAdapter implements CarrierAdapter {
     url.searchParams.set('client_secret', credentials.password);
     const res = await fetch(url.toString(), {
       method: 'POST',
-      headers: { Accept: 'application/json' },
+      headers: withRequestIdHeaders({ Accept: 'application/json' }, requestId),
       cache: 'no-store',
     }).catch(() => null);
     const data = (await res?.json().catch(() => ({}))) as Record<string, unknown>;

@@ -355,6 +355,7 @@ export class ShipmentsService implements OnModuleInit {
           'Content-Type': 'application/json',
           'X-Handyseller-Event': payload.eventType,
           'X-Handyseller-Signature': `sha256=${signature}`,
+          'X-Request-Id': payload.eventId,
         },
         body,
       });
@@ -596,6 +597,7 @@ export class ShipmentsService implements OnModuleInit {
     userId: string,
     input: CreateShipmentRequestInput,
     authToken?: string | null,
+    requestTraceId?: string | null,
   ): Promise<CreateShipmentRequestResult> {
     const id = `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const now = new Date().toISOString();
@@ -612,7 +614,7 @@ export class ShipmentsService implements OnModuleInit {
     };
     this.requests.set(id, request);
     void this.store.saveRequest(request);
-    const quotes = await this.refreshQuotes(userId, id, authToken);
+    const quotes = await this.refreshQuotes(userId, id, authToken, requestTraceId);
     return {
       request: this.requests.get(id)!,
       quotes,
@@ -624,16 +626,18 @@ export class ShipmentsService implements OnModuleInit {
     input: CreateShipmentRequestInput,
     idempotencyKey?: string | null,
     authToken?: string | null,
+    requestTraceId?: string | null,
   ): Promise<CreateShipmentRequestResult> {
     const scopeKey = this.buildIdempotencyScopeKey(userId, 'create', idempotencyKey);
-    if (!scopeKey) return this.createFromCoreOrder(userId, input, authToken);
-    return this.withIdempotency(scopeKey, () => this.createFromCoreOrder(userId, input, authToken));
+    if (!scopeKey) return this.createFromCoreOrder(userId, input, authToken, requestTraceId);
+    return this.withIdempotency(scopeKey, () => this.createFromCoreOrder(userId, input, authToken, requestTraceId));
   }
 
   async refreshQuotes(
     userId: string,
     requestId: string,
     authToken?: string | null,
+    requestTraceId?: string | null,
   ): Promise<CarrierQuote[]> {
     const request = this.getRequestOrThrow(userId, requestId);
     const quoteResults = await Promise.allSettled(
@@ -644,7 +648,7 @@ export class ShipmentsService implements OnModuleInit {
             draft: request.draft,
           },
           requestId,
-          { userId, authToken },
+          { userId, authToken, requestId: requestTraceId ?? requestId },
         ),
       ),
     );
@@ -718,6 +722,7 @@ export class ShipmentsService implements OnModuleInit {
     userId: string,
     requestId: string,
     authToken?: string | null,
+    requestTraceId?: string | null,
   ): Promise<ShipmentRecord> {
     const request = this.getRequestOrThrow(userId, requestId);
     if (!request.selectedQuoteId) {
@@ -776,7 +781,7 @@ export class ShipmentsService implements OnModuleInit {
           snapshot: request.snapshot,
           draft: request.draft,
         },
-        context: { userId, authToken },
+        context: { userId, authToken, requestId: requestTraceId ?? requestId },
       });
     } catch (error) {
       const message =
@@ -875,10 +880,11 @@ export class ShipmentsService implements OnModuleInit {
     requestId: string,
     idempotencyKey?: string | null,
     authToken?: string | null,
+    requestTraceId?: string | null,
   ): Promise<ShipmentRecord> {
     const scopeKey = this.buildIdempotencyScopeKey(userId, `confirm:${requestId}`, idempotencyKey);
-    if (!scopeKey) return this.confirmSelectedQuote(userId, requestId, authToken);
-    return this.withIdempotency(scopeKey, () => this.confirmSelectedQuote(userId, requestId, authToken));
+    if (!scopeKey) return this.confirmSelectedQuote(userId, requestId, authToken, requestTraceId);
+    return this.withIdempotency(scopeKey, () => this.confirmSelectedQuote(userId, requestId, authToken, requestTraceId));
   }
 
   getTracking(userId: string, shipmentId: string): TrackingEventRecord[] {
@@ -902,6 +908,7 @@ export class ShipmentsService implements OnModuleInit {
     shipmentId: string,
     documentId: string,
     authToken?: string | null,
+    requestTraceId?: string | null,
   ): Promise<{ content: Buffer; mimeType: string; fileName: string }> {
     const shipment = this.shipments.get(shipmentId);
     if (!shipment || shipment.userId !== userId) {
@@ -936,7 +943,7 @@ export class ShipmentsService implements OnModuleInit {
     return adapter.downloadDocument({
       shipment,
       document: doc,
-      context: { userId, authToken },
+      context: { userId, authToken, requestId: requestTraceId ?? shipment.requestId },
     });
   }
 
@@ -944,6 +951,7 @@ export class ShipmentsService implements OnModuleInit {
     userId: string,
     shipmentId: string,
     authToken?: string | null,
+    requestTraceId?: string | null,
   ): Promise<ShipmentRecord> {
     const shipment = this.shipments.get(shipmentId);
     if (!shipment || shipment.userId !== userId) {
@@ -957,7 +965,7 @@ export class ShipmentsService implements OnModuleInit {
     try {
       refreshed = await adapter.refreshShipment({
         shipment,
-        context: { userId, authToken },
+        context: { userId, authToken, requestId: requestTraceId ?? shipment.requestId },
       });
     } catch (error) {
       const message =
