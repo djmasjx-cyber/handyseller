@@ -862,6 +862,7 @@ export class DellinAdapter implements CarrierAdapter {
       sender: DellinCounteragentForm;
       receiver: DellinCounteragentForm;
       useSenderReceiverCounteragent: boolean;
+      useCounteragentIdOnly: boolean;
       label: string;
     }> = [];
     for (const sender of senderCandidates) {
@@ -871,6 +872,7 @@ export class DellinAdapter implements CarrierAdapter {
           sender,
           receiver,
           useSenderReceiverCounteragent: true,
+          useCounteragentIdOnly: false,
           label: `sender=${sender == null ? 'null' : typeof sender === 'object' ? 'object' : String(sender)};receiver=${receiver == null ? 'null' : typeof receiver === 'object' ? 'object' : String(receiver)}`,
         });
       }
@@ -880,7 +882,15 @@ export class DellinAdapter implements CarrierAdapter {
       sender: null,
       receiver: null,
       useSenderReceiverCounteragent: false,
+      useCounteragentIdOnly: false,
       label: 'no-sender-receiver-counteragent',
+    });
+    formAttempts.push({
+      sender: null,
+      receiver: null,
+      useSenderReceiverCounteragent: false,
+      useCounteragentIdOnly: true,
+      label: 'counteragent-id-only',
     });
     const makePayload = (
       draftOnly: boolean,
@@ -888,6 +898,7 @@ export class DellinAdapter implements CarrierAdapter {
       senderForm: DellinCounteragentForm,
       receiverForm: DellinCounteragentForm,
       useSenderReceiverCounteragent: boolean,
+      useCounteragentIdOnly: boolean,
     ): Record<string, unknown> => ({
       appkey: appKey,
       sessionID,
@@ -896,6 +907,7 @@ export class DellinAdapter implements CarrierAdapter {
       members: {
         requester: { role: 'sender', uid: requesterUid },
         sender: {
+          ...(useCounteragentIdOnly ? { counteragentID: requesterUid } : {}),
           ...(useSenderReceiverCounteragent
             ? {
                 counteragent: {
@@ -911,6 +923,7 @@ export class DellinAdapter implements CarrierAdapter {
           phoneNumbers: [{ number: shipperPhone }],
         },
         receiver: {
+          ...(useCounteragentIdOnly ? { counteragentID: requesterUid } : {}),
           ...(useSenderReceiverCounteragent
             ? {
                 counteragent: {
@@ -964,6 +977,7 @@ export class DellinAdapter implements CarrierAdapter {
           formChoice.sender,
           formChoice.receiver,
           formChoice.useSenderReceiverCounteragent,
+          formChoice.useCounteragentIdOnly,
         );
         if (this.dellinDebug) {
           this.logger.log(
@@ -1001,6 +1015,7 @@ export class DellinAdapter implements CarrierAdapter {
             formChoice.sender,
             formChoice.receiver,
             formChoice.useSenderReceiverCounteragent,
+            formChoice.useCounteragentIdOnly,
           );
           res = await fetch(url, {
             method: 'POST',
