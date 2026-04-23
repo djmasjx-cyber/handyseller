@@ -396,6 +396,59 @@ export class ShipmentsService implements OnModuleInit {
     }
   }
 
+  async ingestCarrierWebhookIdempotent(input: {
+    carrier: string;
+    eventType: string;
+    eventId: string;
+    payload?: unknown;
+  }): Promise<{ queued: boolean }> {
+    const scopeKey = `carrier-webhook:${input.carrier}:${input.eventId}`;
+    return this.withIdempotency(scopeKey, async () => {
+      const jobId = `job_carrier_wh_${input.carrier}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      await this.store.enqueueSyncJob({
+        id: jobId,
+        kind: 'ingest_carrier_webhook',
+        carrier: input.carrier,
+        idempotencyKey: scopeKey,
+        payload: {
+          carrier: input.carrier,
+          eventType: input.eventType,
+          eventId: input.eventId,
+          receivedAt: new Date().toISOString(),
+          payload: input.payload ?? null,
+        },
+      });
+      return { queued: true };
+    });
+  }
+
+  async processInboundCarrierWebhook(payload: {
+    carrier: string;
+    eventType: string;
+    eventId: string;
+    receivedAt: string;
+    payload?: unknown;
+  }): Promise<void> {
+    const carrier = (payload.carrier || '').trim().toLowerCase();
+    const eventType = payload.eventType || 'carrier.updated';
+    const eventId = payload.eventId || 'n/a';
+    this.logger.log(`[carrier-webhook] accepted carrier=${carrier} eventType=${eventType} eventId=${eventId}`);
+
+    // Minimal generic behavior for scaffold: if payload contains known identifiers, schedule refresh.
+    const body = (payload.payload ?? {}) as Record<string, unknown>;
+    const shipmentId = typeof body.shipmentId === 'string' ? body.shipmentId.trim() : '';
+    const userId = typeof body.userId === 'string' ? body.userId.trim() : '';
+    if (shipmentId && userId) {
+      await this.store.enqueueSyncJob({
+        id: `job_refresh_from_webhook_${shipmentId}_${Date.now()}`,
+        kind: 'refresh_shipment',
+        carrier: carrier || null,
+        idempotencyKey: `refresh:${shipmentId}:${eventId}`,
+        payload: { userId, shipmentId },
+      });
+    }
+  }
+
   async listClientOrders(
     userId: string,
     authToken?: string | null,

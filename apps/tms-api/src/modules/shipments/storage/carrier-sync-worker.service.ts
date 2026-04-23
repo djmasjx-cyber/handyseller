@@ -82,6 +82,28 @@ export class CarrierSyncWorkerService implements OnModuleInit, OnModuleDestroy {
       await this.store.markSyncJobDone(job.id);
       return;
     }
+    if (job.kind === 'ingest_carrier_webhook') {
+      const payload = (job.payload ?? {}) as {
+        carrier?: string;
+        eventType?: string;
+        eventId?: string;
+        receivedAt?: string;
+        payload?: unknown;
+      };
+      if (!payload.carrier || !payload.eventType || !payload.eventId || !payload.receivedAt) {
+        await this.store.markSyncJobDone(job.id);
+        return;
+      }
+      await this.shipmentsService.processInboundCarrierWebhook({
+        carrier: payload.carrier,
+        eventType: payload.eventType,
+        eventId: payload.eventId,
+        receivedAt: payload.receivedAt,
+        payload: payload.payload,
+      });
+      await this.store.markSyncJobDone(job.id);
+      return;
+    }
     await this.store.markSyncJobDone(job.id);
   }
 }
