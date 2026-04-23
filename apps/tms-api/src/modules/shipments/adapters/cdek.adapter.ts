@@ -220,6 +220,11 @@ function withRequestIdHeaders(
 
 export class CdekAdapter implements CarrierAdapter {
   private readonly logger = new Logger(CdekAdapter.name);
+  private readonly credentialsCache = new Map<
+    string,
+    { expiresAt: number; value: InternalCarrierCredentials }
+  >();
+  private readonly tokenCache = new Map<string, { expiresAt: number; token: string }>();
   readonly descriptor: CarrierDescriptor = {
     id: 'cdek',
     code: 'CDEK',
@@ -230,6 +235,33 @@ export class CdekAdapter implements CarrierAdapter {
     supportsBooking: true,
     requiresCredentials: true,
   };
+
+  private quoteTimeoutMs(): number {
+    const raw = Number.parseInt(process.env.TMS_CARRIER_QUOTE_TIMEOUT_MS ?? '2500', 10);
+    return Number.isFinite(raw) ? Math.max(500, raw) : 2500;
+  }
+
+  private credentialsCacheTtlMs(): number {
+    const raw = Number.parseInt(process.env.TMS_CREDENTIALS_CACHE_TTL_SECONDS ?? '300', 10);
+    return (Number.isFinite(raw) ? Math.max(30, raw) : 300) * 1000;
+  }
+
+  private tokenSafetySeconds(): number {
+    const raw = Number.parseInt(process.env.TMS_CDEK_TOKEN_SAFETY_SECONDS ?? '60', 10);
+    return Number.isFinite(raw) ? Math.max(5, raw) : 60;
+  }
+
+  private async fetchWithTimeout(input: string, init: RequestInit, timeoutMs: number): Promise<Response | null> {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), timeoutMs);
+    try {
+      return await fetch(input, { ...init, signal: ctl.signal });
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
 
   async quote(
     input: CreateShipmentRequestInput,
@@ -263,12 +295,19 @@ export class CdekAdapter implements CarrierAdapter {
     const base = (process.env.CDEK_API_BASE ?? 'https://api.cdek.ru').replace(/\/+$/, '');
     const orderType = getCdekOrderType();
     const cityResolveStartedAt = Date.now();
-    const fromCode = await this.resolveCityCode(base, token, input.draft.originLabel || input.snapshot.originLabel, traceId);
+    const fromCode = await this.resolveCityCode(
+      base,
+      token,
+      input.draft.originLabel || input.snapshot.originLabel,
+      traceId,
+      this.quoteTimeoutMs(),
+    );
     const toCode = await this.resolveCityCode(
       base,
       token,
       input.draft.destinationLabel || input.snapshot.destinationLabel,
       traceId,
+      this.quoteTimeoutMs(),
     );
     cityResolveMs = Math.max(0, Date.now() - cityResolveStartedAt);
     if (!fromCode || !toCode) {
@@ -293,7 +332,7 @@ export class CdekAdapter implements CarrierAdapter {
     };
 
     const calculatorStartedAt = Date.now();
-    const res = await fetch(`${base}/v2/calculator/tarifflist`, {
+    const res = await this.fetchWithTimeout(`${base}/v2/calculator/tarifflist`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -303,7 +342,7 @@ export class CdekAdapter implements CarrierAdapter {
       },
       body: JSON.stringify(payload),
       cache: 'no-store',
-    }).catch(() => null);
+    }, this.quoteTimeoutMs());
     calculatorMs = Math.max(0, Date.now() - calculatorStartedAt);
     if (!res?.ok) {
       this.logger.warn(`CDEK calculator HTTP failed: status=${res?.status ?? 'n/a'}; requestId=${requestId}`);
@@ -365,6 +404,7 @@ export class CdekAdapter implements CarrierAdapter {
     token: string,
     label: string | null | undefined,
     requestId?: string | null,
+    timeoutMs = 2500,
   ): Promise<number | null> {
     const candidates = cdekCityCandidates(label);
     for (const city of candidates) {
@@ -372,10 +412,10 @@ export class CdekAdapter implements CarrierAdapter {
       url.searchParams.set('country_codes', 'RU');
       url.searchParams.set('city', city);
       url.searchParams.set('size', '1');
-      const res = await fetch(url.toString(), {
+      const res = await this.fetchWithTimeout(url.toString(), {
         headers: withRequestIdHeaders({ Authorization: `Bearer ${token}`, Accept: 'application/json' }, requestId),
         cache: 'no-store',
-      }).catch(() => null);
+      }, timeoutMs);
       if (!res?.ok) continue;
       const data = (await res.json().catch(() => [])) as unknown;
       const row = Array.isArray(data) && data.length ? (data[0] as CdekCity) : null;
@@ -972,40 +1012,55 @@ export class CdekAdapter implements CarrierAdapter {
     requestId: string,
   ): Promise<InternalCarrierCredentials | null> {
     if (!context.authToken) return null;
+    const cacheKey = `${context.userId}:cdek:express`;
+    const cached = this.credentialsCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.value;
+    }
     const coreBase = (process.env.CORE_API_URL ?? 'http://localhost:4000').replace(/\/api\/?$/, '');
     const internalKey = process.env.TMS_INTERNAL_KEY?.trim();
     if (!internalKey) return null;
-    const res = await fetch(`${coreBase}/api/tms/carrier-connections/internal/CDEK/default?serviceType=EXPRESS`, {
+    const res = await this.fetchWithTimeout(`${coreBase}/api/tms/carrier-connections/internal/CDEK/default?serviceType=EXPRESS`, {
       headers: {
         Authorization: `Bearer ${context.authToken}`,
         'x-tms-internal-key': internalKey,
         ...withRequestIdHeaders({}, context.requestId ?? requestId),
       },
       cache: 'no-store',
-    }).catch(() => null);
+    }, this.quoteTimeoutMs());
     if (!res?.ok) {
       this.logger.warn(
         `CDEK credentials fetch failed: status=${res?.status ?? 'n/a'}; coreBase=${coreBase}; requestId=${requestId}`,
       );
       return null;
     }
-    return (await res.json()) as InternalCarrierCredentials;
+    const value = (await res.json()) as InternalCarrierCredentials;
+    this.credentialsCache.set(cacheKey, {
+      value,
+      expiresAt: Date.now() + this.credentialsCacheTtlMs(),
+    });
+    return value;
   }
 
   private async getAccessToken(
     credentials: InternalCarrierCredentials,
     requestId: string,
   ): Promise<string | null> {
+    const cacheKey = `${credentials.login}:${credentials.password}`;
+    const cached = this.tokenCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.token;
+    }
     const base = (process.env.CDEK_API_BASE ?? 'https://api.cdek.ru').replace(/\/+$/, '');
     const url = new URL('/v2/oauth/token', base);
     url.searchParams.set('grant_type', 'client_credentials');
     url.searchParams.set('client_id', credentials.login);
     url.searchParams.set('client_secret', credentials.password);
-    const res = await fetch(url.toString(), {
+    const res = await this.fetchWithTimeout(url.toString(), {
       method: 'POST',
       headers: withRequestIdHeaders({ Accept: 'application/json' }, requestId),
       cache: 'no-store',
-    }).catch(() => null);
+    }, this.quoteTimeoutMs());
     const data = (await res?.json().catch(() => ({}))) as Record<string, unknown>;
     if (!res?.ok) {
       const hint =
@@ -1025,6 +1080,13 @@ export class CdekAdapter implements CarrierAdapter {
       );
       return null;
     }
-    return data.access_token;
+    const token = data.access_token;
+    const expiresIn = typeof data.expires_in === 'number' && Number.isFinite(data.expires_in) ? data.expires_in : 3600;
+    const ttlSeconds = Math.max(30, expiresIn - this.tokenSafetySeconds());
+    this.tokenCache.set(cacheKey, {
+      token,
+      expiresAt: Date.now() + ttlSeconds * 1000,
+    });
+    return token;
   }
 }

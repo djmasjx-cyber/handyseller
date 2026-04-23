@@ -245,6 +245,10 @@ function extractMajorCityCandidates(label: string | null | undefined): string[] 
 
 export class MajorExpressAdapter implements CarrierAdapter {
   private readonly logger = new Logger(MajorExpressAdapter.name);
+  private readonly credentialsCache = new Map<
+    string,
+    { expiresAt: number; value: InternalCarrierCredentials }
+  >();
   readonly descriptor: CarrierDescriptor = {
     id: 'major-express',
     code: 'MAJOR_EXPRESS',
@@ -258,6 +262,28 @@ export class MajorExpressAdapter implements CarrierAdapter {
 
   private cityCache: MajorCity[] | null = null;
   private cityCacheLoadedAt = 0;
+
+  private quoteTimeoutMs(): number {
+    const raw = Number.parseInt(process.env.TMS_CARRIER_QUOTE_TIMEOUT_MS ?? '2500', 10);
+    return Number.isFinite(raw) ? Math.max(500, raw) : 2500;
+  }
+
+  private credentialsCacheTtlMs(): number {
+    const raw = Number.parseInt(process.env.TMS_CREDENTIALS_CACHE_TTL_SECONDS ?? '300', 10);
+    return (Number.isFinite(raw) ? Math.max(30, raw) : 300) * 1000;
+  }
+
+  private async fetchWithTimeout(input: string, init: RequestInit, timeoutMs: number): Promise<Response | null> {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), timeoutMs);
+    try {
+      return await fetch(input, { ...init, signal: ctl.signal });
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
 
   async quote(
     input: CreateShipmentRequestInput,
@@ -626,6 +652,11 @@ export class MajorExpressAdapter implements CarrierAdapter {
     if (!context.authToken) {
       return null;
     }
+    const cacheKey = `${context.userId}:major:${serviceType.toLowerCase()}`;
+    const cached = this.credentialsCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.value;
+    }
 
     const coreBase = (process.env.CORE_API_URL ?? 'http://localhost:4000').replace(/\/api\/?$/, '');
     const internalKey = process.env.TMS_INTERNAL_KEY?.trim();
@@ -633,7 +664,7 @@ export class MajorExpressAdapter implements CarrierAdapter {
       return null;
     }
 
-    const res = await fetch(
+    const res = await this.fetchWithTimeout(
       `${coreBase}/api/tms/carrier-connections/internal/MAJOR_EXPRESS/default?serviceType=${serviceType}`,
       {
         headers: {
@@ -642,7 +673,8 @@ export class MajorExpressAdapter implements CarrierAdapter {
         },
         cache: 'no-store',
       },
-    ).catch(() => null);
+      this.quoteTimeoutMs(),
+    );
 
     if (!res?.ok) {
       this.logger.warn(
@@ -651,7 +683,12 @@ export class MajorExpressAdapter implements CarrierAdapter {
       return null;
     }
 
-    return (await res.json()) as InternalCarrierCredentials;
+    const value = (await res.json()) as InternalCarrierCredentials;
+    this.credentialsCache.set(cacheKey, {
+      value,
+      expiresAt: Date.now() + this.credentialsCacheTtlMs(),
+    });
+    return value;
   }
 
   private async loadCredentialsWithFallback(
@@ -676,9 +713,9 @@ export class MajorExpressAdapter implements CarrierAdapter {
       return this.cityCache;
     }
 
-    const res = await fetch('https://ltl-ws.major-express.ru/ed.asmx/dict_Cities', {
+    const res = await this.fetchWithTimeout('https://ltl-ws.major-express.ru/ed.asmx/dict_Cities', {
       cache: 'no-store',
-    }).catch(() => null);
+    }, Math.max(this.quoteTimeoutMs(), 3000));
     if (!res?.ok) {
       // Не валим весь расчёт: без справочника городов Major просто не даст тариф в этом запросе.
       this.logger.warn(`Major city dictionary fetch failed: status=${res?.status ?? 'n/a'}`);
@@ -744,7 +781,7 @@ export class MajorExpressAdapter implements CarrierAdapter {
       : this.buildCalculatorBody(credentials, shipperCityCode, consigneeCityCode, input, ns);
     const soapAction = hasDimensions ? `"${ns}Calculator1"` : `"${ns}Calculator"`;
 
-    const res = await fetch(endpoint, {
+    const res = await this.fetchWithTimeout(endpoint, {
       method: 'POST',
       headers: {
         Authorization: `Basic ${Buffer.from(`${credentials.login}:${credentials.password}`).toString('base64')}`,
@@ -752,7 +789,7 @@ export class MajorExpressAdapter implements CarrierAdapter {
         SOAPAction: soapAction,
       },
       body,
-    }).catch(() => null);
+    }, this.quoteTimeoutMs());
 
     if (!res?.ok) {
       this.logger.warn(

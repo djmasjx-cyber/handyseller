@@ -116,7 +116,17 @@ REQUEST_BODY="$(cat <<EOF
         "quantity": 1,
         "weightGrams": 1500
       }
-    ]
+    ],
+    "contacts": {
+      "shipper": {
+        "name": "Склад HandySeller",
+        "phone": "+79990001122"
+      },
+      "recipient": {
+        "name": "Тестовый получатель",
+        "phone": "+79990003344"
+      }
+    }
   },
   "draft": {
     "originLabel": "Москва, Склад 1",

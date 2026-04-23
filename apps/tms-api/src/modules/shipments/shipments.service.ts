@@ -32,6 +32,9 @@ export class ShipmentsService implements OnModuleInit {
   private readonly adapters: CarrierAdapter[] = ShipmentsService.buildCarrierAdapters();
   private readonly requests = new Map<string, ShipmentRequestRecord>();
   private readonly quotes = new Map<string, CarrierQuote[]>();
+  private readonly quoteCache = new Map<string, { expiresAt: number; quotes: CarrierQuote[] }>();
+  private readonly quoteInFlight = new Map<string, Promise<CarrierQuote[]>>();
+  private readonly quoteDiagnostics: Array<{ ts: number; durationMs: number; empty: boolean }> = [];
   private readonly shipments = new Map<string, ShipmentRecord>();
   private readonly tracking = new Map<string, TrackingEventRecord[]>();
   private readonly documents = new Map<string, ShipmentDocumentRecord[]>();
@@ -563,6 +566,27 @@ export class ShipmentsService implements OnModuleInit {
     return sorted[index] ?? 0;
   }
 
+  private quoteCacheTtlMs(): number {
+    const raw = Number.parseInt(process.env.TMS_QUOTE_CACHE_TTL_SECONDS ?? '120', 10);
+    return (Number.isFinite(raw) ? Math.max(10, raw) : 120) * 1000;
+  }
+
+  private quoteCacheKey(userId: string, request: ShipmentRequestRecord): string {
+    const cargo = request.snapshot.cargo;
+    const flags = [...(request.draft.serviceFlags ?? [])].sort().join(',');
+    return [
+      userId,
+      request.draft.originLabel || request.snapshot.originLabel || '',
+      request.draft.destinationLabel || request.snapshot.destinationLabel || '',
+      cargo.weightGrams ?? 0,
+      cargo.lengthMm ?? 0,
+      cargo.widthMm ?? 0,
+      cargo.heightMm ?? 0,
+      cargo.places ?? 1,
+      flags,
+    ].join('|');
+  }
+
   async getSloMetrics(
     userId: string,
     options?: { staleHours?: number; webhookWindowHours?: number },
@@ -591,6 +615,11 @@ export class ShipmentsService implements OnModuleInit {
     latency: {
       quoteMs: { p50: number; p95: number; avg: number; samples: number };
       confirmMs: { p50: number; p95: number; avg: number; samples: number };
+    };
+    quoteQuality: {
+      samples: number;
+      emptyRate: number;
+      estimateTotalMs: { p50: number; p95: number; avg: number };
     };
     carrierErrors: {
       windowHours: number;
@@ -640,6 +669,13 @@ export class ShipmentsService implements OnModuleInit {
       ? confirmDurations.reduce((sum, value) => sum + value, 0) / confirmDurations.length
       : 0;
     const carrierFailedTotal = failedByCarrier.reduce((sum, row) => sum + row.failed, 0);
+    const windowStart = now - webhookWindowHours * 60 * 60 * 1000;
+    const diag = this.quoteDiagnostics.filter((x) => x.ts >= windowStart);
+    const diagDurations = diag.map((x) => x.durationMs);
+    const diagAvg = diagDurations.length
+      ? diagDurations.reduce((sum, value) => sum + value, 0) / diagDurations.length
+      : 0;
+    const emptyCount = diag.filter((x) => x.empty).length;
 
     return {
       generatedAt: new Date().toISOString(),
@@ -671,6 +707,15 @@ export class ShipmentsService implements OnModuleInit {
           p95: Math.round(this.percentile(confirmDurations, 95)),
           avg: Math.round(confirmAvg),
           samples: confirmDurations.length,
+        },
+      },
+      quoteQuality: {
+        samples: diag.length,
+        emptyRate: Number((diag.length ? emptyCount / diag.length : 0).toFixed(4)),
+        estimateTotalMs: {
+          p50: Math.round(this.percentile(diagDurations, 50)),
+          p95: Math.round(this.percentile(diagDurations, 95)),
+          avg: Math.round(diagAvg),
         },
       },
       carrierErrors: {
@@ -770,6 +815,45 @@ export class ShipmentsService implements OnModuleInit {
     requestTraceId?: string | null,
   ): Promise<CarrierQuote[]> {
     const request = this.getRequestOrThrow(userId, requestId);
+    const cacheKey = this.quoteCacheKey(userId, request);
+    const cached = this.quoteCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      this.logger.log(`[quote-cache] requestId=${requestId} status=hit quotes=${cached.quotes.length}`);
+      request.status = cached.quotes.length > 0 ? 'QUOTED' : 'DRAFT';
+      request.updatedAt = new Date().toISOString();
+      this.requests.set(requestId, request);
+      void this.store.saveRequest(request);
+      this.quotes.set(requestId, cached.quotes);
+      return cached.quotes;
+    }
+    const inFlight = this.quoteInFlight.get(cacheKey);
+    if (inFlight) {
+      this.logger.log(`[quote-cache] requestId=${requestId} status=singleflight_wait`);
+      const sharedQuotes = await inFlight;
+      request.status = sharedQuotes.length > 0 ? 'QUOTED' : 'DRAFT';
+      request.updatedAt = new Date().toISOString();
+      this.requests.set(requestId, request);
+      void this.store.saveRequest(request);
+      this.quotes.set(requestId, sharedQuotes);
+      return sharedQuotes;
+    }
+    const compute = this.computeQuotes(userId, requestId, request, authToken, requestTraceId, cacheKey);
+    this.quoteInFlight.set(cacheKey, compute);
+    try {
+      return await compute;
+    } finally {
+      this.quoteInFlight.delete(cacheKey);
+    }
+  }
+
+  private async computeQuotes(
+    userId: string,
+    requestId: string,
+    request: ShipmentRequestRecord,
+    authToken?: string | null,
+    requestTraceId?: string | null,
+    cacheKey?: string,
+  ): Promise<CarrierQuote[]> {
     const quoteStartedAt = Date.now();
     const adapterStartedAt = this.adapters.map(() => Date.now());
     const quoteResults = await Promise.allSettled(
@@ -814,6 +898,16 @@ export class ShipmentsService implements OnModuleInit {
     const quotes = rankQuotes(successfulQuotes);
     const totalDurationMs = Math.max(0, Date.now() - quoteStartedAt);
     this.logger.log(`[quote-latency] requestId=${requestId} stage=refreshQuotes totalMs=${totalDurationMs} quotes=${quotes.length}`);
+    this.quoteDiagnostics.push({ ts: Date.now(), durationMs: totalDurationMs, empty: quotes.length === 0 });
+    if (this.quoteDiagnostics.length > 2000) {
+      this.quoteDiagnostics.splice(0, this.quoteDiagnostics.length - 2000);
+    }
+    if (cacheKey) {
+      this.quoteCache.set(cacheKey, {
+        quotes,
+        expiresAt: Date.now() + this.quoteCacheTtlMs(),
+      });
+    }
     this.logQuoteAudit(requestId, request, quotes);
 
     request.status = quotes.length > 0 ? 'QUOTED' : 'DRAFT';
