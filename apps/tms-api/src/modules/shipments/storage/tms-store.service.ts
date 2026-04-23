@@ -30,6 +30,18 @@ type WebhookSubRow = { payload: unknown };
 type StatusCountRow = { status: string; count: string };
 type WebhookDeliveryCountRow = { status: string; count: string };
 type CarrierFailedCountRow = { carrier: string | null; count: string };
+type WebhookDeliveryReplayRow = {
+  event_type: string;
+  payload: unknown;
+  created_at: string;
+};
+type StaleShipmentCandidateRow = {
+  id: string;
+  user_id: string;
+  carrier: string | null;
+  status: string;
+  updated_at: string;
+};
 
 @Injectable()
 export class TmsStoreService implements OnModuleInit {
@@ -504,6 +516,28 @@ export class TmsStoreService implements OnModuleInit {
     );
   }
 
+  async getWebhookDeliveryReplayPayload(
+    subscriptionId: string,
+    eventId: string,
+  ): Promise<{ eventType: string; payload: unknown; occurredAt: string } | null> {
+    if (!this.pool) return null;
+    const rows = await this.pool.query<WebhookDeliveryReplayRow>(
+      `SELECT event_type, payload, created_at::text
+       FROM tms_partner_webhook_delivery
+       WHERE subscription_id = $1 AND event_id = $2
+       ORDER BY id DESC
+       LIMIT 1`,
+      [subscriptionId, eventId],
+    );
+    if ((rows.rowCount ?? 0) < 1) return null;
+    const row = rows.rows[0];
+    return {
+      eventType: row.event_type,
+      payload: row.payload ?? null,
+      occurredAt: row.created_at,
+    };
+  }
+
   async getSyncJobStats(): Promise<{ pending: number; running: number; failed: number }> {
     if (!this.pool) return { pending: 0, running: 0, failed: 0 };
     const rows = await this.pool.query<StatusCountRow>(
@@ -557,6 +591,30 @@ export class TmsStoreService implements OnModuleInit {
     return rows.rows.map((row) => ({
       carrier: row.carrier || 'unknown',
       failed: Number.parseInt(row.count, 10) || 0,
+    }));
+  }
+
+  async listStaleShipmentCandidates(staleMinutes = 30, limit = 50): Promise<
+    Array<{ shipmentId: string; userId: string; carrier: string | null; status: string; updatedAt: string }>
+  > {
+    if (!this.pool) return [];
+    const safeMinutes = Math.max(5, Math.min(24 * 60, Math.floor(staleMinutes)));
+    const safeLimit = Math.max(1, Math.min(200, Math.floor(limit)));
+    const rows = await this.pool.query<StaleShipmentCandidateRow>(
+      `SELECT id, user_id, carrier, status, updated_at::text
+       FROM tms_shipment
+       WHERE status NOT IN ('DELIVERED', 'CANCELLED')
+         AND updated_at <= NOW() - make_interval(mins => $1::int)
+       ORDER BY updated_at ASC
+       LIMIT $2`,
+      [safeMinutes, safeLimit],
+    );
+    return rows.rows.map((row) => ({
+      shipmentId: row.id,
+      userId: row.user_id,
+      carrier: row.carrier,
+      status: row.status,
+      updatedAt: row.updated_at,
     }));
   }
 }

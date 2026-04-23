@@ -55,6 +55,9 @@ Operational playbook for diagnosing and resolving carrier integration issues (CD
   - `TMS_CARRIER_WEBHOOK_SHARED_SECRET`
 - If no secret is configured, endpoint denies requests by design.
 - Incoming events are queued via `ingest_carrier_webhook` and processed asynchronously.
+- Worker resolves shipment by:
+  - explicit `shipmentId + userId`,
+  - or by `trackingNumber` / `carrierOrderReference` fallback.
 
 ## Carrier-specific notes
 
@@ -115,6 +118,10 @@ Operational playbook for diagnosing and resolving carrier integration issues (CD
   - `GET /api/tms/slo/metrics?staleHours=24&webhookWindowHours=24`
 - Run SLO alert gate:
   - `ACCESS_TOKEN=... npm run slo:tms:check`
+- Pull fallback tuning (stale shipment refresh worker):
+  - `TMS_STALE_POLL_EVERY_SECONDS` (default `120`)
+  - `TMS_STALE_SHIPMENT_MINUTES` (default `30`)
+  - `TMS_STALE_POLL_MAX_JOBS` (default `30`)
 - Smoke output format:
   - success: `PASS carrier=<id> requestId=<requestId> shipmentId=<shipmentId>`
   - fail-fast: `FAIL step=<step> reason=<auth|validation|timeout|doc_not_ready|carrier|unknown>`

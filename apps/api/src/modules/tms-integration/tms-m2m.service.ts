@@ -418,6 +418,24 @@ paths:
         '200':
           description: Новый signing secret выпущен
 
+  /tms/v1/webhooks/subscriptions/{id}/replay/{eventId}:
+    post:
+      summary: Переотправить webhook-событие из delivery log
+      tags: [TMS v1]
+      security: [bearerAuth]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: eventId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Событие поставлено в очередь на повторную доставку
+
   /tms/client-orders:
     get:
       summary: Заказы клиентов (TMS)

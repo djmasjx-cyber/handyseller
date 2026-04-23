@@ -108,6 +108,8 @@ curl -X POST "https://api.handyseller.ru/api/tms/v1/shipments/<REQUEST_ID>/confi
   - `DELETE /api/tms/v1/webhooks/subscriptions/{id}`
 - Ротировать секрет подписи:
   - `POST /api/tms/v1/webhooks/subscriptions/{id}/rotate-secret`
+- Replay события из delivery log:
+  - `POST /api/tms/v1/webhooks/subscriptions/{id}/replay/{eventId}`
 
 `callbackUrl` должен быть HTTPS.
 

@@ -283,6 +283,16 @@ export class ShipmentsController {
     return this.shipmentsService.rotateWebhookSubscriptionSecret(userId, id);
   }
 
+  @Post('v1/webhooks/subscriptions/:id/replay/:eventId')
+  @TmsAccess('write')
+  v1ReplayWebhookEvent(
+    @CurrentUser('userId') userId: string,
+    @Param('id') id: string,
+    @Param('eventId') eventId: string,
+  ) {
+    return this.shipmentsService.replayWebhookDeliveryEvent(userId, id, eventId);
+  }
+
   @Get('shipments')
   listShipments(@CurrentUser('userId') userId: string) {
     return this.shipmentsService.listShipments(userId);

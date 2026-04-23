@@ -329,6 +329,38 @@ export class ShipmentsService implements OnModuleInit {
     return { ok: true };
   }
 
+  async replayWebhookDeliveryEvent(
+    userId: string,
+    subscriptionId: string,
+    eventId: string,
+  ): Promise<{ queued: boolean; eventType: string }> {
+    const existing = this.webhookSubscriptions.get(subscriptionId);
+    if (!existing || existing.userId !== userId) {
+      throw new NotFoundException('Webhook subscription не найдена');
+    }
+    const replay = await this.store.getWebhookDeliveryReplayPayload(subscriptionId, eventId);
+    if (!replay) {
+      throw new NotFoundException('Webhook event не найден в delivery log');
+    }
+    const now = new Date().toISOString();
+    const replayJobId = `job_webhook_replay_${subscriptionId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    await this.store.enqueueSyncJob({
+      id: replayJobId,
+      kind: 'deliver_partner_webhook',
+      carrier: null,
+      idempotencyKey: `deliver:${subscriptionId}:${eventId}:replay:${Date.now()}`,
+      payload: {
+        subscriptionId,
+        eventType: replay.eventType,
+        eventId,
+        occurredAt: replay.occurredAt || now,
+        updatedAt: now,
+        data: replay.payload ?? null,
+      },
+    });
+    return { queued: true, eventType: replay.eventType };
+  }
+
   async deliverWebhookEvent(payload: {
     subscriptionId: string;
     eventType: string;
@@ -435,19 +467,58 @@ export class ShipmentsService implements OnModuleInit {
     const eventId = payload.eventId || 'n/a';
     this.logger.log(`[carrier-webhook] accepted carrier=${carrier} eventType=${eventType} eventId=${eventId}`);
 
-    // Minimal generic behavior for scaffold: if payload contains known identifiers, schedule refresh.
     const body = (payload.payload ?? {}) as Record<string, unknown>;
-    const shipmentId = typeof body.shipmentId === 'string' ? body.shipmentId.trim() : '';
-    const userId = typeof body.userId === 'string' ? body.userId.trim() : '';
-    if (shipmentId && userId) {
-      await this.store.enqueueSyncJob({
-        id: `job_refresh_from_webhook_${shipmentId}_${Date.now()}`,
-        kind: 'refresh_shipment',
-        carrier: carrier || null,
-        idempotencyKey: `refresh:${shipmentId}:${eventId}`,
-        payload: { userId, shipmentId },
-      });
+    const asString = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
+    const identifiers = {
+      shipmentId: asString(body.shipmentId),
+      userId: asString(body.userId),
+      trackingNumber: asString(body.trackingNumber),
+      carrierOrderReference: asString(body.carrierOrderReference || body.orderReference || body.orderId),
+    };
+
+    // Fallback: try common nested carrier webhook shapes.
+    if (!identifiers.shipmentId || !identifiers.userId) {
+      const meta = (body.meta ?? body.metadata ?? body.data ?? body.payload) as Record<string, unknown> | undefined;
+      if (meta) {
+        identifiers.shipmentId ||= asString(meta.shipmentId);
+        identifiers.userId ||= asString(meta.userId);
+        identifiers.trackingNumber ||= asString(meta.trackingNumber);
+        identifiers.carrierOrderReference ||= asString(meta.carrierOrderReference || meta.orderReference || meta.orderId);
+      }
     }
+
+    let matchedShipmentId = identifiers.shipmentId;
+    let matchedUserId = identifiers.userId;
+    if (matchedShipmentId && !matchedUserId) {
+      const byId = this.shipments.get(matchedShipmentId);
+      if (byId) matchedUserId = byId.userId;
+    }
+    if (!matchedShipmentId || !matchedUserId) {
+      const matched = [...this.shipments.values()].find((item) => {
+        if (carrier && item.carrierId !== carrier) return false;
+        if (identifiers.trackingNumber && item.trackingNumber === identifiers.trackingNumber) return true;
+        if (identifiers.carrierOrderReference && item.carrierOrderReference === identifiers.carrierOrderReference) return true;
+        return false;
+      });
+      if (matched) {
+        matchedShipmentId = matched.id;
+        matchedUserId = matched.userId;
+      }
+    }
+    if (!matchedShipmentId || !matchedUserId) {
+      this.logger.warn(
+        `[carrier-webhook] unresolved identifiers carrier=${carrier} eventType=${eventType} eventId=${eventId}`,
+      );
+      return;
+    }
+
+    await this.store.enqueueSyncJob({
+      id: `job_refresh_from_webhook_${matchedShipmentId}_${Date.now()}`,
+      kind: 'refresh_shipment',
+      carrier: carrier || null,
+      idempotencyKey: `refresh:${matchedShipmentId}:${eventId}`,
+      payload: { userId: matchedUserId, shipmentId: matchedShipmentId },
+    });
   }
 
   async listClientOrders(

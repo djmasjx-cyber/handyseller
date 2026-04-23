@@ -7,6 +7,7 @@ export class CarrierSyncWorkerService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(CarrierSyncWorkerService.name);
   private timer: NodeJS.Timeout | null = null;
   private busy = false;
+  private lastStalePollAt = 0;
 
   constructor(
     private readonly store: TmsStoreService,
@@ -27,6 +28,7 @@ export class CarrierSyncWorkerService implements OnModuleInit, OnModuleDestroy {
     if (this.busy) return;
     this.busy = true;
     try {
+      await this.enqueueStaleRefreshJobs();
       const jobs = await this.store.claimDueSyncJobs(20);
       for (const job of jobs) {
         await this.execute(job).catch(async (error) => {
@@ -44,6 +46,32 @@ export class CarrierSyncWorkerService implements OnModuleInit, OnModuleDestroy {
     } finally {
       this.busy = false;
     }
+  }
+
+  private async enqueueStaleRefreshJobs(): Promise<void> {
+    const pollEverySeconds = Math.max(30, Number.parseInt(process.env.TMS_STALE_POLL_EVERY_SECONDS ?? '120', 10) || 120);
+    const staleMinutes = Math.max(
+      5,
+      Number.parseInt(process.env.TMS_STALE_SHIPMENT_MINUTES ?? '30', 10) || 30,
+    );
+    const maxJobs = Math.max(1, Number.parseInt(process.env.TMS_STALE_POLL_MAX_JOBS ?? '30', 10) || 30);
+    const now = Date.now();
+    if (now - this.lastStalePollAt < pollEverySeconds * 1000) return;
+    this.lastStalePollAt = now;
+
+    const candidates = await this.store.listStaleShipmentCandidates(staleMinutes, maxJobs);
+    if (!candidates.length) return;
+    const bucket = Math.floor(now / (pollEverySeconds * 1000));
+    for (const candidate of candidates) {
+      await this.store.enqueueSyncJob({
+        id: `job_refresh_stale_${candidate.shipmentId}_${bucket}`,
+        kind: 'refresh_shipment',
+        carrier: candidate.carrier,
+        idempotencyKey: `refresh:auto:${candidate.shipmentId}:${bucket}`,
+        payload: { userId: candidate.userId, shipmentId: candidate.shipmentId },
+      });
+    }
+    this.logger.log(`[sync-worker] queued stale refresh jobs=${candidates.length} staleMinutes=${staleMinutes}`);
   }
 
   private async execute(job: { id: string; kind: string; payload: unknown; attempt: number }): Promise<void> {
