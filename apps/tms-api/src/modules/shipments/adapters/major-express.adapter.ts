@@ -262,6 +262,11 @@ export class MajorExpressAdapter implements CarrierAdapter {
 
   private cityCache: MajorCity[] | null = null;
   private cityCacheLoadedAt = 0;
+  private cityWarmupTimer: NodeJS.Timeout | null = null;
+
+  constructor() {
+    this.scheduleCityWarmup();
+  }
 
   private quoteTimeoutMs(): number {
     const raw = Number.parseInt(process.env.TMS_CARRIER_QUOTE_TIMEOUT_MS ?? '2500', 10);
@@ -283,6 +288,21 @@ export class MajorExpressAdapter implements CarrierAdapter {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  private cityWarmupIntervalMs(): number {
+    const raw = Number.parseInt(process.env.TMS_MAJOR_CITY_WARMUP_SECONDS ?? '1800', 10);
+    return (Number.isFinite(raw) ? Math.max(60, raw) : 1800) * 1000;
+  }
+
+  private scheduleCityWarmup(): void {
+    // initial best-effort warmup
+    void this.getCities().catch(() => undefined);
+    this.cityWarmupTimer = setInterval(() => {
+      this.cityCacheLoadedAt = 0; // force refresh on next call
+      void this.getCities().catch(() => undefined);
+    }, this.cityWarmupIntervalMs());
+    this.cityWarmupTimer.unref?.();
   }
 
   async quote(

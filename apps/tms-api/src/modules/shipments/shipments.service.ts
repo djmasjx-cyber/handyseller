@@ -35,6 +35,10 @@ export class ShipmentsService implements OnModuleInit {
   private readonly quoteCache = new Map<string, { expiresAt: number; quotes: CarrierQuote[] }>();
   private readonly quoteInFlight = new Map<string, Promise<CarrierQuote[]>>();
   private readonly quoteDiagnostics: Array<{ ts: number; durationMs: number; empty: boolean }> = [];
+  private readonly carrierBreaker = new Map<
+    string,
+    { consecutiveFailures: number; openUntilMs: number; lastReason: string | null }
+  >();
   private readonly shipments = new Map<string, ShipmentRecord>();
   private readonly tracking = new Map<string, TrackingEventRecord[]>();
   private readonly documents = new Map<string, ShipmentDocumentRecord[]>();
@@ -571,6 +575,63 @@ export class ShipmentsService implements OnModuleInit {
     return (Number.isFinite(raw) ? Math.max(10, raw) : 120) * 1000;
   }
 
+  private breakerFailureThreshold(): number {
+    const raw = Number.parseInt(process.env.TMS_CARRIER_BREAKER_FAILURES ?? '3', 10);
+    return Number.isFinite(raw) ? Math.max(1, raw) : 3;
+  }
+
+  private breakerCooldownMs(): number {
+    const raw = Number.parseInt(process.env.TMS_CARRIER_BREAKER_COOLDOWN_SECONDS ?? '60', 10);
+    return (Number.isFinite(raw) ? Math.max(5, raw) : 60) * 1000;
+  }
+
+  private isBreakerOpen(carrierId: string): boolean {
+    const row = this.carrierBreaker.get(carrierId);
+    if (!row) return false;
+    if (row.openUntilMs <= Date.now()) return false;
+    return true;
+  }
+
+  private markCarrierSuccess(carrierId: string): void {
+    const row = this.carrierBreaker.get(carrierId);
+    if (!row) return;
+    if (row.consecutiveFailures !== 0 || row.openUntilMs !== 0) {
+      this.logger.log(`[quote-breaker] carrier=${carrierId} state=closed reason=recovered`);
+    }
+    this.carrierBreaker.set(carrierId, {
+      consecutiveFailures: 0,
+      openUntilMs: 0,
+      lastReason: null,
+    });
+  }
+
+  private markCarrierFailure(carrierId: string, reason: string): void {
+    const prev = this.carrierBreaker.get(carrierId) ?? {
+      consecutiveFailures: 0,
+      openUntilMs: 0,
+      lastReason: null,
+    };
+    const nextFailures = prev.consecutiveFailures + 1;
+    const threshold = this.breakerFailureThreshold();
+    if (nextFailures >= threshold) {
+      const openUntilMs = Date.now() + this.breakerCooldownMs();
+      this.carrierBreaker.set(carrierId, {
+        consecutiveFailures: 0,
+        openUntilMs,
+        lastReason: reason,
+      });
+      this.logger.warn(
+        `[quote-breaker] carrier=${carrierId} state=open cooldownMs=${this.breakerCooldownMs()} reason=${reason}`,
+      );
+      return;
+    }
+    this.carrierBreaker.set(carrierId, {
+      consecutiveFailures: nextFailures,
+      openUntilMs: 0,
+      lastReason: reason,
+    });
+  }
+
   private quoteCacheKey(userId: string, request: ShipmentRequestRecord): string {
     const cargo = request.snapshot.cargo;
     const flags = [...(request.draft.serviceFlags ?? [])].sort().join(',');
@@ -855,9 +916,18 @@ export class ShipmentsService implements OnModuleInit {
     cacheKey?: string,
   ): Promise<CarrierQuote[]> {
     const quoteStartedAt = Date.now();
-    const adapterStartedAt = this.adapters.map(() => Date.now());
+    const enabledAdapters = this.adapters.filter((adapter) => {
+      const carrierId = adapter.descriptor.id;
+      if (!this.isBreakerOpen(carrierId)) return true;
+      const row = this.carrierBreaker.get(carrierId);
+      this.logger.warn(
+        `[quote-breaker] carrier=${carrierId} state=skip_open openUntil=${row?.openUntilMs ?? 0} reason=${row?.lastReason ?? 'n/a'}`,
+      );
+      return false;
+    });
+    const adapterStartedAt = enabledAdapters.map(() => Date.now());
     const quoteResults = await Promise.allSettled(
-      this.adapters.map((adapter) =>
+      enabledAdapters.map((adapter) =>
         adapter.quote(
           {
             snapshot: request.snapshot,
@@ -872,7 +942,7 @@ export class ShipmentsService implements OnModuleInit {
     const successfulQuotes: CarrierQuote[] = [];
     for (let i = 0; i < quoteResults.length; i += 1) {
       const result = quoteResults[i];
-      const adapter = this.adapters[i];
+      const adapter = enabledAdapters[i];
       const adapterId = adapter?.descriptor?.id ?? 'unknown';
       const durationMs = Math.max(0, Date.now() - adapterStartedAt[i]);
       if (result.status === 'fulfilled') {
@@ -880,6 +950,7 @@ export class ShipmentsService implements OnModuleInit {
         this.logger.log(
           `[quote-latency] requestId=${requestId} adapter=${adapterId} status=ok durationMs=${durationMs} quotes=${count}`,
         );
+        this.markCarrierSuccess(adapterId);
         if (Array.isArray(result.value) && result.value.length > 0) {
           successfulQuotes.push(...result.value);
         }
@@ -893,6 +964,7 @@ export class ShipmentsService implements OnModuleInit {
       this.logger.warn(
         `Quote adapter failed: ${adapterId}; requestId=${requestId}; reason=${String(result.reason)}`,
       );
+      this.markCarrierFailure(adapterId, String(result.reason));
     }
 
     const quotes = rankQuotes(successfulQuotes);

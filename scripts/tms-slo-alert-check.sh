@@ -15,6 +15,7 @@ set -euo pipefail
 #   MAX_CARRIER_FAILED_SHARE               default: 0.70
 #   MAX_QUOTE_P95_MS                       default: 120000
 #   MAX_CONFIRM_P95_MS                     default: 180000
+#   MAX_EMPTY_OPTIONS_RATE                 default: 0.20
 
 API_BASE_URL="${API_BASE_URL:-https://api.handyseller.ru/api}"
 ACCESS_TOKEN="${ACCESS_TOKEN:-}"
@@ -27,6 +28,7 @@ MAX_FAILED_SYNC_JOBS="${MAX_FAILED_SYNC_JOBS:-20}"
 MAX_CARRIER_FAILED_SHARE="${MAX_CARRIER_FAILED_SHARE:-0.70}"
 MAX_QUOTE_P95_MS="${MAX_QUOTE_P95_MS:-120000}"
 MAX_CONFIRM_P95_MS="${MAX_CONFIRM_P95_MS:-180000}"
+MAX_EMPTY_OPTIONS_RATE="${MAX_EMPTY_OPTIONS_RATE:-0.20}"
 
 if [[ -z "${ACCESS_TOKEN}" ]]; then
   echo "[slo-check] ERROR: ACCESS_TOKEN is required" >&2
@@ -56,6 +58,7 @@ quote_p95_ms="$(echo "${RESPONSE}" | jq -r '.latency.quoteMs.p95 // 0')"
 confirm_p95_ms="$(echo "${RESPONSE}" | jq -r '.latency.confirmMs.p95 // 0')"
 top_carrier_share="$(echo "${RESPONSE}" | jq -r '.carrierErrors.byCarrier[0].rate // 0')"
 top_carrier_name="$(echo "${RESPONSE}" | jq -r '.carrierErrors.byCarrier[0].carrier // "n/a"')"
+empty_options_rate="$(echo "${RESPONSE}" | jq -r '.quoteQuality.emptyRate // 0')"
 
 breach=0
 check_fail() {
@@ -76,8 +79,10 @@ awk -v a="${confirm_p95_ms}" -v b="${MAX_CONFIRM_P95_MS}" 'BEGIN {exit !(a>b)}' 
   check_fail "confirmP95Ms=${confirm_p95_ms} > ${MAX_CONFIRM_P95_MS}"
 awk -v a="${top_carrier_share}" -v b="${MAX_CARRIER_FAILED_SHARE}" 'BEGIN {exit !(a>b)}' && \
   check_fail "carrierFailedShare[${top_carrier_name}]=${top_carrier_share} > ${MAX_CARRIER_FAILED_SHARE}"
+awk -v a="${empty_options_rate}" -v b="${MAX_EMPTY_OPTIONS_RATE}" 'BEGIN {exit !(a>b)}' && \
+  check_fail "quoteEmptyOptionsRate=${empty_options_rate} > ${MAX_EMPTY_OPTIONS_RATE}"
 
-echo "[slo-check] snapshot stale=${stale_shipments} webhookRate=${webhook_success_rate} failedJobs=${failed_sync_jobs} quoteP95=${quote_p95_ms} confirmP95=${confirm_p95_ms}"
+echo "[slo-check] snapshot stale=${stale_shipments} webhookRate=${webhook_success_rate} failedJobs=${failed_sync_jobs} quoteP95=${quote_p95_ms} confirmP95=${confirm_p95_ms} emptyRate=${empty_options_rate}"
 
 if [[ ${breach} -ne 0 ]]; then
   exit 1
