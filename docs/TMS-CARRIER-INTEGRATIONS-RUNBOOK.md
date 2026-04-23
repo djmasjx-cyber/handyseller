@@ -79,6 +79,27 @@ Operational playbook for diagnosing and resolving carrier integration issues (CD
 - L2 Integration engineer: payload mapping fix, credential/session flow, adapter logic.
 - L3 Platform owner: DNS, ingress, TLS, global endpoint/certificate issues.
 
+## First-line support checklist
+- Confirm tenant/user and carrier (`cdek` / `major-express` / `dellin`).
+- Capture minimal case: order id, shipment id, request id, event time, endpoint used.
+- Reproduce once only, avoid repeated retries without config changes.
+- Classify and route:
+  - `400 validation/schema` -> L2 (payload mapping)
+  - `401/403 auth` -> L2 (credentials/session)
+  - `timeout/5xx` -> L2 first, L3 if systemic
+  - `doc not ready` -> wait/retry by carrier readiness window
+- Add incident note with exact raw error and last successful step (`estimate/select/confirm/refresh/docs`).
+
+## Escalation payload template
+- `carrier`: `<carrier-id>`
+- `requestId`: `<x-request-id>`
+- `shipmentId`: `<shipment-id>`
+- `step`: `<estimate|confirm|refresh|documents>`
+- `errorClass`: `<validation|auth|timeout|doc_not_ready|carrier|unknown>`
+- `errorText`: `<verbatim>`
+- `firstSeenAt`: `<UTC timestamp>`
+- `lastSeenAt`: `<UTC timestamp>`
+
 ## Definition of healthy state
 - Quote success rate > 95% by carrier.
 - Confirm success rate > 95% by carrier.
@@ -88,5 +109,10 @@ Operational playbook for diagnosing and resolving carrier integration issues (CD
 ## Daily operations
 - Run nightly smoke manually when needed:
   - `npm run smoke:tms:nightly`
+  - with carrier scenarios:
+    - `CLIENT_ID=... CLIENT_SECRET=... NIGHTLY_CARRIERS=cdek,major-express npm run smoke:tms:nightly`
 - Read aggregate SLO metrics:
   - `GET /api/tms/slo/metrics?staleHours=24&webhookWindowHours=24`
+- Smoke output format:
+  - success: `PASS carrier=<id> requestId=<requestId> shipmentId=<shipmentId>`
+  - fail-fast: `FAIL step=<step> reason=<auth|validation|timeout|doc_not_ready|carrier|unknown>`
