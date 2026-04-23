@@ -17,6 +17,21 @@ export class ShipmentsController {
     return this.shipmentsService.getOverview(userId);
   }
 
+  @Get('slo/metrics')
+  @TmsAccess('read')
+  sloMetrics(
+    @CurrentUser('userId') userId: string,
+    @Query('staleHours') staleHours?: string,
+    @Query('webhookWindowHours') webhookWindowHours?: string,
+  ) {
+    const parsedStaleHours = staleHours ? Number.parseInt(staleHours, 10) : undefined;
+    const parsedWebhookWindowHours = webhookWindowHours ? Number.parseInt(webhookWindowHours, 10) : undefined;
+    return this.shipmentsService.getSloMetrics(userId, {
+      staleHours: Number.isFinite(parsedStaleHours) ? parsedStaleHours : undefined,
+      webhookWindowHours: Number.isFinite(parsedWebhookWindowHours) ? parsedWebhookWindowHours : undefined,
+    });
+  }
+
   @Get('client-orders')
   clientOrders(
     @CurrentUser('userId') userId: string,

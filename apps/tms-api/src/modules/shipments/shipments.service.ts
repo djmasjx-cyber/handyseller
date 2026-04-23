@@ -431,6 +431,76 @@ export class ShipmentsService implements OnModuleInit {
     };
   }
 
+  async getSloMetrics(
+    userId: string,
+    options?: { staleHours?: number; webhookWindowHours?: number },
+  ): Promise<{
+    generatedAt: string;
+    userId: string;
+    staleHours: number;
+    totals: {
+      requests: number;
+      shipments: number;
+      activeShipments: number;
+      staleShipments: number;
+      webhookSubscriptionsActive: number;
+    };
+    syncJobs: {
+      pending: number;
+      running: number;
+      failed: number;
+    };
+    webhookDelivery: {
+      windowHours: number;
+      success: number;
+      failed: number;
+      successRate: number;
+    };
+  }> {
+    const staleHours = Math.max(1, Math.min(24 * 30, Math.floor(options?.staleHours ?? 24)));
+    const webhookWindowHours = Math.max(1, Math.min(24 * 30, Math.floor(options?.webhookWindowHours ?? 24)));
+    const now = Date.now();
+    const staleMs = staleHours * 60 * 60 * 1000;
+
+    const requests = this.listRequests(userId);
+    const shipments = this.listShipments(userId);
+    const activeShipments = shipments.filter((item) => item.status !== 'DELIVERED');
+    const staleShipments = activeShipments.filter((item) => {
+      const createdAt = Date.parse(item.createdAt);
+      return Number.isFinite(createdAt) && now - createdAt >= staleMs;
+    });
+    const webhookSubscriptionsActive = [...this.webhookSubscriptions.values()].filter(
+      (item) => item.userId === userId && item.status === 'ACTIVE',
+    ).length;
+
+    const [syncJobs, webhookDelivery] = await Promise.all([
+      this.store.getSyncJobStats(),
+      this.store.getWebhookDeliveryStats(webhookWindowHours),
+    ]);
+    const totalDeliveries = webhookDelivery.success + webhookDelivery.failed;
+    const successRate = totalDeliveries > 0 ? webhookDelivery.success / totalDeliveries : 1;
+
+    return {
+      generatedAt: new Date().toISOString(),
+      userId,
+      staleHours,
+      totals: {
+        requests: requests.length,
+        shipments: shipments.length,
+        activeShipments: activeShipments.length,
+        staleShipments: staleShipments.length,
+        webhookSubscriptionsActive,
+      },
+      syncJobs,
+      webhookDelivery: {
+        windowHours: webhookWindowHours,
+        success: webhookDelivery.success,
+        failed: webhookDelivery.failed,
+        successRate: Number(successRate.toFixed(4)),
+      },
+    };
+  }
+
   async listFailedSyncJobs(): Promise<
     Array<{
       id: string;

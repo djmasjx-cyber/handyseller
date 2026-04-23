@@ -27,6 +27,8 @@ type IdempotencyRow = {
   response_payload: unknown;
 };
 type WebhookSubRow = { payload: unknown };
+type StatusCountRow = { status: string; count: string };
+type WebhookDeliveryCountRow = { status: string; count: string };
 
 @Injectable()
 export class TmsStoreService implements OnModuleInit {
@@ -499,6 +501,44 @@ export class TmsStoreService implements OnModuleInit {
         record.payload ? JSON.stringify(record.payload) : null,
       ],
     );
+  }
+
+  async getSyncJobStats(): Promise<{ pending: number; running: number; failed: number }> {
+    if (!this.pool) return { pending: 0, running: 0, failed: 0 };
+    const rows = await this.pool.query<StatusCountRow>(
+      `SELECT status, COUNT(*)::text AS count
+       FROM tms_sync_job
+       GROUP BY status`,
+    );
+    const out = { pending: 0, running: 0, failed: 0 };
+    for (const row of rows.rows) {
+      const value = Number.parseInt(row.count, 10) || 0;
+      const status = row.status.toUpperCase();
+      if (status === 'PENDING') out.pending = value;
+      if (status === 'RUNNING') out.running = value;
+      if (status === 'FAILED') out.failed = value;
+    }
+    return out;
+  }
+
+  async getWebhookDeliveryStats(hours = 24): Promise<{ success: number; failed: number }> {
+    if (!this.pool) return { success: 0, failed: 0 };
+    const safeHours = Math.max(1, Math.min(24 * 30, Math.floor(hours)));
+    const rows = await this.pool.query<WebhookDeliveryCountRow>(
+      `SELECT status, COUNT(*)::text AS count
+       FROM tms_partner_webhook_delivery
+       WHERE created_at >= NOW() - make_interval(hours => $1::int)
+       GROUP BY status`,
+      [safeHours],
+    );
+    const out = { success: 0, failed: 0 };
+    for (const row of rows.rows) {
+      const value = Number.parseInt(row.count, 10) || 0;
+      const status = row.status.toUpperCase();
+      if (status === 'SUCCESS') out.success = value;
+      if (status === 'FAILED') out.failed = value;
+    }
+    return out;
   }
 }
 

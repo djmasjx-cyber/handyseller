@@ -29,7 +29,8 @@
     "db:connect": "./scripts/connect-db.sh",
     "setup:cloud": "./scripts/setup-cloud-dev.sh",
     "dev:api:mdb": "./scripts/start-api-mdb.sh",
-    "deploy": "bash scripts/run-deploy.sh"
+    "deploy": "bash scripts/run-deploy.sh",
+    "smoke:tms:nightly": "bash scripts/tms-nightly-smoke.sh"
   },
   "engines": {
     "node": ">=18"
