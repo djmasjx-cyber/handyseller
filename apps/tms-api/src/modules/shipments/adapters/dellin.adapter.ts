@@ -250,6 +250,19 @@ function truncate(value: string, max = 180): string {
   return value.length > max ? `${value.slice(0, max)}…` : value;
 }
 
+function normalizeDellinPhone(value: string | null | undefined): string {
+  const digits = (value ?? '').replace(/\D+/g, '');
+  if (!digits) return '';
+  if (digits.length === 10) return `7${digits}`;
+  if (digits.length === 11 && digits.startsWith('8')) return `7${digits.slice(1)}`;
+  if (digits.length === 11 && digits.startsWith('7')) return digits;
+  if (digits.length > 11) {
+    const tail = digits.slice(-10);
+    return `7${tail}`;
+  }
+  return `7${digits.padStart(10, '0').slice(-10)}`;
+}
+
 function isLikelyPdf(buffer: Buffer): boolean {
   if (!buffer || buffer.length < 16) return false;
   return buffer.subarray(0, 5).toString('ascii') === '%PDF-';
@@ -530,9 +543,11 @@ export class DellinAdapter implements CarrierAdapter {
     const fromAddress = (input.draft.originLabel || input.snapshot.originLabel || '').trim();
     const toAddress = (input.draft.destinationLabel || input.snapshot.destinationLabel || '').trim();
     const shipperName = input.snapshot.contacts?.shipper?.name?.trim();
-    const shipperPhone = input.snapshot.contacts?.shipper?.phone?.trim();
+    const shipperPhoneRaw = input.snapshot.contacts?.shipper?.phone?.trim();
     const recipientName = input.snapshot.contacts?.recipient?.name?.trim();
-    const recipientPhone = input.snapshot.contacts?.recipient?.phone?.trim();
+    const recipientPhoneRaw = input.snapshot.contacts?.recipient?.phone?.trim();
+    const shipperPhone = normalizeDellinPhone(shipperPhoneRaw);
+    const recipientPhone = normalizeDellinPhone(recipientPhoneRaw);
     const missingFields = requiredDellinFieldErrors(input);
     if (missingFields.length > 0) {
       throw new Error(
@@ -547,40 +562,60 @@ export class DellinAdapter implements CarrierAdapter {
       ((cargo.lengthMm ?? 100) / 1000) * ((cargo.widthMm ?? 100) / 1000) * ((cargo.heightMm ?? 100) / 1000),
       0.0001,
     );
+    const cargoLength = Math.max((cargo.lengthMm ?? 100) / 1000, 0.01);
+    const cargoWidth = Math.max((cargo.widthMm ?? 100) / 1000, 0.01);
+    const cargoHeight = Math.max((cargo.heightMm ?? 100) / 1000, 0.01);
     const draftOnlyByEnv = process.env.DELLIN_DRAFT_ONLY === 'true';
 
     const deliveryType = input.draft.serviceFlags.includes('EXPRESS') ? 'express' : 'auto';
+    const produceDate = new Date().toISOString().slice(0, 10);
     const makePayload = (draftOnly: boolean): Record<string, unknown> => ({
       appkey: appKey,
       sessionID,
       inOrder: !draftOnly,
-      delivery: {
-        deliveryType: { type: deliveryType },
-        variant: 'address',
-        derival: { variant: 'address', address: { search: fromAddress } },
-        arrival: { variant: 'address', address: { search: toAddress } },
-      },
+      payment: { type: 'cash' },
       members: {
+        requester: 'sender',
         sender: {
           counteragent: {
             isAnonym: true,
+            form: 'private',
             name: shipperName,
             phone: shipperPhone,
           },
+          contactPersons: [{ name: shipperName }],
+          phoneNumbers: [{ number: shipperPhone }],
         },
         receiver: {
           counteragent: {
             isAnonym: true,
+            form: 'private',
             name: recipientName,
             phone: recipientPhone,
           },
+          contactPersons: [{ name: recipientName }],
+          phoneNumbers: [{ number: recipientPhone }],
         },
+      },
+      delivery: {
+        deliveryType: { type: deliveryType },
+        variant: 'address',
+        derival: {
+          variant: 'address',
+          produceDate,
+          time: { worktimeStart: '09:00', worktimeEnd: '18:00' },
+          address: { search: fromAddress },
+        },
+        arrival: { variant: 'address', address: { search: toAddress } },
       },
       cargo: {
         quantity: 1,
         freightName: cargoTitle,
         totalWeight,
         totalVolume,
+        length: cargoLength,
+        width: cargoWidth,
+        height: cargoHeight,
       },
     });
     if (this.dellinDebug) {
@@ -592,19 +627,25 @@ export class DellinAdapter implements CarrierAdapter {
           delivery: {
             deliveryType: { type: deliveryType },
             variant: 'address',
-            derival: { variant: 'address', search: truncate(fromAddress) },
+            derival: {
+              variant: 'address',
+              produceDate,
+              time: { worktimeStart: '09:00', worktimeEnd: '18:00' },
+              search: truncate(fromAddress),
+            },
             arrival: { variant: 'address', search: truncate(toAddress) },
           },
           members: {
+            requester: 'sender',
             sender: {
               isAnonym: true,
               name: truncate(shipperName ?? ''),
-              phone: maskPhone(shipperPhone ?? ''),
+              phone: maskPhone(shipperPhoneRaw ?? ''),
             },
             receiver: {
               isAnonym: true,
               name: truncate(recipientName ?? ''),
-              phone: maskPhone(recipientPhone ?? ''),
+              phone: maskPhone(recipientPhoneRaw ?? ''),
             },
           },
           cargo: {
@@ -612,6 +653,9 @@ export class DellinAdapter implements CarrierAdapter {
             freightName: truncate(cargoTitle),
             totalWeight,
             totalVolume,
+            length: cargoLength,
+            width: cargoWidth,
+            height: cargoHeight,
           },
         })}`,
       );
