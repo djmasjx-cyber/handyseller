@@ -1,3 +1,0 @@
-{
-  "/api/marketplaces/import/status/[jobId]/route": "app/api/marketplaces/import/status/[jobId]/route.js"
-}
