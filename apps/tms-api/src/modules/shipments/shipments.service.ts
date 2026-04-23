@@ -770,6 +770,8 @@ export class ShipmentsService implements OnModuleInit {
     requestTraceId?: string | null,
   ): Promise<CarrierQuote[]> {
     const request = this.getRequestOrThrow(userId, requestId);
+    const quoteStartedAt = Date.now();
+    const adapterStartedAt = this.adapters.map(() => Date.now());
     const quoteResults = await Promise.allSettled(
       this.adapters.map((adapter) =>
         adapter.quote(
@@ -786,19 +788,32 @@ export class ShipmentsService implements OnModuleInit {
     const successfulQuotes: CarrierQuote[] = [];
     for (let i = 0; i < quoteResults.length; i += 1) {
       const result = quoteResults[i];
+      const adapter = this.adapters[i];
+      const adapterId = adapter?.descriptor?.id ?? 'unknown';
+      const durationMs = Math.max(0, Date.now() - adapterStartedAt[i]);
       if (result.status === 'fulfilled') {
+        const count = Array.isArray(result.value) ? result.value.length : 0;
+        this.logger.log(
+          `[quote-latency] requestId=${requestId} adapter=${adapterId} status=ok durationMs=${durationMs} quotes=${count}`,
+        );
         if (Array.isArray(result.value) && result.value.length > 0) {
           successfulQuotes.push(...result.value);
         }
         continue;
       }
-      const adapter = this.adapters[i];
       this.logger.warn(
-        `Quote adapter failed: ${adapter?.descriptor?.id ?? 'unknown'}; requestId=${requestId}; reason=${String(result.reason)}`,
+        `[quote-latency] requestId=${requestId} adapter=${adapterId} status=failed durationMs=${durationMs} reason=${String(
+          result.reason,
+        )}`,
+      );
+      this.logger.warn(
+        `Quote adapter failed: ${adapterId}; requestId=${requestId}; reason=${String(result.reason)}`,
       );
     }
 
     const quotes = rankQuotes(successfulQuotes);
+    const totalDurationMs = Math.max(0, Date.now() - quoteStartedAt);
+    this.logger.log(`[quote-latency] requestId=${requestId} stage=refreshQuotes totalMs=${totalDurationMs} quotes=${quotes.length}`);
     this.logQuoteAudit(requestId, request, quotes);
 
     request.status = quotes.length > 0 ? 'QUOTED' : 'DRAFT';

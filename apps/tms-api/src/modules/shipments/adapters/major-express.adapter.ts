@@ -264,10 +264,25 @@ export class MajorExpressAdapter implements CarrierAdapter {
     requestId: string,
     context: CarrierQuoteContext,
   ): Promise<CarrierQuote[]> {
+    const startedAt = Date.now();
+    let credentialsMs = 0;
+    let cityResolveMs = 0;
+    let calculatorMs = 0;
+    const done = (quotes: CarrierQuote[], reason?: string): CarrierQuote[] => {
+      const totalMs = Math.max(0, Date.now() - startedAt);
+      const status = quotes.length > 0 ? 'ok' : 'empty';
+      this.logger.log(
+        `[quote-stage] carrier=major-express requestId=${requestId} traceId=${context.requestId ?? requestId} status=${status} reason=${reason ?? 'none'} quotes=${quotes.length} totalMs=${totalMs} credentialsMs=${credentialsMs} cityResolveMs=${cityResolveMs} calculatorMs=${calculatorMs}`,
+      );
+      return quotes;
+    };
+
+    const credentialsStartedAt = Date.now();
     const [expressCredentials, ltlCredentials] = await Promise.all([
       this.loadCredentials(context, 'EXPRESS'),
       this.loadCredentials(context, 'LTL'),
     ]);
+    credentialsMs = Math.max(0, Date.now() - credentialsStartedAt);
     const credentialsByType: Array<{ serviceType: MajorServiceType; credentials: InternalCarrierCredentials }> = [];
     if (expressCredentials) {
       credentialsByType.push({ serviceType: 'EXPRESS', credentials: expressCredentials });
@@ -282,13 +297,15 @@ export class MajorExpressAdapter implements CarrierAdapter {
       this.logger.warn(
         `Major quote skipped: missing credentials for both service types; requestId=${requestId}`,
       );
-      return [];
+      return done([], 'missing_credentials');
     }
 
+    const cityResolveStartedAt = Date.now();
     const [shipperCity, consigneeCity] = await Promise.all([
       this.resolveCityCode(input.draft.originLabel || input.snapshot.originLabel),
       this.resolveCityCode(input.draft.destinationLabel || input.snapshot.destinationLabel),
     ]);
+    cityResolveMs = Math.max(0, Date.now() - cityResolveStartedAt);
 
     if (!shipperCity || !consigneeCity) {
       this.logger.warn(
@@ -300,11 +317,12 @@ export class MajorExpressAdapter implements CarrierAdapter {
           extractMajorCityCandidates(input.draft.destinationLabel || input.snapshot.destinationLabel),
         )}`,
       );
-      return [];
+      return done([], 'city_resolve_failed');
     }
 
     const quotes: CarrierQuote[] = [];
     for (const { serviceType, credentials } of credentialsByType) {
+      const calculatorStartedAt = Date.now();
       const result = await this.callCalculator(
         input,
         credentials,
@@ -312,6 +330,7 @@ export class MajorExpressAdapter implements CarrierAdapter {
         consigneeCity.code,
         serviceType,
       );
+      calculatorMs += Math.max(0, Date.now() - calculatorStartedAt);
       if (!result) {
         this.logger.warn(
           `Major quote skipped: calculator returned empty; requestId=${requestId}; serviceType=${serviceType}; shipperCity=${shipperCity.code}; consigneeCity=${consigneeCity.code}`,
@@ -344,7 +363,8 @@ export class MajorExpressAdapter implements CarrierAdapter {
         score: Math.round((100000 / Math.max(computedPrice, 1)) * 100) / 100,
       });
     }
-    return quotes;
+    if (!quotes.length) return done([], 'calculator_empty');
+    return done(quotes);
   }
 
   async book({ quote, input, context }: CarrierBookInput): Promise<{

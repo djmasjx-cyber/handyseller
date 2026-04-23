@@ -236,14 +236,33 @@ export class CdekAdapter implements CarrierAdapter {
     requestId: string,
     context: CarrierQuoteContext,
   ): Promise<CarrierQuote[]> {
+    const startedAt = Date.now();
+    const traceId = context.requestId ?? requestId;
+    let credentialsMs = 0;
+    let authMs = 0;
+    let cityResolveMs = 0;
+    let calculatorMs = 0;
+    const done = (quotes: CarrierQuote[], reason?: string): CarrierQuote[] => {
+      const totalMs = Math.max(0, Date.now() - startedAt);
+      const status = quotes.length > 0 ? 'ok' : 'empty';
+      this.logger.log(
+        `[quote-stage] carrier=cdek requestId=${requestId} traceId=${traceId} status=${status} reason=${reason ?? 'none'} quotes=${quotes.length} totalMs=${totalMs} credentialsMs=${credentialsMs} authMs=${authMs} cityResolveMs=${cityResolveMs} calculatorMs=${calculatorMs}`,
+      );
+      return quotes;
+    };
+
+    const credentialsStartedAt = Date.now();
     const credentials = await this.loadCredentials(context, requestId);
-    if (!credentials) return [];
+    credentialsMs = Math.max(0, Date.now() - credentialsStartedAt);
+    if (!credentials) return done([], 'missing_credentials');
+    const authStartedAt = Date.now();
     const token = await this.getAccessToken(credentials, requestId);
-    if (!token) return [];
+    authMs = Math.max(0, Date.now() - authStartedAt);
+    if (!token) return done([], 'auth_failed');
 
     const base = (process.env.CDEK_API_BASE ?? 'https://api.cdek.ru').replace(/\/+$/, '');
     const orderType = getCdekOrderType();
-    const traceId = context.requestId ?? requestId;
+    const cityResolveStartedAt = Date.now();
     const fromCode = await this.resolveCityCode(base, token, input.draft.originLabel || input.snapshot.originLabel, traceId);
     const toCode = await this.resolveCityCode(
       base,
@@ -251,11 +270,12 @@ export class CdekAdapter implements CarrierAdapter {
       input.draft.destinationLabel || input.snapshot.destinationLabel,
       traceId,
     );
+    cityResolveMs = Math.max(0, Date.now() - cityResolveStartedAt);
     if (!fromCode || !toCode) {
       this.logger.warn(
         `CDEK city resolve failed; requestId=${requestId}; fromResolved=${Boolean(fromCode)}; toResolved=${Boolean(toCode)}`,
       );
-      return [];
+      return done([], 'city_resolve_failed');
     }
     const payload = {
       type: orderType,
@@ -272,6 +292,7 @@ export class CdekAdapter implements CarrierAdapter {
       ],
     };
 
+    const calculatorStartedAt = Date.now();
     const res = await fetch(`${base}/v2/calculator/tarifflist`, {
       method: 'POST',
       headers: {
@@ -283,9 +304,10 @@ export class CdekAdapter implements CarrierAdapter {
       body: JSON.stringify(payload),
       cache: 'no-store',
     }).catch(() => null);
+    calculatorMs = Math.max(0, Date.now() - calculatorStartedAt);
     if (!res?.ok) {
       this.logger.warn(`CDEK calculator HTTP failed: status=${res?.status ?? 'n/a'}; requestId=${requestId}`);
-      return [];
+      return done([], `calculator_http_${res?.status ?? 'n/a'}`);
     }
     const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
     const tariffsRaw = Array.isArray(data.tariff_codes)
@@ -294,7 +316,7 @@ export class CdekAdapter implements CarrierAdapter {
         ? data.tariffs
         : [];
     const tariffs = tariffsRaw as CdekTariff[];
-    if (!tariffs.length) return [];
+    if (!tariffs.length) return done([], 'no_tariffs');
 
     const tariffsDoor = tariffs.filter(isDoorToDoorTariff);
     const tariffsForQuotes = tariffsDoor.length ? tariffsDoor : tariffs;
@@ -335,7 +357,7 @@ export class CdekAdapter implements CarrierAdapter {
         score: Math.round((100000 / Math.max(priceRub, 1)) * 100) / 100,
       });
     }
-    return quotes.sort((a, b) => a.priceRub - b.priceRub);
+    return done(quotes.sort((a, b) => a.priceRub - b.priceRub));
   }
 
   private async resolveCityCode(
