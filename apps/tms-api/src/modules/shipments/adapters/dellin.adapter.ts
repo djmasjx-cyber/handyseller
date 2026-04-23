@@ -377,9 +377,9 @@ function isValidHm(value: string | null | undefined): boolean {
   return /^([01]\d|2[0-3]):[0-5]\d$/u.test(value.trim());
 }
 
-type DellinCounteragentForm = 'juridical' | 'person' | 'individual' | 'legal' | null;
+type DellinCounteragentForm = string | number | Record<string, unknown> | null;
 
-function collectDellinForms(node: unknown, out: Set<string>): void {
+function collectDellinForms(node: unknown, out: Array<string | number | Record<string, unknown>>): void {
   if (!node) return;
   if (Array.isArray(node)) {
     for (const item of node) collectDellinForms(item, out);
@@ -388,13 +388,15 @@ function collectDellinForms(node: unknown, out: Set<string>): void {
   if (typeof node !== 'object') return;
   const obj = node as Record<string, unknown>;
   const form = obj.form;
-  if (typeof form === 'string' && form.trim()) out.add(form.trim());
+  if (typeof form === 'string' && form.trim()) out.push(form.trim());
+  if (typeof form === 'number' && Number.isFinite(form)) out.push(form);
+  if (form && typeof form === 'object' && !Array.isArray(form)) out.push(form as Record<string, unknown>);
   for (const value of Object.values(obj)) {
     collectDellinForms(value, out);
   }
 }
 
-function findDellinFormByUid(node: unknown, uid: string): string | null {
+function findDellinFormByUid(node: unknown, uid: string): unknown {
   if (!node) return null;
   if (Array.isArray(node)) {
     for (const item of node) {
@@ -407,14 +409,53 @@ function findDellinFormByUid(node: unknown, uid: string): string | null {
   const obj = node as Record<string, unknown>;
   const candidateUid = firstNonEmptyString(obj.uid, obj.counteragentUID, obj.counteragentUid);
   if (candidateUid?.trim() === uid.trim()) {
-    const form = firstNonEmptyString(obj.form);
-    if (form) return form;
+    const form = obj.form;
+    if (form != null) return form;
   }
   for (const value of Object.values(obj)) {
     const hit = findDellinFormByUid(value, uid);
     if (hit) return hit;
   }
   return null;
+}
+
+function extractDellinFormVariants(value: unknown): DellinCounteragentForm[] {
+  if (value == null) return [];
+  const out: DellinCounteragentForm[] = [];
+  if (typeof value === 'string' && value.trim()) out.push(value.trim());
+  if (typeof value === 'number' && Number.isFinite(value)) out.push(value);
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const obj = value as Record<string, unknown>;
+    out.push(obj);
+    for (const key of ['uid', 'id', 'code', 'value', 'name', 'shortName']) {
+      const candidate = obj[key];
+      if (typeof candidate === 'string' && candidate.trim()) out.push(candidate.trim());
+      if (typeof candidate === 'number' && Number.isFinite(candidate)) out.push(candidate);
+    }
+  }
+  return out;
+}
+
+function pushUniqueForm(
+  list: DellinCounteragentForm[],
+  value: DellinCounteragentForm,
+): void {
+  const normalized =
+    value == null
+      ? 'null'
+      : typeof value === 'object'
+      ? `obj:${JSON.stringify(value)}`
+      : `${typeof value}:${String(value)}`;
+  const exists = list.some((current) => {
+    const currentNorm =
+      current == null
+        ? 'null'
+        : typeof current === 'object'
+        ? `obj:${JSON.stringify(current)}`
+        : `${typeof current}:${String(current)}`;
+    return currentNorm === normalized;
+  });
+  if (!exists) list.push(value);
 }
 
 function isDellinUid(value: string | null | undefined): boolean {
@@ -517,7 +558,7 @@ export class DellinAdapter implements CarrierAdapter {
   private readonly logger = new Logger(DellinAdapter.name);
   private readonly dellinDebug =
     process.env.TMS_DELLIN_DEBUG === '1' || process.env.TMS_DELLIN_DEBUG === 'true';
-  private readonly counteragentFormCache = new Map<string, { value: string | null; expiresAt: number }>();
+  private readonly counteragentFormCache = new Map<string, { value: DellinCounteragentForm; expiresAt: number }>();
   readonly descriptor: CarrierDescriptor = {
     id: 'dellin',
     code: 'DELLIN',
@@ -804,14 +845,31 @@ export class DellinAdapter implements CarrierAdapter {
       requestId,
       traceId,
     );
-    const formAttempts: Array<{ sender: DellinCounteragentForm; receiver: DellinCounteragentForm; label: string }> = [
-      ...(discoveredForm
-        ? [{ sender: discoveredForm as DellinCounteragentForm, receiver: discoveredForm as DellinCounteragentForm, label: `counteragents:${discoveredForm}` }]
-        : []),
-      { sender: 'juridical', receiver: 'person', label: 'juridical/person' },
-      { sender: null, receiver: null, label: 'omit-form' },
-      { sender: 'legal', receiver: 'individual', label: 'legal/individual' },
-    ];
+    const senderCandidates: DellinCounteragentForm[] = [];
+    for (const variant of extractDellinFormVariants(discoveredForm)) {
+      pushUniqueForm(senderCandidates, variant);
+    }
+    for (const fallback of ['juridical', 'legal', 'person', 'individual']) {
+      pushUniqueForm(senderCandidates, fallback);
+    }
+    pushUniqueForm(senderCandidates, null);
+    const receiverCandidates: DellinCounteragentForm[] = [];
+    for (const fallback of ['person', 'individual', 'juridical', 'legal']) {
+      pushUniqueForm(receiverCandidates, fallback);
+    }
+    pushUniqueForm(receiverCandidates, null);
+    const formAttempts: Array<{ sender: DellinCounteragentForm; receiver: DellinCounteragentForm; label: string }> = [];
+    for (const sender of senderCandidates) {
+      for (const receiver of receiverCandidates) {
+        if (formAttempts.length >= 12) break;
+        formAttempts.push({
+          sender,
+          receiver,
+          label: `sender=${sender == null ? 'null' : typeof sender === 'object' ? 'object' : String(sender)};receiver=${receiver == null ? 'null' : typeof receiver === 'object' ? 'object' : String(receiver)}`,
+        });
+      }
+      if (formAttempts.length >= 12) break;
+    }
     const makePayload = (
       draftOnly: boolean,
       produceDate: string,
@@ -827,7 +885,7 @@ export class DellinAdapter implements CarrierAdapter {
         sender: {
           counteragent: {
             uid: requesterUid,
-            ...(senderForm ? { form: senderForm } : {}),
+            ...(senderForm != null ? { form: senderForm } : {}),
             name: shipperName,
             phone: shipperPhone,
           },
@@ -838,7 +896,7 @@ export class DellinAdapter implements CarrierAdapter {
         receiver: {
           counteragent: {
             uid: requesterUid,
-            ...(receiverForm ? { form: receiverForm } : {}),
+            ...(receiverForm != null ? { form: receiverForm } : {}),
             name: recipientName,
             phone: recipientPhone,
           },
@@ -1078,7 +1136,7 @@ export class DellinAdapter implements CarrierAdapter {
     requesterUid: string,
     requestId: string,
     traceId?: string | null,
-  ): Promise<string | null> {
+  ): Promise<DellinCounteragentForm> {
     const cacheKey = `${appKey}:${sessionID}:${requesterUid}`;
     const now = Date.now();
     const cached = this.counteragentFormCache.get(cacheKey);
@@ -1099,15 +1157,16 @@ export class DellinAdapter implements CarrierAdapter {
       return null;
     }
     const data = (await res.json().catch(() => null)) as unknown;
-    const exactForm = findDellinFormByUid(data, requesterUid);
-    const resolved = exactForm ?? (() => {
-      const known = new Set<string>();
+    const exactForm = findDellinFormByUid(data, requesterUid) as DellinCounteragentForm;
+    const resolved: DellinCounteragentForm = exactForm ?? (() => {
+      const known: Array<string | number | Record<string, unknown>> = [];
       collectDellinForms(data, known);
-      return [...known][0] ?? null;
+      return (known[0] as DellinCounteragentForm) ?? null;
     })();
     this.counteragentFormCache.set(cacheKey, { value: resolved, expiresAt: now + 10 * 60_000 });
-    if (this.dellinDebug && resolved) {
-      this.logger.log(`[dellin-booking] counteragent form resolved requestId=${requestId} form=${resolved}`);
+    if (this.dellinDebug && resolved != null) {
+      const formLog = typeof resolved === 'object' ? JSON.stringify(resolved) : String(resolved);
+      this.logger.log(`[dellin-booking] counteragent form resolved requestId=${requestId} form=${formLog}`);
     }
     return resolved;
   }
