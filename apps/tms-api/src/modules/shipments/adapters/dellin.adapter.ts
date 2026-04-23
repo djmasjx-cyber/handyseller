@@ -573,13 +573,12 @@ export class DellinAdapter implements CarrierAdapter {
       appkey: appKey,
       sessionID,
       inOrder: !draftOnly,
-      payment: { type: 'cash' },
+      payment: { type: 'cash', primaryPayer: 'sender' },
       members: {
-        requester: 'sender',
+        requester: { role: 'sender' },
         sender: {
           counteragent: {
-            isAnonym: true,
-            form: 'private',
+            customForm: 'ООО',
             name: shipperName,
             phone: shipperPhone,
           },
@@ -588,8 +587,7 @@ export class DellinAdapter implements CarrierAdapter {
         },
         receiver: {
           counteragent: {
-            isAnonym: true,
-            form: 'private',
+            customForm: 'ФЛ',
             name: recipientName,
             phone: recipientPhone,
           },
@@ -638,12 +636,10 @@ export class DellinAdapter implements CarrierAdapter {
           members: {
             requester: 'sender',
             sender: {
-              isAnonym: true,
               name: truncate(shipperName ?? ''),
               phone: maskPhone(shipperPhoneRaw ?? ''),
             },
             receiver: {
-              isAnonym: true,
               name: truncate(recipientName ?? ''),
               phone: maskPhone(recipientPhoneRaw ?? ''),
             },
