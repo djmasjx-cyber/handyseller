@@ -19,7 +19,7 @@
 3. Запросите OAuth token:
 
 ```bash
-curl -X POST "https://api.handyseller.ru/api/tms/oauth/token" \
+curl -X POST "https://app.handyseller.ru/api/tms/oauth/token" \
   -H "Content-Type: application/json" \
   -d '{
     "grant_type":"client_credentials",
@@ -33,7 +33,7 @@ curl -X POST "https://api.handyseller.ru/api/tms/oauth/token" \
 ### 3.1 Рассчитать варианты доставки
 
 ```bash
-curl -X POST "https://api.handyseller.ru/api/tms/v1/shipments/estimate" \
+curl -X POST "https://app.handyseller.ru/api/tms/v1/shipments/estimate" \
   -H "Authorization: Bearer <ACCESS_TOKEN>" \
   -H "Idempotency-Key: estimate-ord-1001-v1" \
   -H "Content-Type: application/json" \
@@ -81,7 +81,7 @@ curl -X POST "https://api.handyseller.ru/api/tms/v1/shipments/estimate" \
 3. Подтвердите:
 
 ```bash
-curl -X POST "https://api.handyseller.ru/api/tms/v1/shipments/<REQUEST_ID>/confirm" \
+curl -X POST "https://app.handyseller.ru/api/tms/v1/shipments/<REQUEST_ID>/confirm" \
   -H "Authorization: Bearer <ACCESS_TOKEN>" \
   -H "Idempotency-Key: confirm-ord-1001-v1"
 ```

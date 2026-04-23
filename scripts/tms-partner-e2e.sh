@@ -5,12 +5,12 @@ set -euo pipefail
 # Usage:
 #   CLIENT_ID=... CLIENT_SECRET=... USER_ID=... ./scripts/tms-partner-e2e.sh
 # Optional:
-#   API_BASE_URL (default: https://api.handyseller.ru/api)
+#   API_BASE_URL (default: https://app.handyseller.ru/api)
 #   ORDER_TYPE   (default: CLIENT_ORDER)
 #   EXTERNAL_ORDER_ID (default: 1C-ORDER-<timestamp>)
 #   CALLBACK_URL (for webhook subscription creation)
 
-API_BASE_URL="${API_BASE_URL:-https://api.handyseller.ru/api}"
+API_BASE_URL="${API_BASE_URL:-https://app.handyseller.ru/api}"
 ORDER_TYPE="${ORDER_TYPE:-CLIENT_ORDER}"
 USER_ID="${USER_ID:-u_demo}"
 EXTERNAL_ORDER_ID="${EXTERNAL_ORDER_ID:-1C-ORDER-$(date +%s)}"
