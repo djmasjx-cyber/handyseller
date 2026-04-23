@@ -344,6 +344,37 @@ function normalizeDellinPhone(value: string | null | undefined): string {
   return `7${digits.padStart(10, '0').slice(-10)}`;
 }
 
+function ymdInTimeZone(date: Date, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+  const year = parts.find((p) => p.type === 'year')?.value ?? '1970';
+  const month = parts.find((p) => p.type === 'month')?.value ?? '01';
+  const day = parts.find((p) => p.type === 'day')?.value ?? '01';
+  return `${year}-${month}-${day}`;
+}
+
+function addDaysYmd(ymd: string, days: number): string {
+  const [y, m, d] = ymd.split('-').map((x) => Number.parseInt(x, 10));
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return ymd;
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + days);
+  return dt.toISOString().slice(0, 10);
+}
+
+function isValidYmd(value: string | null | undefined): boolean {
+  if (!value) return false;
+  return /^\d{4}-\d{2}-\d{2}$/u.test(value.trim());
+}
+
+function isValidHm(value: string | null | undefined): boolean {
+  if (!value) return false;
+  return /^([01]\d|2[0-3]):[0-5]\d$/u.test(value.trim());
+}
+
 function isDellinUid(value: string | null | undefined): boolean {
   const v = (value ?? '').trim();
   if (!v) return false;
@@ -708,8 +739,13 @@ export class DellinAdapter implements CarrierAdapter {
     const draftOnlyByEnv = process.env.DELLIN_DRAFT_ONLY === 'true';
 
     const deliveryType = input.draft.serviceFlags.includes('EXPRESS') ? 'express' : 'auto';
-    const produceDate = new Date().toISOString().slice(0, 10);
-    const makePayload = (draftOnly: boolean): Record<string, unknown> => ({
+    const logisticsTimeZone = process.env.TMS_LOGISTICS_TIMEZONE?.trim() || 'Europe/Moscow';
+    const preferredProduceDate =
+      isValidYmd(input.draft.pickupDate) ? input.draft.pickupDate!.trim() : addDaysYmd(ymdInTimeZone(new Date(), logisticsTimeZone), 1);
+    const produceDateAttempts = Array.from({ length: 7 }, (_, idx) => addDaysYmd(preferredProduceDate, idx));
+    const produceDateError = (errors: string[]): boolean =>
+      errors.some((line) => line.includes('code=180012') || line.includes('delivery.derival.produceDate'));
+    const makePayload = (draftOnly: boolean, produceDate: string): Record<string, unknown> => ({
       appkey: appKey,
       sessionID,
       inOrder: !draftOnly,
@@ -744,7 +780,10 @@ export class DellinAdapter implements CarrierAdapter {
         derival: {
           variant: 'address',
           produceDate,
-          time: { worktimeStart: '09:00', worktimeEnd: '18:00' },
+          time: {
+            worktimeStart: isValidHm(input.draft.pickupTimeStart) ? input.draft.pickupTimeStart : '09:00',
+            worktimeEnd: isValidHm(input.draft.pickupTimeEnd) ? input.draft.pickupTimeEnd : '18:00',
+          },
           address: { search: fromAddress },
         },
         arrival: { variant: 'address', address: { search: toAddress } },
@@ -759,103 +798,94 @@ export class DellinAdapter implements CarrierAdapter {
         height: cargoHeight,
       },
     });
-    if (this.dellinDebug) {
-      this.logger.log(
-        `[dellin-booking] payload requestId=${requestId} data=${JSON.stringify({
-          appkey: appKey ? '***' : null,
-          sessionID: sessionID ? '***' : null,
-          inOrder: !draftOnlyByEnv,
-          delivery: {
-            deliveryType: { type: deliveryType },
-            variant: 'address',
-            derival: {
-              variant: 'address',
-              produceDate,
-              time: { worktimeStart: '09:00', worktimeEnd: '18:00' },
-              search: truncate(fromAddress),
-            },
-            arrival: { variant: 'address', search: truncate(toAddress) },
-          },
-          members: {
-            requester: { role: 'sender', uid: requesterUid ? '***' : null },
-            sender: {
-              name: truncate(shipperName ?? ''),
-              phone: maskPhone(shipperPhoneRaw ?? ''),
-            },
-            receiver: {
-              name: truncate(recipientName ?? ''),
-              phone: maskPhone(recipientPhoneRaw ?? ''),
-            },
-          },
-          cargo: {
-            quantity: 1,
-            freightName: truncate(cargoTitle),
-            totalWeight,
-            totalVolume,
-            length: cargoLength,
-            width: cargoWidth,
-            height: cargoHeight,
-          },
-        })}`,
-      );
-    }
     const url = dellinJsonUrl(base, DELLIN_REQUEST_PATH);
-    let effectiveDraftOnly = draftOnlyByEnv;
-    let payload = makePayload(effectiveDraftOnly);
-    let res = await fetch(url, {
-      method: 'POST',
-      headers: withRequestIdHeaders({ Accept: 'application/json', 'Content-Type': 'application/json' }, traceId ?? requestId),
-      body: JSON.stringify(payload),
-      cache: 'no-store',
-    }).catch(() => null);
-    let data = (await res?.json().catch(() => null)) as Record<string, unknown> | null;
-    if (!effectiveDraftOnly && res?.status === 400) {
-      // В боевом режиме ДЛ может требовать дополнительные поля; fallback в черновик, чтобы не блокировать логиста.
-      effectiveDraftOnly = true;
-      payload = makePayload(true);
-      res = await fetch(url, {
+    let lastStatus: number | null = null;
+    let lastErrors: string[] = [];
+    let lastRaw = '';
+    for (let idx = 0; idx < produceDateAttempts.length; idx += 1) {
+      const produceDate = produceDateAttempts[idx];
+      let effectiveDraftOnly = draftOnlyByEnv;
+      let payload = makePayload(effectiveDraftOnly, produceDate);
+      if (this.dellinDebug) {
+        this.logger.log(
+          `[dellin-booking] payload requestId=${requestId} attempt=${idx + 1} produceDate=${produceDate} data=${JSON.stringify({
+            appkey: appKey ? '***' : null,
+            sessionID: sessionID ? '***' : null,
+            inOrder: !effectiveDraftOnly,
+            delivery: {
+              deliveryType: { type: deliveryType },
+              variant: 'address',
+              derival: {
+                variant: 'address',
+                produceDate,
+                time: { worktimeStart: '09:00', worktimeEnd: '18:00' },
+                search: truncate(fromAddress),
+              },
+              arrival: { variant: 'address', search: truncate(toAddress) },
+            },
+          })}`,
+        );
+      }
+      let res = await fetch(url, {
         method: 'POST',
         headers: withRequestIdHeaders({ Accept: 'application/json', 'Content-Type': 'application/json' }, traceId ?? requestId),
         body: JSON.stringify(payload),
         cache: 'no-store',
       }).catch(() => null);
-      data = (await res?.json().catch(() => null)) as Record<string, unknown> | null;
-      this.logger.warn(
-        `[dellin-booking] inOrder=true failed with 400, fallback to draft mode; requestId=${requestId}`,
-      );
-    }
-    if (!res?.ok) {
-      const details = parseDellinErrors(data).join('; ');
-      if (this.dellinDebug) {
+      let data = (await res?.json().catch(() => null)) as Record<string, unknown> | null;
+      if (!effectiveDraftOnly && res?.status === 400) {
+        effectiveDraftOnly = true;
+        payload = makePayload(true, produceDate);
+        res = await fetch(url, {
+          method: 'POST',
+          headers: withRequestIdHeaders({ Accept: 'application/json', 'Content-Type': 'application/json' }, traceId ?? requestId),
+          body: JSON.stringify(payload),
+          cache: 'no-store',
+        }).catch(() => null);
+        data = (await res?.json().catch(() => null)) as Record<string, unknown> | null;
         this.logger.warn(
-          `[dellin-booking] request error requestId=${requestId} status=${res?.status ?? 'n/a'} raw=${JSON.stringify(data ?? {}).slice(0, 1200)}`,
+          `[dellin-booking] inOrder=true failed with 400, fallback to draft mode; requestId=${requestId}; produceDate=${produceDate}`,
         );
       }
-      const raw = JSON.stringify(data ?? {}).slice(0, 400);
-      throw new Error(
-        `Dellin request failed: HTTP ${res?.status ?? 'n/a'}${details ? `; ${details}` : raw ? `; ${raw}` : ''}`,
+      const businessErrors = parseDellinErrors(data);
+      const requestUid = firstNonEmptyString(
+        data?.requestID,
+        data?.requestId,
+        asObject(data?.data)?.requestID,
+        asObject(data?.data)?.requestId,
+      );
+      const state = firstNonEmptyString(data?.state, asObject(data?.data)?.state);
+      if (res?.ok && requestUid) {
+        if (this.dellinDebug) {
+          this.logger.log(
+            `[dellin-booking] request ok requestId=${requestId} dellinRequestId=${requestUid} state=${state ?? 'n/a'} produceDate=${produceDate}`,
+          );
+        }
+        return { requestId: requestUid, state, draftOnly: effectiveDraftOnly };
+      }
+
+      lastStatus = res?.status ?? null;
+      lastErrors = businessErrors;
+      lastRaw = JSON.stringify(data ?? {}).slice(0, 400);
+      if (this.dellinDebug) {
+        this.logger.warn(
+          `[dellin-booking] request error requestId=${requestId} produceDate=${produceDate} status=${res?.status ?? 'n/a'} raw=${JSON.stringify(data ?? {}).slice(0, 1200)}`,
+        );
+      }
+      if (!produceDateError(businessErrors)) {
+        const details = businessErrors.join('; ');
+        throw new Error(
+          `Dellin request failed: HTTP ${res?.status ?? 'n/a'}${details ? `; ${details}` : lastRaw ? `; ${lastRaw}` : ''}`,
+        );
+      }
+      this.logger.warn(
+        `[dellin-booking] produceDate unavailable, retrying next day requestId=${requestId} produceDate=${produceDate}`,
       );
     }
-    const businessErrors = parseDellinErrors(data);
-    const requestUid = firstNonEmptyString(
-      data?.requestID,
-      data?.requestId,
-      asObject(data?.data)?.requestID,
-      asObject(data?.data)?.requestId,
+    const details = lastErrors.join('; ');
+    throw new Error(
+      `Dellin request failed: HTTP ${lastStatus ?? 'n/a'}${details ? `; ${details}` : lastRaw ? `; ${lastRaw}` : ''}; triedProduceDates=${produceDateAttempts.join(',')}`,
     );
-    const state = firstNonEmptyString(data?.state, asObject(data?.data)?.state);
-    if (!requestUid && businessErrors.length > 0) {
-      throw new Error(`Dellin request failed: ${businessErrors.join('; ')}`);
-    }
-    if (!requestUid) {
-      throw new Error('Dellin request failed: API response does not contain requestId');
-    }
-    if (this.dellinDebug) {
-      this.logger.log(
-        `[dellin-booking] request ok requestId=${requestId} dellinRequestId=${requestUid ?? 'n/a'} state=${state ?? 'n/a'}`,
-      );
-    }
-    return { requestId: requestUid, state, draftOnly: effectiveDraftOnly };
   }
 
   private async getSessionAuth(

@@ -5,6 +5,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  Matches,
   Max,
   MaxLength,
   Min,
@@ -104,4 +105,9 @@ export class CreateTmsEstimateOrderDto {
   @IsOptional()
   @MaxLength(120)
   salesSource?: string;
+
+  @IsString()
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'Дата забора должна быть в формате YYYY-MM-DD' })
+  pickupDate?: string;
 }

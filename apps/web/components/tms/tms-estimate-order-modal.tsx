@@ -14,6 +14,14 @@ type Props = {
 }
 
 export function TmsEstimateOrderModal({ open, onClose, onCreated }: Props) {
+  const defaultPickupDate = (() => {
+    const now = new Date()
+    now.setDate(now.getDate() + 1)
+    const y = now.getFullYear()
+    const m = String(now.getMonth() + 1).padStart(2, "0")
+    const d = String(now.getDate()).padStart(2, "0")
+    return `${y}-${m}-${d}`
+  })()
   const token = typeof window !== "undefined" ? localStorage.getItem(AUTH_STORAGE_KEYS.accessToken) : null
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -32,6 +40,7 @@ export function TmsEstimateOrderModal({ open, onClose, onCreated }: Props) {
   const [heightCm, setHeightCm] = useState("10")
   const [places, setPlaces] = useState("1")
   const [declaredValue, setDeclaredValue] = useState("1000")
+  const [pickupDate, setPickupDate] = useState(defaultPickupDate)
 
   const reset = () => {
     setError(null)
@@ -49,6 +58,7 @@ export function TmsEstimateOrderModal({ open, onClose, onCreated }: Props) {
     setHeightCm("10")
     setPlaces("1")
     setDeclaredValue("1000")
+    setPickupDate(defaultPickupDate)
   }
 
   const submit = async () => {
@@ -84,6 +94,7 @@ export function TmsEstimateOrderModal({ open, onClose, onCreated }: Props) {
           heightCm: h,
           places: p,
           declaredValueRub: dv,
+          pickupDate: pickupDate.trim() || undefined,
         }),
       })
       const data = await res.json().catch(() => ({}))
@@ -270,6 +281,18 @@ export function TmsEstimateOrderModal({ open, onClose, onCreated }: Props) {
                 onChange={(e) => setDeclaredValue(e.target.value)}
                 required
               />
+            </div>
+            <div className="space-y-2 col-span-2">
+              <Label htmlFor="pickupDate">Дата забора (логистические сутки)</Label>
+              <Input
+                id="pickupDate"
+                type="date"
+                value={pickupDate}
+                onChange={(e) => setPickupDate(e.target.value)}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                По умолчанию стоит завтрашняя дата. При необходимости логист может изменить вручную.
+              </p>
             </div>
           </div>
 

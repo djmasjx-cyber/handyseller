@@ -113,6 +113,12 @@ function quotesForCarrier(quotes: Quote[], carrierId: string, draftFlags: string
   return exact.length ? exact : fallback
 }
 
+function displayRub(value: number, carrierId?: string): number {
+  if (!Number.isFinite(value)) return value
+  if (carrierId === "major-express") return Math.ceil(value)
+  return value
+}
+
 function QuoteDetails({ quote }: { quote: Quote }) {
   const price = quote.priceDetails
   const variantLabel = quote.notes?.split("·")[0]?.trim() ?? "Вариант"
@@ -120,13 +126,13 @@ function QuoteDetails({ quote }: { quote: Quote }) {
     <div className="space-y-1 text-xs">
       <p className="font-medium text-foreground">{variantLabel}</p>
       <p className="text-muted-foreground">Срок: {quote.etaDays} дн.</p>
-      <p className="font-semibold text-foreground">Итог: {quote.priceRub.toLocaleString("ru-RU")} ₽</p>
-      {price?.tariffRub != null ? <p className="text-muted-foreground">Тариф: {price.tariffRub.toLocaleString("ru-RU")} ₽</p> : null}
+      <p className="font-semibold text-foreground">Итог: {displayRub(quote.priceRub, quote.carrierId).toLocaleString("ru-RU")} ₽</p>
+      {price?.tariffRub != null ? <p className="text-muted-foreground">Тариф: {displayRub(price.tariffRub, quote.carrierId).toLocaleString("ru-RU")} ₽</p> : null}
       {price?.insuranceRub != null ? (
-        <p className="text-muted-foreground">Страховка: {price.insuranceRub.toLocaleString("ru-RU")} ₽</p>
+        <p className="text-muted-foreground">Страховка: {displayRub(price.insuranceRub, quote.carrierId).toLocaleString("ru-RU")} ₽</p>
       ) : null}
       {price?.extrasRub != null && price.extrasRub > 0 ? (
-        <p className="text-muted-foreground">Доп. услуги: {price.extrasRub.toLocaleString("ru-RU")} ₽</p>
+        <p className="text-muted-foreground">Доп. услуги: {displayRub(price.extrasRub, quote.carrierId).toLocaleString("ru-RU")} ₽</p>
       ) : null}
       {price?.comment ? <p className="text-muted-foreground">{price.comment}</p> : null}
     </div>
@@ -173,7 +179,7 @@ function QuoteTile({
           <>
             <div className="text-[10px] leading-tight truncate opacity-90">{variantLabel}</div>
             <div className="text-xs font-semibold tabular-nums leading-tight">
-              {quote.priceRub.toLocaleString("ru-RU")} ₽
+              {displayRub(quote.priceRub, quote.carrierId).toLocaleString("ru-RU")} ₽
             </div>
             <div className="text-[10px] leading-tight opacity-85">{quote.etaDays} дн.</div>
           </>
@@ -713,7 +719,7 @@ export default function TmsRequestsPage() {
                         const variantsKey = `${item.id}:${col.id}`
                         const expanded = Boolean(expandedVariants[variantsKey])
                         const shownQuotes = expanded ? carrierQuotes : carrierQuotes.slice(0, 4)
-                        const minPrice = Math.min(...carrierQuotes.map((q) => q.priceRub))
+                        const minPrice = Math.min(...carrierQuotes.map((q) => displayRub(q.priceRub, q.carrierId)))
                         const minEta = Math.min(...carrierQuotes.map((q) => q.etaDays))
                         return (
                           <details key={col.id} className="rounded-md border">

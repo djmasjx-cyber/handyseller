@@ -35,6 +35,7 @@ export async function createTmsShipmentRequestFromOrder(
   const snapshot = (await snapshotRes.json()) as {
     destinationLabel?: string | null
     originLabel?: string | null
+    pickupDatePreferred?: string | null
   }
 
   const snapDest = (snapshot.destinationLabel ?? "").trim()
@@ -60,6 +61,7 @@ export async function createTmsShipmentRequestFromOrder(
         originLabel: (order.warehouseName ?? "").trim() || "Склад не указан",
         destinationLabel: destinationResolved,
         serviceFlags,
+        pickupDate: snapshot.pickupDatePreferred ?? undefined,
       },
     }),
   })

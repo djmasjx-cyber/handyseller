@@ -120,6 +120,7 @@ export class TmsIntegrationService {
     const places = cargoOv?.places ?? Math.max(order.items.length, 1);
     const declaredValueRub = cargoOv?.declaredValueRub ?? Number(order.totalAmount);
     const cargoDescription = cargoOv?.cargoDescription;
+    const pickupDatePreferred = cargoOv?.pickupDate ?? null;
 
     const destinationLabel =
       order.deliveryAddressLabel?.trim() ||
@@ -146,6 +147,7 @@ export class TmsIntegrationService {
           phone: contactOv?.recipientPhone ?? null,
         },
       },
+      pickupDatePreferred,
       cargo: {
         weightGrams,
         widthMm,
@@ -380,6 +382,7 @@ export class TmsIntegrationService {
       places,
       declaredValueRub,
       cargoDescription,
+      pickupDate: dto.pickupDate?.trim() || null,
     };
 
     const productId = await this.getOrCreateTmsEstimateProduct(userId);
@@ -425,6 +428,7 @@ export class TmsIntegrationService {
     places?: number;
     declaredValueRub?: number;
     cargoDescription?: string;
+    pickupDate?: string;
   } | null {
     if (raw == null || typeof raw !== 'object') return null;
     const o = raw as Record<string, unknown>;
@@ -438,6 +442,7 @@ export class TmsIntegrationService {
       places: num(o.places),
       declaredValueRub: num(o.declaredValueRub),
       cargoDescription: str(o.cargoDescription),
+      pickupDate: str(o.pickupDate),
     };
   }
 

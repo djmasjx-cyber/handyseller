@@ -59,6 +59,8 @@ export interface CoreOrderSnapshot {
       company?: string | null;
     };
   };
+  /** Предпочтительная дата забора для создания заявки у перевозчика (YYYY-MM-DD). */
+  pickupDatePreferred?: string | null;
   cargo: CargoSnapshot;
   itemSummary: Array<{
     productId: string | null;
@@ -72,6 +74,12 @@ export interface ShipmentRequestDraft {
   originLabel: string;
   destinationLabel: string;
   serviceFlags: ServiceFlag[];
+  /** Дата забора/подачи машины в логистических сутках (YYYY-MM-DD). */
+  pickupDate?: string;
+  /** Желаемое окно времени забора HH:mm. */
+  pickupTimeStart?: string;
+  /** Желаемое окно времени забора HH:mm. */
+  pickupTimeEnd?: string;
   notes?: string;
 }
 
