@@ -948,13 +948,15 @@ export class DellinAdapter implements CarrierAdapter {
       useCounteragentIdOnly: false,
       label: 'no-sender-receiver-counteragent',
     });
-    formAttempts.push({
-      sender: null,
-      receiver: null,
-      useSenderReceiverCounteragent: false,
-      useCounteragentIdOnly: true,
-      label: 'counteragent-id-only',
-    });
+    if (discoveredCounteragentId != null) {
+      formAttempts.push({
+        sender: null,
+        receiver: null,
+        useSenderReceiverCounteragent: false,
+        useCounteragentIdOnly: true,
+        label: 'counteragent-id-only',
+      });
+    }
     const makePayload = (
       draftOnly: boolean,
       produceDate: string,
