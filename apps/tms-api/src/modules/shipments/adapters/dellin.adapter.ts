@@ -341,6 +341,46 @@ function isDellinUid(value: string | null | undefined): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
 }
 
+function extractDellinUidDeep(payload: unknown): string | null {
+  const seen = new Set<unknown>();
+  const walk = (node: unknown): string | null => {
+    if (!node || seen.has(node)) return null;
+    if (typeof node === 'string') return isDellinUid(node) ? node.trim() : null;
+    if (Array.isArray(node)) {
+      seen.add(node);
+      for (const item of node) {
+        const hit = walk(item);
+        if (hit) return hit;
+      }
+      return null;
+    }
+    const obj = asObject(node);
+    if (!obj) return null;
+    seen.add(obj);
+    const priorityKeys = [
+      'requesterUID',
+      'requesterUid',
+      'counteragentUID',
+      'counteragentUid',
+      'uid',
+      'userUID',
+      'userUid',
+      'senderUID',
+      'senderUid',
+    ];
+    for (const key of priorityKeys) {
+      const val = obj[key];
+      if (typeof val === 'string' && isDellinUid(val)) return val.trim();
+    }
+    for (const val of Object.values(obj)) {
+      const hit = walk(val);
+      if (hit) return hit;
+    }
+    return null;
+  };
+  return walk(payload);
+}
+
 function isLikelyPdf(buffer: Buffer): boolean {
   if (!buffer || buffer.length < 16) return false;
   return buffer.subarray(0, 5).toString('ascii') === '%PDF-';
@@ -628,13 +668,12 @@ export class DellinAdapter implements CarrierAdapter {
     const recipientPhoneRaw = input.snapshot.contacts?.recipient?.phone?.trim();
     const shipperPhone = normalizeDellinPhone(shipperPhoneRaw);
     const recipientPhone = normalizeDellinPhone(recipientPhoneRaw);
-    const requesterUidCandidate = auth.requesterUid?.trim() || process.env.DELLIN_REQUESTER_UID?.trim() || '';
-    if (!isDellinUid(requesterUidCandidate)) {
+    const requesterUid = await this.resolveRequesterUid(base, appKey, sessionID, auth.requesterUid, requestId);
+    if (!isDellinUid(requesterUid)) {
       throw new Error(
         'Dellin booking failed: отсутствует валидный UID контрагента (members.requester.uid). Укажите DELLIN_REQUESTER_UID или проверьте ответ auth/login.',
       );
     }
-    const requesterUid = requesterUidCandidate;
     const missingFields = requiredDellinFieldErrors(input);
     if (missingFields.length > 0) {
       throw new Error(
@@ -665,7 +704,7 @@ export class DellinAdapter implements CarrierAdapter {
         requester: { role: 'sender', uid: requesterUid },
         sender: {
           counteragent: {
-            customForm: { formName: 'ООО', countryUID: '643', juridical: true },
+            uid: requesterUid,
             name: shipperName,
             phone: shipperPhone,
           },
@@ -675,7 +714,7 @@ export class DellinAdapter implements CarrierAdapter {
         },
         receiver: {
           counteragent: {
-            customForm: { formName: 'ФЛ', countryUID: '643', juridical: false },
+            uid: requesterUid,
             name: recipientName,
             phone: recipientPhone,
           },
@@ -834,6 +873,67 @@ export class DellinAdapter implements CarrierAdapter {
       sessionID,
       requesterUid: parseDellinRequesterUid(data),
     };
+  }
+
+  private async resolveRequesterUid(
+    base: string,
+    appKey: string,
+    sessionID: string,
+    authRequesterUid: string | null,
+    requestId: string,
+  ): Promise<string | null> {
+    const fromEnv = process.env.DELLIN_REQUESTER_UID?.trim() || '';
+    if (isDellinUid(fromEnv)) return fromEnv;
+    const fromAuth = (authRequesterUid ?? '').trim();
+    const fromCounteragents = await this.fetchCounteragentUid(base, appKey, sessionID, requestId);
+    if (isDellinUid(fromCounteragents)) return fromCounteragents;
+    if (isDellinUid(fromAuth)) return fromAuth;
+    return null;
+  }
+
+  private async fetchCounteragentUid(
+    base: string,
+    appKey: string,
+    sessionID: string,
+    requestId: string,
+  ): Promise<string | null> {
+    const paths = [
+      '/v2/customers/counteragents',
+      '/v1/customers/counteragents',
+      '/v2/customers/counterparties',
+      '/v1/customers/counterparties',
+    ];
+    for (const p of paths) {
+      const url = dellinJsonUrl(base, p);
+      // Try POST first.
+      const postRes = await fetch(url, {
+        method: 'POST',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ appkey: appKey, sessionID }),
+        cache: 'no-store',
+      }).catch(() => null);
+      if (postRes?.ok) {
+        const data = await postRes.json().catch(() => null);
+        const uid = extractDellinUidDeep(data);
+        if (isDellinUid(uid)) return uid;
+      }
+      // Fallback to GET with query params.
+      const q = new URL(url);
+      q.searchParams.set('appkey', appKey);
+      q.searchParams.set('sessionID', sessionID);
+      const getRes = await fetch(q.toString(), {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+        cache: 'no-store',
+      }).catch(() => null);
+      if (getRes?.ok) {
+        const data = await getRes.json().catch(() => null);
+        const uid = extractDellinUidDeep(data);
+        if (isDellinUid(uid)) return uid;
+      }
+    }
+    this.logger.warn(`[dellin-booking] counteragent uid probe failed requestId=${requestId}`);
+    return null;
   }
 
   private async resolveKladrCode(
