@@ -1310,45 +1310,68 @@ export class DellinAdapter implements CarrierAdapter {
     ];
     for (const path of paths) {
       const url = dellinJsonUrl(base, path);
-      const postRes = await fetch(url, {
-        method: 'POST',
-        headers: withRequestIdHeaders(
-          { Accept: 'application/json', 'Content-Type': 'application/json' },
-          traceId ?? requestId,
-        ),
-        body: JSON.stringify({ appkey: appKey, sessionID, fullInfo: true }),
-        cache: 'no-store',
-      }).catch(() => null);
-      if (postRes?.ok) {
+      const postBodies: Array<Record<string, unknown>> = [
+        { appkey: appKey, sessionID, fullInfo: true },
+        { appkey: appKey, sessionID, fullInfo: false },
+        { appkey: appKey, sessionId: sessionID, fullInfo: true },
+        { appkey: appKey, sessionId: sessionID, fullInfo: false },
+        { appkey: appKey, sessionID },
+        { appkey: appKey, sessionId: sessionID },
+      ];
+      for (const postBody of postBodies) {
+        const postRes = await fetch(url, {
+          method: 'POST',
+          headers: withRequestIdHeaders(
+            { Accept: 'application/json', 'Content-Type': 'application/json' },
+            traceId ?? requestId,
+          ),
+          body: JSON.stringify(postBody),
+          cache: 'no-store',
+        }).catch(() => null);
+        if (!postRes?.ok) continue;
         const data = (await postRes.json().catch(() => null)) as unknown;
         const id = findDellinCounteragentIdByUid(data, requesterUid) ?? findFirstDellinCounteragentId(data);
         if (id != null) {
           this.counteragentIdCache.set(cacheKey, { value: id, expiresAt: now + 10 * 60_000 });
           if (this.dellinDebug) {
-            this.logger.log(`[dellin-booking] counteragent id resolved requestId=${requestId} id=${id} path=${path}`);
+            this.logger.log(
+              `[dellin-booking] counteragent id resolved requestId=${requestId} id=${id} path=${path} method=POST`,
+            );
           }
           return id;
         }
       }
 
-      const q = new URL(url);
-      q.searchParams.set('appkey', appKey);
-      q.searchParams.set('sessionID', sessionID);
-      q.searchParams.set('fullInfo', 'true');
-      const getRes = await fetch(q.toString(), {
-        method: 'GET',
-        headers: withRequestIdHeaders({ Accept: 'application/json' }, traceId ?? requestId),
-        cache: 'no-store',
-      }).catch(() => null);
-      if (!getRes?.ok) continue;
-      const data = (await getRes.json().catch(() => null)) as unknown;
-      const id = findDellinCounteragentIdByUid(data, requesterUid) ?? findFirstDellinCounteragentId(data);
-      if (id == null) continue;
-      this.counteragentIdCache.set(cacheKey, { value: id, expiresAt: now + 10 * 60_000 });
-      if (this.dellinDebug) {
-        this.logger.log(`[dellin-booking] counteragent id resolved requestId=${requestId} id=${id} path=${path} method=GET`);
+      const getVariants = [
+        { sessionKey: 'sessionID', fullInfo: 'true' },
+        { sessionKey: 'sessionID', fullInfo: 'false' },
+        { sessionKey: 'sessionId', fullInfo: 'true' },
+        { sessionKey: 'sessionId', fullInfo: 'false' },
+        { sessionKey: 'sessionID', fullInfo: null },
+        { sessionKey: 'sessionId', fullInfo: null },
+      ] as const;
+      for (const variant of getVariants) {
+        const q = new URL(url);
+        q.searchParams.set('appkey', appKey);
+        q.searchParams.set(variant.sessionKey, sessionID);
+        if (variant.fullInfo != null) q.searchParams.set('fullInfo', variant.fullInfo);
+        const getRes = await fetch(q.toString(), {
+          method: 'GET',
+          headers: withRequestIdHeaders({ Accept: 'application/json' }, traceId ?? requestId),
+          cache: 'no-store',
+        }).catch(() => null);
+        if (!getRes?.ok) continue;
+        const data = (await getRes.json().catch(() => null)) as unknown;
+        const id = findDellinCounteragentIdByUid(data, requesterUid) ?? findFirstDellinCounteragentId(data);
+        if (id == null) continue;
+        this.counteragentIdCache.set(cacheKey, { value: id, expiresAt: now + 10 * 60_000 });
+        if (this.dellinDebug) {
+          this.logger.log(
+            `[dellin-booking] counteragent id resolved requestId=${requestId} id=${id} path=${path} method=GET`,
+          );
+        }
+        return id;
       }
-      return id;
     }
 
     this.counteragentIdCache.set(cacheKey, { value: null, expiresAt: now + 5 * 60_000 });
