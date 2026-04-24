@@ -323,6 +323,11 @@ type DellinAuthSession = {
   requesterUid: string | null;
 };
 
+type DellinJsonResponse = {
+  res: Response | null;
+  data: Record<string, unknown> | null;
+};
+
 function maskPhone(value: string): string {
   const digits = value.replace(/\D+/g, '');
   if (digits.length < 6) return '***';
@@ -1069,13 +1074,13 @@ export class DellinAdapter implements CarrierAdapter {
             })}`,
           );
         }
-        let res = await fetch(url, {
-          method: 'POST',
-          headers: withRequestIdHeaders({ Accept: 'application/json', 'Content-Type': 'application/json' }, traceId ?? requestId),
-          body: JSON.stringify(payload),
-          cache: 'no-store',
-        }).catch(() => null);
-        let data = (await res?.json().catch(() => null)) as Record<string, unknown> | null;
+        let { res, data } = await this.postDellinJsonWithRetry(
+          url,
+          payload,
+          traceId ?? requestId,
+          requestId,
+          `request:create produceDate=${produceDate} form=${formChoice.label} inOrder=${!effectiveDraftOnly}`,
+        );
         if (!effectiveDraftOnly && res?.status === 400) {
           effectiveDraftOnly = true;
           payload = makePayload(
@@ -1086,13 +1091,13 @@ export class DellinAdapter implements CarrierAdapter {
             formChoice.useSenderReceiverCounteragent,
             formChoice.useCounteragentIdOnly,
           );
-          res = await fetch(url, {
-            method: 'POST',
-            headers: withRequestIdHeaders({ Accept: 'application/json', 'Content-Type': 'application/json' }, traceId ?? requestId),
-            body: JSON.stringify(payload),
-            cache: 'no-store',
-          }).catch(() => null);
-          data = (await res?.json().catch(() => null)) as Record<string, unknown> | null;
+          ({ res, data } = await this.postDellinJsonWithRetry(
+            url,
+            payload,
+            traceId ?? requestId,
+            requestId,
+            `request:fallback-draft produceDate=${produceDate} form=${formChoice.label}`,
+          ));
           this.logger.warn(
             `[dellin-booking] inOrder=true failed with 400, fallback to draft mode; requestId=${requestId}; produceDate=${produceDate}; form=${formChoice.label}`,
           );
@@ -1206,6 +1211,46 @@ export class DellinAdapter implements CarrierAdapter {
 
     this.logger.warn(`Dellin auth failed: requestId=${requestId}; ${lastFailure}`);
     return null;
+  }
+
+  private async postDellinJsonWithRetry(
+    url: string,
+    body: Record<string, unknown>,
+    traceId: string,
+    requestId: string,
+    op: string,
+  ): Promise<DellinJsonResponse> {
+    const maxAttemptsRaw = Number.parseInt(process.env.DELLIN_REQUEST_MAX_ATTEMPTS ?? '3', 10);
+    const maxAttempts = Number.isFinite(maxAttemptsRaw) ? Math.min(Math.max(maxAttemptsRaw, 1), 6) : 3;
+    const baseDelayRaw = Number.parseInt(process.env.DELLIN_REQUEST_RETRY_DELAY_MS ?? '1500', 10);
+    const baseDelayMs = Number.isFinite(baseDelayRaw) ? Math.min(Math.max(baseDelayRaw, 250), 10_000) : 1500;
+    let last: DellinJsonResponse = { res: null, data: null };
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: withRequestIdHeaders({ Accept: 'application/json', 'Content-Type': 'application/json' }, traceId),
+        body: JSON.stringify(body),
+        cache: 'no-store',
+      }).catch(() => null);
+      const data = (await res?.json().catch(() => null)) as Record<string, unknown> | null;
+      last = { res, data };
+      if (res?.ok) return last;
+
+      const status = res?.status ?? 0;
+      const details = parseDellinErrors(data).join('; ');
+      const retryableStatus = !res || status === 429 || status >= 500;
+      const retryableDetail = /rate|too many requests|timeout|temporar|unavailable|overload/i.test(details);
+      const retryable = retryableStatus || retryableDetail;
+      if (attempt >= maxAttempts || !retryable) return last;
+
+      const delayMs = baseDelayMs * attempt;
+      this.logger.warn(
+        `[dellin-booking] retry ${attempt}/${maxAttempts} op=${op} requestId=${requestId} status=${status || 'n/a'}${details ? ` details=${details}` : ''} nextDelayMs=${delayMs}`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+    return last;
   }
 
   private async resolveRequesterUid(
