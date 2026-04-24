@@ -178,18 +178,36 @@ jobs:
               df -h /
             }
             ensure_disk_headroom 1200
-            # Pull can fail on small VM disks during layer extraction.
-            # Retry with emergency cleanup, but keep running containers online.
-            for i in 1 2 3; do
-              echo "Image pull attempt ${i}/3"
-              if $DC -f docker-compose.ci.yml --env-file "${ENV_FILE}" pull api web tms-api; then
-                break
-              fi
-              echo "Pull failed; running emergency cleanup and retrying..."
+            pull_with_fallback() {
+              local svc="$1"
+              local cname="$2"
+              local old_image=""
+              old_image="$(docker inspect "${cname}" --format '{{.Image}}' 2>/dev/null || true)"
               ensure_disk_headroom 1200
-              [ "$i" -eq 3 ] && { echo "Image pull failed after retries"; exit 1; }
-              sleep $((i * 5))
-            done
+              for i in 1 2 3; do
+                echo "Image pull attempt ${i}/3 service=${svc}"
+                if $DC -f docker-compose.ci.yml --env-file "${ENV_FILE}" pull "${svc}"; then
+                  return 0
+                fi
+                echo "Pull failed for ${svc}; running emergency cleanup and retrying..."
+                ensure_disk_headroom 1200
+                if [ "${i}" -eq 2 ]; then
+                  echo "Low-space fallback for ${svc}: recycle old container/image."
+                  docker stop "${cname}" >/dev/null 2>&1 || true
+                  docker rm "${cname}" >/dev/null 2>&1 || true
+                  if [ -n "${old_image}" ]; then
+                    docker image rm -f "${old_image}" >/dev/null 2>&1 || true
+                  fi
+                  ensure_disk_headroom 1200
+                fi
+                [ "${i}" -eq 3 ] && { echo "Image pull failed after retries service=${svc}"; return 1; }
+                sleep $((i * 5))
+              done
+              return 1
+            }
+            pull_with_fallback api handyseller-api || exit 1
+            pull_with_fallback tms-api handyseller-tms-api || exit 1
+            pull_with_fallback web handyseller-web || exit 1
             $DC -f docker-compose.ci.yml --env-file "${ENV_FILE}" up -d --no-deps redis
             $DC -f docker-compose.ci.yml --env-file "${ENV_FILE}" up -d --no-deps api tms-api web
             for i in $(seq 1 30); do
