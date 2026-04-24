@@ -51,7 +51,7 @@ jobs:
           tags: ${{ steps.meta-api.outputs.tags }}
           labels: ${{ steps.meta-api.outputs.labels }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: type=gha,mode=max,ignore-error=true
 
       - id: meta-tms-api
         uses: docker/metadata-action@v5
@@ -69,7 +69,7 @@ jobs:
           tags: ${{ steps.meta-tms-api.outputs.tags }}
           labels: ${{ steps.meta-tms-api.outputs.labels }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: type=gha,mode=max,ignore-error=true
 
       - id: meta-web
         uses: docker/metadata-action@v5
@@ -87,7 +87,7 @@ jobs:
           tags: ${{ steps.meta-web.outputs.tags }}
           labels: ${{ steps.meta-web.outputs.labels }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: type=gha,mode=max,ignore-error=true
 
       - name: Export immutable image refs
         id: image_refs
