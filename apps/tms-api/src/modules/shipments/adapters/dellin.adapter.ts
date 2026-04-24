@@ -434,9 +434,10 @@ function findDellinCounteragentProfiles(node: unknown, out: DellinCounteragentPr
   const obj = node as Record<string, unknown>;
   const uid = firstNonEmptyString(obj.uid, obj.counteragentUID, obj.counteragentUid);
   const name = firstNonEmptyString(obj.name, obj.fullName, obj.shortName);
-  if (isDellinUid(uid) && name) {
+  const safeUid = uid?.trim();
+  if (safeUid && isDellinUid(safeUid) && name) {
     out.push({
-      uid,
+      uid: safeUid,
       name,
       inn: firstNonEmptyString(obj.inn),
       juridical: typeof obj.juridical === 'boolean' ? obj.juridical : null,
