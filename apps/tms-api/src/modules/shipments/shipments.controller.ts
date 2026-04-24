@@ -151,9 +151,13 @@ export class ShipmentsController {
         quoteId: quote.id,
         carrierId: quote.carrierId,
         carrierName: quote.carrierName,
+        mode: quote.mode,
         serviceFlags: quote.serviceFlags,
         etaDays: quote.etaDays,
+        priceRub: quote.priceRub,
         totalPriceRub: quote.priceRub,
+        notes: quote.notes,
+        priceDetails: quote.priceDetails,
       })),
     };
   }

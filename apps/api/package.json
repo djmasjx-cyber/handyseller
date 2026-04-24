@@ -21,6 +21,7 @@
     "prisma:migrate-pii": "node scripts/migrate-encrypt-pii.js",
     "prisma:studio": "prisma studio",
     "prisma:seed": "node scripts/seed-database.js",
+    "tms:demo:bootstrap": "node scripts/bootstrap-tms-demo-client.js",
     "debug:wb-order": "ts-node scripts/debug-wb-order-sync.ts",
     "backfill:cancellation-kind": "ts-node scripts/backfill-order-cancellation-kind.ts"
   },
