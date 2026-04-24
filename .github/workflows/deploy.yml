@@ -223,7 +223,9 @@ jobs:
 
       - name: Prepare SSH key
         run: |
-          echo "${{ secrets.VM_SSH_KEY }}" | base64 -d > deploy_key.pem
+          if ! printf '%s' "${{ secrets.VM_SSH_KEY }}" | base64 -d > deploy_key.pem 2>/dev/null; then
+            printf '%s' "${{ secrets.VM_SSH_KEY }}" > deploy_key.pem
+          fi
           chmod 600 deploy_key.pem
 
       - name: Add VM host to known_hosts
