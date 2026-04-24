@@ -160,8 +160,16 @@ jobs:
             $DC -f docker-compose.ci.yml --env-file "${ENV_FILE}" pull api web tms-api
             $DC -f docker-compose.ci.yml --env-file "${ENV_FILE}" up -d --no-deps redis
             $DC -f docker-compose.ci.yml --env-file "${ENV_FILE}" up -d --no-deps api tms-api web
-            curl -sf --connect-timeout 5 http://127.0.0.1:4000/health >/dev/null
-            curl -sf --connect-timeout 5 http://127.0.0.1:4100/health >/dev/null
+            for i in $(seq 1 30); do
+              curl -sf --connect-timeout 3 http://127.0.0.1:4000/health >/dev/null && break
+              [ "$i" -eq 30 ] && { echo "API health check timeout"; exit 1; }
+              sleep 3
+            done
+            for i in $(seq 1 30); do
+              curl -sf --connect-timeout 3 http://127.0.0.1:4100/health >/dev/null && break
+              [ "$i" -eq 30 ] && { echo "TMS API health check timeout"; exit 1; }
+              sleep 3
+            done
           SSH
 
       - name: Staging partner smoke
