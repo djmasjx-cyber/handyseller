@@ -7,7 +7,7 @@ export async function POST(req: Request) {
     const checkout = await req.json()
     const token = await getDemoAccessToken()
     const { externalOrderId, payload } = buildShipmentPayload(checkout)
-    const result = await callTmsJson("v1/shipments/estimate", {
+    const result = await callTmsJson<Record<string, unknown>>("v1/shipments/estimate", {
       method: "POST",
       token,
       body: payload,
