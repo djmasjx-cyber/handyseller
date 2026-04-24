@@ -234,6 +234,10 @@ jobs:
               echo "ERROR: .env.production not found. Run vm-setup-once.sh on VM first."
               exit 1
             fi
+            # Free disk space before pulling fresh images.
+            docker image prune -af >/dev/null 2>&1 || true
+            docker builder prune -af >/dev/null 2>&1 || true
+            docker container prune -f >/dev/null 2>&1 || true
 
             grep -v '^IMAGE_API=' .env.production | grep -v '^IMAGE_WEB=' | grep -v '^IMAGE_TMS_API=' > .env.production.tmp
             echo "IMAGE_API=${IMAGE_API}" >> .env.production.tmp

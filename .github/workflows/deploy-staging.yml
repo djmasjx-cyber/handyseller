@@ -137,6 +137,10 @@ jobs:
               echo "ERROR: ${APP_DIR}/${ENV_FILE} not found"
               exit 1
             fi
+            # Free disk space before pulling fresh images.
+            docker image prune -af >/dev/null 2>&1 || true
+            docker builder prune -af >/dev/null 2>&1 || true
+            docker container prune -f >/dev/null 2>&1 || true
             if [ -n "${CR_PAT}" ]; then
               echo "${CR_PAT}" | docker login ghcr.io -u ${{ github.repository_owner }} --password-stdin
             fi
