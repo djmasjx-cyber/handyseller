@@ -59,6 +59,12 @@ services:
       DADATA_TOKEN: ${DADATA_TOKEN:-}
       DADATA_API_KEY: ${DADATA_API_KEY:-}
       DADATA_SECRET: ${DADATA_SECRET:-}
+      # Temporary checkout demo BFF credentials; server-side only, never exposed to browser bundles.
+      TMS_DEMO_CLIENT_ID: ${TMS_DEMO_CLIENT_ID:-}
+      TMS_DEMO_CLIENT_SECRET: ${TMS_DEMO_CLIENT_SECRET:-}
+      TMS_DEMO_ORIGIN_LABEL: ${TMS_DEMO_ORIGIN_LABEL:-}
+      TMS_DEMO_SHIPPER_NAME: ${TMS_DEMO_SHIPPER_NAME:-}
+      TMS_DEMO_SHIPPER_PHONE: ${TMS_DEMO_SHIPPER_PHONE:-}
     ports:
       - "127.0.0.1:3001:3001"
     healthcheck:
