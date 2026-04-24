@@ -10,21 +10,26 @@ function getToken(req: NextRequest): string | null {
   return null
 }
 
-/** Маршруты основного Nest API (учётки, OAuth, OpenAPI), остальное — tms-api. */
+/**
+ * Core API ownership is intentionally narrow:
+ * - OAuth and integration-client management stay in core.
+ * - Transport API (`/tms/v1/*`) is owned by `tms-api`.
+ */
 function useCoreApi(path: string[]): boolean {
   const head = path[0]
-  return head === "core" || head === "oauth" || head === "integration-clients" || head === "openapi.yaml"
+  return head === "oauth" || head === "integration-clients" || head === "openapi.yaml"
 }
 
 function resolveTarget(req: NextRequest, path: string[]): string {
   const qs = req.nextUrl.searchParams.toString()
   const q = qs ? `?${qs}` : ""
   const [scope, ...rest] = path
-  if (scope === "core") {
-    return `${API_BASE}/tms/${rest.join("/")}${q}`
-  }
   if (useCoreApi(path)) {
     return `${API_BASE}/tms/${path.join("/")}${q}`
+  }
+  // Legacy compatibility path: `/tms/core/*` remains routed to core while clients migrate.
+  if (scope === "core") {
+    return `${API_BASE}/tms/${rest.join("/")}${q}`
   }
   return `${TMS_API_BASE}/tms/${path.join("/")}${q}`
 }

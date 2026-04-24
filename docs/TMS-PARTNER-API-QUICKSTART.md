@@ -1,6 +1,10 @@
 # HandySeller TMS Partner API Quickstart
 
-Этот документ описывает самый простой и надежный способ подключения сайта или 1С к TMS API.
+Этот документ описывает простой и надежный путь интеграции сайта/1С с HandySeller как с агрегатором доставки.
+Цель интеграции:
+- в корзине показать покупателю варианты доставки (цена, срок, перевозчик);
+- после выбора варианта создать заказ у выбранного перевозчика через HandySeller;
+- получить обратно `trackingNumber` и сохранить его у себя в заказе.
 
 ## 1) Модель интеграции
 
@@ -28,9 +32,21 @@ curl -X POST "https://api.handyseller.ru/api/tms/oauth/token" \
   }'
 ```
 
-## 3) Минимальный рабочий flow
+## 3) Checkout-flow (как на странице корзины)
 
-### 3.1 Рассчитать варианты доставки
+Ниже правильный поток для фронта и бэкенда клиента:
+
+1. Когда корзина и адрес заполнены -> вызываете `estimate`.
+2. Из ответа `estimate` берете массив `options` и показываете его в блоке "Способ доставки".
+3. Пользователь выбирает один вариант -> отправляете `select` с выбранным `quoteId`.
+4. Пользователь нажимает "Оформить заказ" -> вызываете `confirm`.
+5. Из ответа `confirm` берете `trackingNumber` и сохраняете в заказе клиента.
+
+Если нужно, статусы дальше получаете через webhook и/или pull-методы.
+
+## 4) Минимальный рабочий flow (запросы)
+
+### 4.1 Рассчитать варианты доставки
 
 ```bash
 curl -X POST "https://api.handyseller.ru/api/tms/v1/shipments/estimate" \
@@ -69,11 +85,47 @@ curl -X POST "https://api.handyseller.ru/api/tms/v1/shipments/estimate" \
   }'
 ```
 
-### 3.2 Создать shipment-request
+### 4.2 Что вернется в `estimate` и что показывать в корзине
+
+В ответе `estimate` вам важны поля:
+- `shipmentRequestId` - id заявки в HandySeller (сохраните у себя).
+- `options[]` - список вариантов доставки для отображения клиенту.
+  - `options[].quoteId` - технический id варианта (нужен для `select`).
+  - `options[].carrierName` - название перевозчика (показ в UI).
+  - `options[].priceRub` - цена доставки (показ в UI).
+  - `options[].etaDays` - срок доставки в днях (показ в UI).
+  - `options[].notes` - пояснение к тарифу (опционально показывать).
+
+Пример (сокращенно):
+
+```json
+{
+  "shipmentRequestId": "req_01J...",
+  "options": [
+    {
+      "quoteId": "q_01J..._dellin",
+      "carrierId": "dellin",
+      "carrierName": "Деловые Линии",
+      "priceRub": 610,
+      "etaDays": 2,
+      "notes": "Экспресс, дверь -> дверь"
+    },
+    {
+      "quoteId": "q_01J..._cdek",
+      "carrierId": "cdek",
+      "carrierName": "CDEK",
+      "priceRub": 650,
+      "etaDays": 3
+    }
+  ]
+}
+```
+
+### 4.3 Создать shipment-request
 
 `POST /api/tms/v1/shipments` с тем же payload (если нужен отдельный этап).
 
-### 3.3 Подтвердить выбранный вариант
+### 4.4 Подтвердить выбранный вариант
 
 1. Выберите `quoteId`.
 2. Установите выбранный тариф:
@@ -88,7 +140,28 @@ curl -X POST "https://api.handyseller.ru/api/tms/v1/shipments/<REQUEST_ID>/confi
 
 В ответе будет `trackingNumber`.
 
-## 4) Получение статусов
+### 4.5 Что вернется в `confirm` и что сохранить у себя
+
+Из ответа `confirm` обязательно сохраните:
+- `id` - внутренний `shipmentId` (для дальнейших запросов статусов);
+- `trackingNumber` - трек-номер, который нужно вернуть в карточку заказа;
+- `carrierName` - перевозчик (для отображения);
+- `status` - текущий статус после бронирования.
+
+Пример (сокращенно):
+
+```json
+{
+  "id": "shp_01J...",
+  "requestId": "req_01J...",
+  "carrierId": "dellin",
+  "carrierName": "Деловые Линии",
+  "trackingNumber": "DELLIN-REQ-123456789",
+  "status": "CONFIRMED"
+}
+```
+
+## 5) Получение статусов
 
 - По внутреннему id:
   - `GET /api/tms/v1/shipments/{shipmentId}`
@@ -98,7 +171,7 @@ curl -X POST "https://api.handyseller.ru/api/tms/v1/shipments/<REQUEST_ID>/confi
 - Батч-синхронизация (рекомендуется для 1С):
   - `GET /api/tms/v1/shipments?updatedSince=<ISO>&limit=50&cursor=<CURSOR>`
 
-## 5) Webhook-подписки
+## 6) Webhook-подписки
 
 - Создать подписку:
   - `POST /api/tms/v1/webhooks/subscriptions` с `{ "callbackUrl": "https://partner.example.com/tms/events" }`
@@ -159,7 +232,21 @@ export function verifyHsWebhook(rawBody, signatureHeader, signingSecret) {
 3. Сравнить с `X-Handyseller-Signature` без префикса `sha256=`.  
 4. Только после успешной проверки запускать бизнес-обработку статуса.
 
-## 6) Правила надежности (обязательные)
+## 7) Какие поля обязательно отправлять в estimate/create
+
+Минимум, без которого расчет/подтверждение обычно ломается:
+- `snapshot.userId`
+- `snapshot.originLabel`, `snapshot.destinationLabel`
+- `snapshot.cargo.weightGrams` (+ желательно габариты)
+- `snapshot.itemSummary[0].title`
+- `snapshot.contacts.shipper.name`, `snapshot.contacts.shipper.phone`
+- `snapshot.contacts.recipient.name`, `snapshot.contacts.recipient.phone`
+- `draft.originLabel`, `draft.destinationLabel`
+- `integration.externalOrderId`, `integration.orderType`
+
+Телефоны передавайте в формате РФ, который легко нормализуется до `7XXXXXXXXXX`.
+
+## 8) Правила надежности (обязательные)
 
 - Всегда передавайте `Idempotency-Key` в write-запросах.
 - Делайте retry только для сетевых/5xx ошибок с exponential backoff.
@@ -170,14 +257,16 @@ export function verifyHsWebhook(rawBody, signatureHeader, signingSecret) {
 - Проверяйте `X-Handyseller-Signature` перед бизнес-обработкой.
 - Используйте pull как fallback, даже если включены webhook.
 
-## 7) OpenAPI
+## 9) OpenAPI
 
 - Спецификация: `GET /api/tms/openapi.yaml`
 - В спецификации перечислены OAuth и v1 partner endpoints.
 
-## 8) Готовые материалы для быстрого старта
+## 10) Готовые материалы для быстрого старта
 
 - E2E smoke script:
   - `scripts/tms-partner-e2e.sh`
 - Postman collection:
   - `docs/TMS-Partner-API.postman_collection.json`
+- Подробный справочник полей и типичных ошибок:
+  - `docs/TMS-PARTNER-API-FIELD-GUIDE.md`

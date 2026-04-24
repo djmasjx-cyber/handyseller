@@ -12,6 +12,16 @@
 
 ---
 
+## Контекстные quality-gates (Core/TMS/WMS)
+
+- `core-quality`: lint + build + unit (`apps/api`)
+- `tms-quality`: build (`apps/tms-api`)
+- `web-quality`: lint + build (`apps/web`)
+- `contracts-quality`: build (`packages/tms-sdk`, `packages/tms-domain`)
+- `wms-quality`: reserved gate, becomes mandatory once `apps/wms` is introduced
+
+---
+
 ## Запуск тестов (API)
 
 ```bash
@@ -90,3 +100,10 @@ docker run -t owasp/zap2docker-stable zap-full-scan.py \
     docker run -t owasp/zap2docker-stable zap-baseline.py \
       -t $API_URL -r zap-report.html || true
 ```
+
+## WMS test baseline (before rollout)
+
+- Unit: invariants for stock/reservation and idempotency.
+- Integration: warehouse operation state transitions.
+- Contract: compatibility checks for event/API payloads.
+- Migration: schema compatibility test before release.

@@ -14,6 +14,7 @@ permissions:
   packages: write
 
 env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   REGISTRY: ghcr.io
   IMAGE_TAG: sha-${{ github.sha }}
 
@@ -51,7 +52,7 @@ jobs:
           tags: ${{ steps.meta-api.outputs.tags }}
           labels: ${{ steps.meta-api.outputs.labels }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: type=gha,mode=max,ignore-error=true
 
       - id: meta-tms-api
         uses: docker/metadata-action@v5
@@ -69,7 +70,7 @@ jobs:
           tags: ${{ steps.meta-tms-api.outputs.tags }}
           labels: ${{ steps.meta-tms-api.outputs.labels }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: type=gha,mode=max,ignore-error=true
 
       - id: meta-web
         uses: docker/metadata-action@v5
@@ -87,7 +88,7 @@ jobs:
           tags: ${{ steps.meta-web.outputs.tags }}
           labels: ${{ steps.meta-web.outputs.labels }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: type=gha,mode=max,ignore-error=true
 
       - name: Export immutable image refs
         id: image_refs
@@ -126,8 +127,10 @@ jobs:
           set -euo pipefail
           HOST="${{ secrets.VM_HOST }}"
           USER="${{ secrets.VM_USER || 'ubuntu' }}"
-          ssh -i deploy_key.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "${USER}@${HOST}" <<'SSH'
+          ssh -i deploy_key.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "${USER}@${HOST}" \
+            "IMAGE_API='${IMAGE_API}' IMAGE_WEB='${IMAGE_WEB}' IMAGE_TMS_API='${IMAGE_TMS_API}' CR_PAT='${CR_PAT}' bash -seu" <<'SSH'
             set -euo pipefail
+            CR_PAT="${CR_PAT:-}"
             APP_DIR="/opt/handyseller"
             ENV_FILE=".env.staging"
             cd "${APP_DIR}"
@@ -135,6 +138,13 @@ jobs:
               echo "ERROR: ${APP_DIR}/${ENV_FILE} not found"
               exit 1
             fi
+            # Keep staging online during deploy: avoid compose down/system prune --volumes.
+            # Use lightweight cleanup only; services are recreated in-place below.
+            df -h /
+            docker image prune -af >/dev/null 2>&1 || true
+            docker builder prune -af >/dev/null 2>&1 || true
+            docker container prune -f >/dev/null 2>&1 || true
+            df -h /
             if [ -n "${CR_PAT}" ]; then
               echo "${CR_PAT}" | docker login ghcr.io -u ${{ github.repository_owner }} --password-stdin
             fi
@@ -147,20 +157,77 @@ jobs:
             DC="docker compose"
             command -v docker-compose >/dev/null 2>&1 && DC="docker-compose"
             docker network create handyseller_handyseller 2>/dev/null || true
-            $DC -f docker-compose.ci.yml --env-file "${ENV_FILE}" pull api web tms-api
+            free_mb() {
+              df --output=avail -Bm / | tail -1 | tr -dc '0-9'
+            }
+            ensure_disk_headroom() {
+              local min_mb="${1:-1200}"
+              local avail
+              avail="$(free_mb)"
+              if [ "${avail}" -ge "${min_mb}" ]; then
+                return 0
+              fi
+              echo "Low disk space (${avail}MB). Running emergency cleanup..."
+              docker system df || true
+              docker image prune -af >/dev/null 2>&1 || true
+              docker builder prune -af >/dev/null 2>&1 || true
+              docker container prune -f >/dev/null 2>&1 || true
+              docker volume prune -f >/dev/null 2>&1 || true
+              sudo -n journalctl --vacuum-size=200M >/dev/null 2>&1 || true
+              sudo -n rm -rf /var/cache/apt/archives/*.deb >/dev/null 2>&1 || true
+              sudo -n apt-get clean >/dev/null 2>&1 || true
+              df -h /
+            }
+            ensure_disk_headroom 1200
+            pull_with_fallback() {
+              local svc="$1"
+              local cname="$2"
+              local old_image=""
+              old_image="$(docker inspect "${cname}" --format '{{.Image}}' 2>/dev/null || true)"
+              ensure_disk_headroom 1200
+              for i in 1 2 3; do
+                echo "Image pull attempt ${i}/3 service=${svc}"
+                if $DC -f docker-compose.ci.yml --env-file "${ENV_FILE}" pull "${svc}"; then
+                  return 0
+                fi
+                echo "Pull failed for ${svc}; running emergency cleanup and retrying..."
+                ensure_disk_headroom 1200
+                if [ "${i}" -eq 2 ]; then
+                  echo "Low-space fallback for ${svc}: recycle old container/image."
+                  docker stop "${cname}" >/dev/null 2>&1 || true
+                  docker rm "${cname}" >/dev/null 2>&1 || true
+                  if [ -n "${old_image}" ]; then
+                    docker image rm -f "${old_image}" >/dev/null 2>&1 || true
+                  fi
+                  ensure_disk_headroom 1200
+                fi
+                [ "${i}" -eq 3 ] && { echo "Image pull failed after retries service=${svc}"; return 1; }
+                sleep $((i * 5))
+              done
+              return 1
+            }
+            pull_with_fallback api handyseller-api || exit 1
+            pull_with_fallback tms-api handyseller-tms-api || exit 1
+            pull_with_fallback web handyseller-web || exit 1
             $DC -f docker-compose.ci.yml --env-file "${ENV_FILE}" up -d --no-deps redis
             $DC -f docker-compose.ci.yml --env-file "${ENV_FILE}" up -d --no-deps api tms-api web
-            curl -sf --connect-timeout 5 http://127.0.0.1:4000/health >/dev/null
-            curl -sf --connect-timeout 5 http://127.0.0.1:4100/health >/dev/null
+            for i in $(seq 1 30); do
+              curl -sf --connect-timeout 3 http://127.0.0.1:4000/health >/dev/null && break
+              [ "$i" -eq 30 ] && { echo "API health check timeout"; exit 1; }
+              sleep 3
+            done
+            for i in $(seq 1 30); do
+              curl -sf --connect-timeout 3 http://127.0.0.1:4100/health >/dev/null && break
+              [ "$i" -eq 30 ] && { echo "TMS API health check timeout"; exit 1; }
+              sleep 3
+            done
           SSH
 
-      - name: Staging partner smoke
+      - name: Staging fast smoke
         env:
           CLIENT_ID: ${{ secrets.TMS_CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.TMS_CLIENT_SECRET }}
           API_BASE_URL: ${{ vars.API_BASE_URL || 'https://api.handyseller.ru/api' }}
-          PREFERRED_CARRIER_ID: dellin
-          DOWNLOAD_DOC: "false"
         run: |
           set -euo pipefail
-          bash scripts/tms-partner-e2e.sh
+          bash scripts/tms-fast-smoke.sh

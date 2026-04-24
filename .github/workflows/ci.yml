@@ -13,23 +13,159 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
-  build-lint-typecheck:
+  detect-context:
     runs-on: ubuntu-latest
+    outputs:
+      core: ${{ steps.filter.outputs.core }}
+      tms: ${{ steps.filter.outputs.tms }}
+      web: ${{ steps.filter.outputs.web }}
+      contracts: ${{ steps.filter.outputs.contracts }}
+      wms: ${{ steps.filter.outputs.wms }}
     steps:
       - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          base: ${{ github.event_name == 'pull_request' && github.base_ref || github.event.before }}
+          filters: |
+            core:
+              - 'apps/api/**'
+            tms:
+              - 'apps/tms-api/**'
+            web:
+              - 'apps/web/**'
+              - 'packages/ui/**'
+            contracts:
+              - 'packages/tms-sdk/**'
+              - 'packages/tms-domain/**'
+            wms:
+              - 'apps/wms/**'
+              - 'packages/wms-*/**'
 
+  core-quality:
+    runs-on: ubuntu-latest
+    needs: detect-context
+    env:
+      RUN_SCOPE: ${{ needs.detect-context.outputs.core == 'true' }}
+    steps:
+      - name: Skip when scope unchanged
+        if: ${{ env.RUN_SCOPE != 'true' }}
+        run: echo "core-quality skipped"
+      - uses: actions/checkout@v4
+        if: ${{ env.RUN_SCOPE == 'true' }}
       - uses: actions/setup-node@v4
+        if: ${{ env.RUN_SCOPE == 'true' }}
         with:
           node-version: "20"
           cache: npm
+      - if: ${{ env.RUN_SCOPE == 'true' }}
+        run: npm ci
+      - if: ${{ env.RUN_SCOPE == 'true' }}
+        run: npm run lint --workspace=api
+      - if: ${{ env.RUN_SCOPE == 'true' }}
+        run: npx prisma generate --schema=./apps/api/prisma/schema.prisma
+      - if: ${{ env.RUN_SCOPE == 'true' }}
+        run: npm run build --workspace=api
+      - if: ${{ env.RUN_SCOPE == 'true' }}
+        run: npm run test:unit --workspace=api
 
-      - run: npm ci
-      - run: npm run lint
-      - run: npx prisma generate --schema=./apps/api/prisma/schema.prisma
-      - run: npm run build --workspace=api
-      - run: npm run build --workspace=tms-api
-      - run: npm run build --workspace=web
+  tms-quality:
+    runs-on: ubuntu-latest
+    needs: detect-context
+    env:
+      RUN_SCOPE: ${{ needs.detect-context.outputs.tms == 'true' }}
+    steps:
+      - name: Skip when scope unchanged
+        if: ${{ env.RUN_SCOPE != 'true' }}
+        run: echo "tms-quality skipped"
+      - uses: actions/checkout@v4
+        if: ${{ env.RUN_SCOPE == 'true' }}
+      - uses: actions/setup-node@v4
+        if: ${{ env.RUN_SCOPE == 'true' }}
+        with:
+          node-version: "20"
+          cache: npm
+      - if: ${{ env.RUN_SCOPE == 'true' }}
+        run: npm ci
+      - if: ${{ env.RUN_SCOPE == 'true' }}
+        run: npm run lint --workspace=tms-api --if-present
+      - if: ${{ env.RUN_SCOPE == 'true' }}
+        run: npm run build --workspace=tms-api
+
+  web-quality:
+    runs-on: ubuntu-latest
+    needs: detect-context
+    env:
+      RUN_SCOPE: ${{ needs.detect-context.outputs.web == 'true' }}
+    steps:
+      - name: Skip when scope unchanged
+        if: ${{ env.RUN_SCOPE != 'true' }}
+        run: echo "web-quality skipped"
+      - uses: actions/checkout@v4
+        if: ${{ env.RUN_SCOPE == 'true' }}
+      - uses: actions/setup-node@v4
+        if: ${{ env.RUN_SCOPE == 'true' }}
+        with:
+          node-version: "20"
+          cache: npm
+      - if: ${{ env.RUN_SCOPE == 'true' }}
+        run: npm ci
+      - if: ${{ env.RUN_SCOPE == 'true' }}
+        run: npm run lint --workspace=web
+      - if: ${{ env.RUN_SCOPE == 'true' }}
+        run: npm run build --workspace=web
+
+  contracts-quality:
+    runs-on: ubuntu-latest
+    needs: detect-context
+    env:
+      RUN_SCOPE: ${{ needs.detect-context.outputs.contracts == 'true' }}
+    steps:
+      - name: Skip when scope unchanged
+        if: ${{ env.RUN_SCOPE != 'true' }}
+        run: echo "contracts-quality skipped"
+      - uses: actions/checkout@v4
+        if: ${{ env.RUN_SCOPE == 'true' }}
+      - uses: actions/setup-node@v4
+        if: ${{ env.RUN_SCOPE == 'true' }}
+        with:
+          node-version: "20"
+          cache: npm
+      - if: ${{ env.RUN_SCOPE == 'true' }}
+        run: npm ci
+      - if: ${{ env.RUN_SCOPE == 'true' }}
+        run: npm run build --workspace=@handyseller/tms-sdk
+      - if: ${{ env.RUN_SCOPE == 'true' }}
+        run: npm run build --workspace=@handyseller/tms-domain
+
+  wms-quality:
+    runs-on: ubuntu-latest
+    needs: detect-context
+    env:
+      RUN_SCOPE: ${{ needs.detect-context.outputs.wms == 'true' }}
+    steps:
+      - if: ${{ env.RUN_SCOPE != 'true' }}
+        run: echo "wms-quality skipped"
+      - if: ${{ env.RUN_SCOPE == 'true' }}
+        run: |
+          echo "::warning::WMS paths changed but quality workflow is not wired yet."
+          echo "::warning::Create apps/wms quality scripts before enabling blocking WMS gate."
+
+  build-lint-typecheck:
+    runs-on: ubuntu-latest
+    needs:
+      - detect-context
+      - core-quality
+      - tms-quality
+      - web-quality
+      - contracts-quality
+      - wms-quality
+    steps:
+      - run: echo "Context-aware quality matrix passed."
 
   quick-partner-smoke:
     runs-on: ubuntu-latest
@@ -39,13 +175,11 @@ jobs:
       CLIENT_ID: ${{ secrets.TMS_CLIENT_ID }}
       CLIENT_SECRET: ${{ secrets.TMS_CLIENT_SECRET }}
       API_BASE_URL: ${{ vars.API_BASE_URL || 'https://api.handyseller.ru/api' }}
-      PREFERRED_CARRIER_ID: cdek
-      DOWNLOAD_DOC: "false"
     steps:
       - uses: actions/checkout@v4
       - name: Skip smoke when secrets are missing
         if: ${{ env.CLIENT_ID == '' || env.CLIENT_SECRET == '' }}
-        run: echo "Smoke skipped: missing TMS_CLIENT_ID/TMS_CLIENT_SECRET"
-      - name: Run quick partner smoke
+        run: 'echo "Smoke skipped: missing TMS_CLIENT_ID/TMS_CLIENT_SECRET"'
+      - name: Run fast deterministic smoke
         if: ${{ env.CLIENT_ID != '' && env.CLIENT_SECRET != '' }}
-        run: bash scripts/tms-partner-e2e.sh
+        run: bash scripts/tms-fast-smoke.sh

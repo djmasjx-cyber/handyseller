@@ -1,0 +1,59 @@
+name: Release Gate (PR -> main)
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: release-gate-main-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify-build-and-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npx prisma generate --schema=./apps/api/prisma/schema.prisma
+      - run: npm run build --workspace=api
+      - run: npm run build --workspace=tms-api
+      - run: npm run build --workspace=web
+
+  external-carrier-gate:
+    needs: verify-build-and-lint
+    runs-on: ubuntu-latest
+    environment: staging
+    strategy:
+      fail-fast: false
+      matrix:
+        carrier:
+          - dellin
+          - cdek
+          - major-express
+    env:
+      CLIENT_ID: ${{ secrets.TMS_CLIENT_ID }}
+      CLIENT_SECRET: ${{ secrets.TMS_CLIENT_SECRET }}
+      API_BASE_URL: ${{ vars.API_BASE_URL || 'https://api.handyseller.ru/api' }}
+      PREFERRED_CARRIER_ID: ${{ matrix.carrier }}
+      DOWNLOAD_DOC: "false"
+      TRACE_ID_PREFIX: pr-main-${{ matrix.carrier }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate external gate secrets
+        run: |
+          if [ -z "${CLIENT_ID}" ] || [ -z "${CLIENT_SECRET}" ]; then
+            echo "::error::Missing TMS_CLIENT_ID/TMS_CLIENT_SECRET in staging environment"
+            exit 1
+          fi
+      - name: Run carrier e2e gate
+        run: |
+          set -euo pipefail
+          bash scripts/tms-partner-e2e.sh

@@ -1,45 +1,72 @@
-name: Dellin Nightly E2E
+name: External Carrier E2E
 
 on:
   schedule:
     - cron: "15 2 * * *"
   workflow_dispatch:
+    inputs:
+      carrier:
+        description: "Carrier to run in manual mode"
+        required: false
+        default: "all"
+        type: choice
+        options:
+          - all
+          - dellin
+          - cdek
+          - major-express
+  workflow_run:
+    workflows: ["Deploy Staging"]
+    types: [completed]
 
 permissions:
   contents: read
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
-  dellin-nightly-e2e:
+  external-carrier-e2e:
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     environment: staging
+    strategy:
+      fail-fast: false
+      matrix:
+        carrier: ${{ fromJSON(
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.carrier == 'dellin' && '["dellin"]')
+          || (github.event_name == 'workflow_dispatch' && github.event.inputs.carrier == 'cdek' && '["cdek"]')
+          || (github.event_name == 'workflow_dispatch' && github.event.inputs.carrier == 'major-express' && '["major-express"]')
+          || '["dellin","cdek","major-express"]'
+          ) }}
     env:
       CLIENT_ID: ${{ secrets.TMS_CLIENT_ID }}
       CLIENT_SECRET: ${{ secrets.TMS_CLIENT_SECRET }}
       API_BASE_URL: ${{ vars.API_BASE_URL || 'https://api.handyseller.ru/api' }}
-      PREFERRED_CARRIER_ID: dellin
+      PREFERRED_CARRIER_ID: ${{ matrix.carrier }}
       DOWNLOAD_DOC: "true"
-      TRACE_ID_PREFIX: nightly-dellin
+      TRACE_ID_PREFIX: external-${{ matrix.carrier }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Validate Dellin smoke secrets
+      - name: Validate external e2e secrets
         run: |
           if [ -z "${CLIENT_ID}" ] || [ -z "${CLIENT_SECRET}" ]; then
             echo "::error::Missing TMS_CLIENT_ID/TMS_CLIENT_SECRET in staging environment"
             exit 1
           fi
 
-      - name: Run Dellin e2e (capture logs)
+      - name: Run external e2e (capture logs)
         run: |
           set -euo pipefail
-          bash scripts/tms-partner-e2e.sh 2>&1 | tee dellin-nightly.log
+          bash scripts/tms-partner-e2e.sh 2>&1 | tee external-${{ matrix.carrier }}.log
 
-      - name: Upload Dellin nightly artifacts
+      - name: Upload external e2e artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: dellin-nightly-${{ github.run_id }}
+          name: external-e2e-${{ matrix.carrier }}-${{ github.run_id }}
           path: |
-            dellin-nightly.log
+            external-${{ matrix.carrier }}.log
             /tmp/tms-smoke-doc.bin
           if-no-files-found: ignore

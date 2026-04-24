@@ -27,6 +27,8 @@ const DELLIN_REQUEST_PATH = '/v2/request';
 const DELLIN_COUNTERAGENTS_PATH = '/v2/counteragents';
 /** Печатные формы по заявке/накладной. */
 const DELLIN_REQUEST_PDF_PATH = '/v1/customers/request/pdf';
+/** UID России из справочника ДЛ `/v1/references/countries`. */
+const DELLIN_RUSSIA_COUNTRY_UID = '0x8f51001438c4d49511dbd774581edb7a';
 
 function asNumber(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -159,6 +161,14 @@ function asObject(value: unknown): Record<string, unknown> | null {
 function firstNonEmptyString(...values: unknown[]): string | null {
   for (const value of values) {
     if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return null;
+}
+
+function firstNonEmptyStringOrNumber(...values: unknown[]): string | null {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
   }
   return null;
 }
@@ -323,6 +333,19 @@ type DellinAuthSession = {
   requesterUid: string | null;
 };
 
+type DellinJsonResponse = {
+  res: Response | null;
+  data: Record<string, unknown> | null;
+};
+
+type DellinCounteragentProfile = {
+  uid: string;
+  name: string | null;
+  inn: string | null;
+  juridical: boolean | null;
+  isCurrent: boolean;
+};
+
 function maskPhone(value: string): string {
   const digits = value.replace(/\D+/g, '');
   if (digits.length < 6) return '***';
@@ -378,6 +401,62 @@ function isValidHm(value: string | null | undefined): boolean {
 }
 
 type DellinCounteragentForm = string | number | Record<string, unknown> | null;
+
+function dellinCounteragentPatch(value: DellinCounteragentForm): Record<string, unknown> {
+  if (value == null) return {};
+  if (typeof value === 'object' && !Array.isArray(value) && 'customForm' in value) {
+    return value;
+  }
+  return { form: value };
+}
+
+function dellinCustomForm(formName: string, juridical: boolean): Record<string, unknown> {
+  return {
+    formName,
+    countryUID: process.env.DELLIN_COUNTRY_UID?.trim() || DELLIN_RUSSIA_COUNTRY_UID,
+    juridical,
+  };
+}
+
+function defaultDellinLegalFormName(name: string | null | undefined): string {
+  const value = (name ?? '').trim();
+  const prefix = value.match(/^(АО|ОАО|ЗАО|ПАО|ООО|ИП)\b/iu)?.[1];
+  return prefix?.toUpperCase() || 'Юридическое лицо';
+}
+
+function dellinReceiverDocument(): Record<string, unknown> {
+  return {
+    type: process.env.DELLIN_RECEIVER_DOCUMENT_TYPE?.trim() || 'foreignPassport',
+    serial: process.env.DELLIN_RECEIVER_DOCUMENT_SERIAL?.trim() || '0000',
+    number: process.env.DELLIN_RECEIVER_DOCUMENT_NUMBER?.trim() || '000000',
+  };
+}
+
+function findDellinCounteragentProfiles(node: unknown, out: DellinCounteragentProfile[] = []): DellinCounteragentProfile[] {
+  if (!node) return out;
+  if (Array.isArray(node)) {
+    for (const item of node) findDellinCounteragentProfiles(item, out);
+    return out;
+  }
+  if (typeof node !== 'object') return out;
+  const obj = node as Record<string, unknown>;
+  const uid = firstNonEmptyString(obj.uid, obj.counteragentUID, obj.counteragentUid);
+  const name = firstNonEmptyString(obj.name, obj.fullName, obj.shortName);
+  const safeUid = uid?.trim();
+  if (safeUid && isDellinUid(safeUid) && name) {
+    out.push({
+      uid: safeUid,
+      name,
+      inn: firstNonEmptyString(obj.inn),
+      juridical: typeof obj.juridical === 'boolean' ? obj.juridical : null,
+      isCurrent: obj.isCurrent === true,
+    });
+  }
+  for (const value of Object.values(obj)) {
+    findDellinCounteragentProfiles(value, out);
+  }
+  return out;
+}
 
 function collectDellinForms(node: unknown, out: Array<string | number | Record<string, unknown>>): void {
   if (!node) return;
@@ -807,9 +886,6 @@ export class DellinAdapter implements CarrierAdapter {
       shipment.requestId,
       traceId,
     );
-    if (!auth) {
-      throw new Error('Dellin document download failed: cannot obtain sessionID');
-    }
     const sessionID = auth.sessionID;
     const pdf = await this.fetchPrintableFormPdf(base, appKey, sessionID, marker.requestId, marker.kind, traceId);
     return {
@@ -832,7 +908,6 @@ export class DellinAdapter implements CarrierAdapter {
     }
     const base = (process.env.DELLIN_API_BASE ?? 'https://api.dellin.ru').replace(/\/+$/, '');
     const auth = await this.getSessionAuth(base, appKey, credentials.login, credentials.password, requestId, traceId);
-    if (!auth) throw new Error('Dellin booking failed: cannot obtain sessionID');
     const sessionID = auth.sessionID;
 
     const fromAddress = (input.draft.originLabel || input.snapshot.originLabel || '').trim();
@@ -868,6 +943,12 @@ export class DellinAdapter implements CarrierAdapter {
     const cargoWidth = Math.max((cargo.widthMm ?? 100) / 1000, 0.01);
     const cargoHeight = Math.max((cargo.heightMm ?? 100) / 1000, 0.01);
     const draftOnlyByEnv = process.env.DELLIN_DRAFT_ONLY === 'true';
+    const enforceRealBooking = process.env.DELLIN_ENFORCE_REAL_BOOKING === 'true';
+    if (draftOnlyByEnv && enforceRealBooking) {
+      throw new Error(
+        'Dellin booking readiness failed: DELLIN_DRAFT_ONLY=true conflicts with DELLIN_ENFORCE_REAL_BOOKING=true. Disable draft-only mode to place real orders.',
+      );
+    }
 
     const deliveryType = input.draft.serviceFlags.includes('EXPRESS') ? 'express' : 'auto';
     const logisticsTimeZone = process.env.TMS_LOGISTICS_TIMEZONE?.trim() || 'Europe/Moscow';
@@ -908,18 +989,35 @@ export class DellinAdapter implements CarrierAdapter {
       requestId,
       traceId,
     );
+    const counteragentProfile = await this.resolveCounteragentProfile(
+      base,
+      appKey,
+      sessionID,
+      requesterUidSafe,
+      requestId,
+      traceId,
+    );
     const senderCandidates: DellinCounteragentForm[] = [];
+    pushUniqueForm(senderCandidates, {
+      customForm: dellinCustomForm(
+        process.env.DELLIN_SENDER_CUSTOM_FORM_NAME?.trim() ||
+          defaultDellinLegalFormName(counteragentProfile?.name ?? shipperName),
+        counteragentProfile?.juridical ?? true,
+      ),
+      ...(counteragentProfile?.inn ? { inn: counteragentProfile.inn } : {}),
+    });
     for (const variant of extractDellinFormVariants(discoveredForm)) {
       pushUniqueForm(senderCandidates, variant);
     }
-    for (const fallback of ['juridical', 'legal', 'person', 'individual']) {
-      pushUniqueForm(senderCandidates, fallback);
-    }
     pushUniqueForm(senderCandidates, null);
     const receiverCandidates: DellinCounteragentForm[] = [];
-    for (const fallback of ['person', 'individual', 'juridical', 'legal']) {
-      pushUniqueForm(receiverCandidates, fallback);
-    }
+    pushUniqueForm(receiverCandidates, {
+      customForm: dellinCustomForm(
+        process.env.DELLIN_RECEIVER_CUSTOM_FORM_NAME?.trim() || 'Физическое лицо',
+        false,
+      ),
+      document: dellinReceiverDocument(),
+    });
     pushUniqueForm(receiverCandidates, null);
     const formAttempts: Array<{
       sender: DellinCounteragentForm;
@@ -979,7 +1077,7 @@ export class DellinAdapter implements CarrierAdapter {
             ? {
                 counteragent: {
                   uid: requesterUid,
-                  ...(senderForm != null ? { form: senderForm } : {}),
+                  ...dellinCounteragentPatch(senderForm),
                   name: shipperName,
                   phone: shipperPhone,
                 },
@@ -996,8 +1094,7 @@ export class DellinAdapter implements CarrierAdapter {
           ...(useSenderReceiverCounteragent
             ? {
                 counteragent: {
-                  uid: requesterUid,
-                  ...(receiverForm != null ? { form: receiverForm } : {}),
+                  ...dellinCounteragentPatch(receiverForm),
                   name: recipientName,
                   phone: recipientPhone,
                 },
@@ -1069,14 +1166,20 @@ export class DellinAdapter implements CarrierAdapter {
             })}`,
           );
         }
-        let res = await fetch(url, {
-          method: 'POST',
-          headers: withRequestIdHeaders({ Accept: 'application/json', 'Content-Type': 'application/json' }, traceId ?? requestId),
-          body: JSON.stringify(payload),
-          cache: 'no-store',
-        }).catch(() => null);
-        let data = (await res?.json().catch(() => null)) as Record<string, unknown> | null;
+        let { res, data } = await this.postDellinJsonWithRetry(
+          url,
+          payload,
+          traceId ?? requestId,
+          requestId,
+          `request:create produceDate=${produceDate} form=${formChoice.label} inOrder=${!effectiveDraftOnly}`,
+        );
         if (!effectiveDraftOnly && res?.status === 400) {
+          if (enforceRealBooking) {
+            const strictErrors = parseDellinErrors(data).join('; ');
+            throw new Error(
+              `Dellin booking readiness failed: inOrder validation rejected by carrier${strictErrors ? `; ${strictErrors}` : ''}. Keep DELLIN_DRAFT_ONLY=false and fix mandatory sender/receiver/members payload fields.`,
+            );
+          }
           effectiveDraftOnly = true;
           payload = makePayload(
             true,
@@ -1086,19 +1189,19 @@ export class DellinAdapter implements CarrierAdapter {
             formChoice.useSenderReceiverCounteragent,
             formChoice.useCounteragentIdOnly,
           );
-          res = await fetch(url, {
-            method: 'POST',
-            headers: withRequestIdHeaders({ Accept: 'application/json', 'Content-Type': 'application/json' }, traceId ?? requestId),
-            body: JSON.stringify(payload),
-            cache: 'no-store',
-          }).catch(() => null);
-          data = (await res?.json().catch(() => null)) as Record<string, unknown> | null;
+          ({ res, data } = await this.postDellinJsonWithRetry(
+            url,
+            payload,
+            traceId ?? requestId,
+            requestId,
+            `request:fallback-draft produceDate=${produceDate} form=${formChoice.label}`,
+          ));
           this.logger.warn(
             `[dellin-booking] inOrder=true failed with 400, fallback to draft mode; requestId=${requestId}; produceDate=${produceDate}; form=${formChoice.label}`,
           );
         }
         const businessErrors = parseDellinErrors(data);
-        const requestUid = firstNonEmptyString(
+        const requestUid = firstNonEmptyStringOrNumber(
           data?.requestID,
           data?.requestId,
           asObject(data?.data)?.requestID,
@@ -1152,34 +1255,100 @@ export class DellinAdapter implements CarrierAdapter {
     password: string,
     requestId: string,
     traceId?: string | null,
-  ): Promise<DellinAuthSession | null> {
+  ): Promise<DellinAuthSession> {
     const url = dellinJsonUrl(base, DELLIN_AUTH_LOGIN_PATH);
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: withRequestIdHeaders(
-        { Accept: 'application/json', 'Content-Type': 'application/json' },
-        traceId ?? requestId,
-      ),
-      body: JSON.stringify({ appkey: appKey, login, password }),
-      cache: 'no-store',
-    }).catch(() => null);
-    const data = (await res?.json().catch(() => null)) as Record<string, unknown> | null;
-    if (!res?.ok) {
+    const maxAttemptsRaw = Number.parseInt(process.env.DELLIN_AUTH_MAX_ATTEMPTS ?? '3', 10);
+    const maxAttempts = Number.isFinite(maxAttemptsRaw) ? Math.min(Math.max(maxAttemptsRaw, 1), 6) : 3;
+    const baseDelayRaw = Number.parseInt(process.env.DELLIN_AUTH_RETRY_DELAY_MS ?? '1200', 10);
+    const baseDelayMs = Number.isFinite(baseDelayRaw) ? Math.min(Math.max(baseDelayRaw, 250), 10_000) : 1200;
+    let lastFailure = 'unknown auth failure';
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: withRequestIdHeaders(
+          { Accept: 'application/json', 'Content-Type': 'application/json' },
+          traceId ?? requestId,
+        ),
+        body: JSON.stringify({ appkey: appKey, login, password }),
+        cache: 'no-store',
+      }).catch(() => null);
+      const data = (await res?.json().catch(() => null)) as Record<string, unknown> | null;
       const details = parseDellinErrors(data).join('; ');
+      const sessionID = parseDellinSessionId(data);
+
+      if (res?.ok && sessionID) {
+        if (this.dellinDebug) {
+          this.logger.log(`[dellin-booking] auth ok requestId=${requestId} attempt=${attempt}/${maxAttempts}`);
+        }
+        return {
+          sessionID,
+          requesterUid: parseDellinRequesterUid(data),
+        };
+      }
+
+      const status = res?.status ?? 0;
+      const retryableStatus = !res || status === 429 || status >= 500;
+      const retryableDetail = /rate|too many requests|timeout|temporar|unavailable|session/i.test(details);
+      const missingSessionWithOk = Boolean(res?.ok && !sessionID);
+      const retryable = retryableStatus || retryableDetail || missingSessionWithOk;
+      lastFailure = `status=${status || 'n/a'}${details ? `; ${details}` : ''}${missingSessionWithOk ? '; missing sessionID' : ''}`;
+
+      if (attempt < maxAttempts && retryable) {
+        const delayMs = baseDelayMs * attempt;
+        this.logger.warn(
+          `Dellin auth retry ${attempt}/${maxAttempts}: requestId=${requestId}; ${lastFailure}; nextDelayMs=${delayMs}`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        continue;
+      }
+
+      this.logger.warn(`Dellin auth failed: requestId=${requestId}; ${lastFailure}`);
+      throw new Error(`Dellin auth failed: ${lastFailure}`);
+    }
+
+    this.logger.warn(`Dellin auth failed: requestId=${requestId}; ${lastFailure}`);
+    throw new Error(`Dellin auth failed: ${lastFailure}`);
+  }
+
+  private async postDellinJsonWithRetry(
+    url: string,
+    body: Record<string, unknown>,
+    traceId: string,
+    requestId: string,
+    op: string,
+  ): Promise<DellinJsonResponse> {
+    const maxAttemptsRaw = Number.parseInt(process.env.DELLIN_REQUEST_MAX_ATTEMPTS ?? '3', 10);
+    const maxAttempts = Number.isFinite(maxAttemptsRaw) ? Math.min(Math.max(maxAttemptsRaw, 1), 6) : 3;
+    const baseDelayRaw = Number.parseInt(process.env.DELLIN_REQUEST_RETRY_DELAY_MS ?? '1500', 10);
+    const baseDelayMs = Number.isFinite(baseDelayRaw) ? Math.min(Math.max(baseDelayRaw, 250), 10_000) : 1500;
+    let last: DellinJsonResponse = { res: null, data: null };
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: withRequestIdHeaders({ Accept: 'application/json', 'Content-Type': 'application/json' }, traceId),
+        body: JSON.stringify(body),
+        cache: 'no-store',
+      }).catch(() => null);
+      const data = (await res?.json().catch(() => null)) as Record<string, unknown> | null;
+      last = { res, data };
+      if (res?.ok) return last;
+
+      const status = res?.status ?? 0;
+      const details = parseDellinErrors(data).join('; ');
+      const retryableStatus = !res || status === 429 || status >= 500;
+      const retryableDetail = /rate|too many requests|timeout|temporar|unavailable|overload/i.test(details);
+      const retryable = retryableStatus || retryableDetail;
+      if (attempt >= maxAttempts || !retryable) return last;
+
+      const delayMs = baseDelayMs * attempt;
       this.logger.warn(
-        `Dellin auth failed: status=${res?.status ?? 'n/a'}; requestId=${requestId}${details ? `; ${details}` : ''}`,
+        `[dellin-booking] retry ${attempt}/${maxAttempts} op=${op} requestId=${requestId} status=${status || 'n/a'}${details ? ` details=${details}` : ''} nextDelayMs=${delayMs}`,
       );
-      return null;
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
-    if (this.dellinDebug) {
-      this.logger.log(`[dellin-booking] auth ok requestId=${requestId}`);
-    }
-    const sessionID = parseDellinSessionId(data);
-    if (!sessionID) return null;
-    return {
-      sessionID,
-      requesterUid: parseDellinRequesterUid(data),
-    };
+    return last;
   }
 
   private async resolveRequesterUid(
@@ -1284,6 +1453,40 @@ export class DellinAdapter implements CarrierAdapter {
     if (this.dellinDebug && resolved != null) {
       const formLog = typeof resolved === 'object' ? JSON.stringify(resolved) : String(resolved);
       this.logger.log(`[dellin-booking] counteragent form resolved requestId=${requestId} form=${formLog}`);
+    }
+    return resolved;
+  }
+
+  private async resolveCounteragentProfile(
+    base: string,
+    appKey: string,
+    sessionID: string,
+    requesterUid: string,
+    requestId: string,
+    traceId?: string | null,
+  ): Promise<DellinCounteragentProfile | null> {
+    const url = dellinJsonUrl(base, DELLIN_COUNTERAGENTS_PATH);
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: withRequestIdHeaders({ Accept: 'application/json', 'Content-Type': 'application/json' }, traceId ?? requestId),
+      body: JSON.stringify({ appkey: appKey, sessionID, fullInfo: true }),
+      cache: 'no-store',
+    }).catch(() => null);
+    if (!res?.ok) {
+      this.logger.warn(
+        `[dellin-booking] counteragent profile lookup failed requestId=${requestId} status=${res?.status ?? 'n/a'}`,
+      );
+      return null;
+    }
+
+    const data = (await res.json().catch(() => null)) as unknown;
+    const profiles = findDellinCounteragentProfiles(data);
+    const exact = profiles.find((profile) => profile.uid.trim().toLowerCase() === requesterUid.trim().toLowerCase());
+    const resolved = exact ?? profiles.find((profile) => profile.isCurrent) ?? profiles[0] ?? null;
+    if (this.dellinDebug && resolved) {
+      this.logger.log(
+        `[dellin-booking] counteragent profile resolved requestId=${requestId} uid=${resolved.uid} name=${resolved.name ?? 'n/a'} hasInn=${Boolean(resolved.inn)} juridical=${resolved.juridical ?? 'n/a'}`,
+      );
     }
     return resolved;
   }

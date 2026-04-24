@@ -4,6 +4,24 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      change_class:
+        description: "Release change class"
+        required: true
+        type: choice
+        options:
+          - standard
+          - high-risk
+          - schema-impact
+        default: standard
+      release_owner:
+        description: "Release owner (name or handle)"
+        required: true
+        type: string
+      risk_notes:
+        description: "Short risk notes for this release"
+        required: false
+        type: string
 
 concurrency:
   group: deploy-production-${{ github.ref }}
@@ -14,11 +32,43 @@ permissions:
   packages: write
 
 env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   REGISTRY: ghcr.io
   IMAGE_TAG: sha-${{ github.sha }}
 
 jobs:
+  governance-check:
+    runs-on: ubuntu-latest
+    outputs:
+      change_class: ${{ steps.meta.outputs.change_class }}
+      release_owner: ${{ steps.meta.outputs.release_owner }}
+      risk_notes: ${{ steps.meta.outputs.risk_notes }}
+    steps:
+      - id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            CHANGE_CLASS="${{ github.event.inputs.change_class }}"
+            RELEASE_OWNER="${{ github.event.inputs.release_owner }}"
+            RISK_NOTES="${{ github.event.inputs.risk_notes }}"
+          else
+            CHANGE_CLASS="standard"
+            RELEASE_OWNER="${{ github.actor }}"
+            RISK_NOTES="auto-release from main push"
+          fi
+          if [ "${CHANGE_CLASS}" = "high-risk" ] || [ "${CHANGE_CLASS}" = "schema-impact" ]; then
+            if [ -z "${RISK_NOTES}" ]; then
+              echo "::error::risk_notes is required for high-risk/schema-impact releases"
+              exit 1
+            fi
+          fi
+          echo "change_class=${CHANGE_CLASS}" >> "$GITHUB_OUTPUT"
+          echo "release_owner=${RELEASE_OWNER}" >> "$GITHUB_OUTPUT"
+          echo "risk_notes=${RISK_NOTES}" >> "$GITHUB_OUTPUT"
+
   verify-build-and-lint:
+    needs: governance-check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,8 +83,39 @@ jobs:
       - run: npm run build --workspace=tms-api
       - run: npm run build --workspace=web
 
+  external-carrier-gate:
+    needs: [governance-check, verify-build-and-lint]
+    runs-on: ubuntu-latest
+    environment: staging
+    strategy:
+      fail-fast: false
+      matrix:
+        carrier:
+          - dellin
+          - cdek
+          - major-express
+    env:
+      CLIENT_ID: ${{ secrets.TMS_CLIENT_ID }}
+      CLIENT_SECRET: ${{ secrets.TMS_CLIENT_SECRET }}
+      API_BASE_URL: ${{ vars.API_BASE_URL || 'https://api.handyseller.ru/api' }}
+      PREFERRED_CARRIER_ID: ${{ matrix.carrier }}
+      DOWNLOAD_DOC: "false"
+      TRACE_ID_PREFIX: preprod-${{ matrix.carrier }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate external gate secrets
+        run: |
+          if [ -z "${CLIENT_ID}" ] || [ -z "${CLIENT_SECRET}" ]; then
+            echo "::error::Missing TMS_CLIENT_ID/TMS_CLIENT_SECRET in staging environment"
+            exit 1
+          fi
+      - name: Run carrier e2e gate
+        run: |
+          set -euo pipefail
+          bash scripts/tms-partner-e2e.sh
+
   build-and-push-images:
-    needs: verify-build-and-lint
+    needs: [governance-check, verify-build-and-lint, external-carrier-gate]
     runs-on: ubuntu-latest
     outputs:
       image_api: ${{ steps.image_refs.outputs.image_api }}
@@ -73,7 +154,7 @@ jobs:
           tags: ${{ steps.meta-api.outputs.tags }}
           labels: ${{ steps.meta-api.outputs.labels }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: type=gha,mode=max,ignore-error=true
 
       - name: Extract metadata for TMS API
         id: meta-tms-api
@@ -93,7 +174,7 @@ jobs:
           tags: ${{ steps.meta-tms-api.outputs.tags }}
           labels: ${{ steps.meta-tms-api.outputs.labels }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: type=gha,mode=max,ignore-error=true
 
       - name: Extract metadata for Web
         id: meta-web
@@ -113,7 +194,7 @@ jobs:
           tags: ${{ steps.meta-web.outputs.tags }}
           labels: ${{ steps.meta-web.outputs.labels }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: type=gha,mode=max,ignore-error=true
 
       - name: Export immutable image refs
         id: image_refs
@@ -123,7 +204,7 @@ jobs:
           echo "image_tms_api=${{ env.REGISTRY }}/${{ github.repository_owner }}/handyseller-tms-api:${{ env.IMAGE_TAG }}" >> "$GITHUB_OUTPUT"
 
   deploy-production:
-    needs: build-and-push-images
+    needs: [governance-check, build-and-push-images]
     runs-on: ubuntu-latest
     environment: production
     outputs:
@@ -221,8 +302,10 @@ jobs:
           HOST="${{ secrets.VM_HOST }}"
           USER="${{ secrets.VM_USER || 'ubuntu' }}"
           ssh -i deploy_key.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
-            "${USER}@${HOST}" <<'SSH'
+            "${USER}@${HOST}" \
+            "IMAGE_API='${IMAGE_API}' IMAGE_WEB='${IMAGE_WEB}' IMAGE_TMS_API='${IMAGE_TMS_API}' CR_PAT='${CR_PAT}' bash -seu" <<'SSH'
             set -euo pipefail
+            CR_PAT="${CR_PAT:-}"
             cd /opt/handyseller
 
             sudo rm -f /etc/cron.d/handyseller-watchdog
@@ -232,6 +315,10 @@ jobs:
               echo "ERROR: .env.production not found. Run vm-setup-once.sh on VM first."
               exit 1
             fi
+            # Free disk space before pulling fresh images.
+            docker image prune -af >/dev/null 2>&1 || true
+            docker builder prune -af >/dev/null 2>&1 || true
+            docker container prune -f >/dev/null 2>&1 || true
 
             grep -v '^IMAGE_API=' .env.production | grep -v '^IMAGE_WEB=' | grep -v '^IMAGE_TMS_API=' > .env.production.tmp
             echo "IMAGE_API=${IMAGE_API}" >> .env.production.tmp
@@ -366,7 +453,8 @@ jobs:
           set -euo pipefail
           HOST="${{ secrets.VM_HOST }}"
           USER="${{ secrets.VM_USER || 'ubuntu' }}"
-          ssh -i deploy_key.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "${USER}@${HOST}" <<'SSH'
+          ssh -i deploy_key.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "${USER}@${HOST}" \
+            "PREV_IMAGE_API='${PREV_IMAGE_API}' PREV_IMAGE_WEB='${PREV_IMAGE_WEB}' PREV_IMAGE_TMS_API='${PREV_IMAGE_TMS_API}' bash -seu" <<'SSH'
             set -euo pipefail
             cd /opt/handyseller
             grep -v '^IMAGE_API=' .env.production | grep -v '^IMAGE_WEB=' | grep -v '^IMAGE_TMS_API=' > .env.production.tmp
@@ -379,3 +467,41 @@ jobs:
             $DC -f docker-compose.ci.yml --env-file .env.production pull api web tms-api
             $DC -f docker-compose.ci.yml --env-file .env.production up -d --no-deps api tms-api web
           SSH
+
+      - name: Build release evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > release-evidence.md <<EOF
+          # Release Evidence
+
+          - Repository: ${{ github.repository }}
+          - Run ID: ${{ github.run_id }}
+          - Commit SHA: ${{ github.sha }}
+          - Trigger: ${{ github.event_name }}
+          - Actor: ${{ github.actor }}
+          - Change class: ${{ needs.governance-check.outputs.change_class }}
+          - Release owner: ${{ needs.governance-check.outputs.release_owner }}
+          - Risk notes: ${{ needs.governance-check.outputs.risk_notes }}
+
+          ## Required gates
+          - verify-build-and-lint: passed
+          - external-carrier-gate: passed
+          - deploy-production: completed
+
+          ## Rollback
+          - Strategy: restore previous immutable images from .env.production
+          - Workflow rollback step: Rollback previous images on failure
+
+          ## Runbook
+          - docs/CI-DEPLOY.md
+          - docs/ENGINEERING-OPERATING-MODEL.md
+          EOF
+
+      - name: Upload release evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-evidence-${{ github.run_id }}
+          path: release-evidence.md

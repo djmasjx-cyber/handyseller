@@ -1,4 +1,4 @@
-# CI/CD: dev -> staging -> prod
+# CI/CD: fast dev -> stable prod
 
 Сборка, тесты и деплой выполняются в GitHub Actions, без нагрузки на ноутбук.
 
@@ -6,15 +6,25 @@
 
 - `CI Checks` (`.github/workflows/ci.yml`)
   - запускается на PR в `dev`/`main` и push в `dev`.
-  - gates: lint + build (`api`, `tms-api`, `web`) + optional quick smoke.
+  - fast-gate: lint + build (`api`, `tms-api`, `web`) + `tms-fast-smoke` (OAuth + protected read endpoints без вызова перевозчиков).
+  - context-aware quality matrix:
+    - `core-quality` (api lint/build/unit)
+    - `tms-quality` (tms-api build)
+    - `web-quality` (web lint/build)
+    - `contracts-quality` (shared SDK/domain build)
+    - `wms-quality` (зарезервированный gate для будущего WMS)
 - `Deploy Staging` (`.github/workflows/deploy-staging.yml`)
   - автозапуск по push в `dev`, плюс ручной запуск.
-  - deploy в environment `staging` + staging smoke.
+  - deploy в environment `staging` + быстрый staging smoke (без внешних интеграций).
 - `Deploy Production` (`.github/workflows/deploy.yml`)
   - запуск по push в `main` или вручную.
-  - deploy в environment `production` + post-deploy smoke + SLO gate + rollback.
-- `Dellin Nightly E2E` (`.github/workflows/dellin-nightly.yml`)
-  - ночная проверка dellin flow на `staging`, с артефактами логов.
+  - release-gate: verify build/lint -> `external-carrier-gate` (реальные перевозчики на staging) -> deploy `production` + post-deploy smoke + SLO gate + rollback.
+  - governance v1: для ручного запуска требуется `change_class`, `release_owner`, а для high-risk/schema-impact — обязательный `risk_notes`.
+  - после каждого prod-выката публикуется artifact `release-evidence-*`.
+- `External Carrier E2E` (`.github/workflows/dellin-nightly.yml`)
+  - отдельный контур реальных e2e с `dellin/cdek/major-express`.
+  - запускается по расписанию, вручную, и автоматически после успешного staging deploy.
+  - не блокирует быстрый цикл `dev`.
 
 ## Требуемая структура GitHub Environments
 
@@ -56,11 +66,16 @@
 
 1. Require a pull request before merging
 2. Require status checks to pass before merging
-3. Required checks:
+3. Required checks (для `dev`):
    - `build-lint-typecheck`
    - `quick-partner-smoke`
-4. Restrict direct pushes
-5. (для `main`) Require approvals (минимум 1)
+4. Required checks (для `main`):
+   - `verify-build-and-lint`
+   - `external-carrier-gate (dellin)`
+   - `external-carrier-gate (cdek)`
+   - `external-carrier-gate (major-express)`
+5. Restrict direct pushes
+6. (для `main`) Require approvals (минимум 1)
 
 ## Rollback логика в prod
 
@@ -71,9 +86,21 @@
 3. запускает post-deploy smoke + SLO gate
 4. при ошибке возвращает предыдущие образы
 
-## Быстрый операционный цикл
+## Release change classes
 
-1. Merge в `dev` -> staging deploy + smoke
-2. Проверка staging
-3. Merge `dev -> main`
-4. Prod deploy с автоматическими проверками и rollback
+- `standard`: типовой релиз без рискованных изменений контракта/схемы.
+- `high-risk`: изменение критических сценариев, требующее явного risk note.
+- `schema-impact`: релиз, затрагивающий схему данных или миграции; обязателен risk note и ручная проверка rollback-пути.
+
+## Операционные контуры
+
+### Fast lane (ежедневная разработка)
+1. PR/merge в `dev` -> fast-gate + auto deploy staging.
+2. Быстрая проверка сценария в staging.
+3. Повторяем цикл быстро, без ожидания внешних API.
+
+### Release lane (выкатка в прод)
+1. Merge `dev -> main`.
+2. Блокирующий `external-carrier-gate` на staging (реальные перевозчики).
+3. Если gate зелёный -> production deploy.
+4. Post-deploy smoke + SLO + rollback при ошибке.

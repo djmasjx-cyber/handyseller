@@ -63,19 +63,59 @@ Operational playbook for diagnosing and resolving carrier integration issues (CD
 
 ### Dellin
 - `v2/request` is strict on payload typing and required nested fields.
+- Proven booking path as of 2026-04-24:
+  - Auth is `POST /v3/auth/login` with `appkey`, `login`, `password`; a valid account returns `sessionID`.
+  - Sender profile is resolved from `POST /v2/counteragents` with `fullInfo=true`.
+  - `members.sender.counteragent` must include `uid`, `name`, `inn`, and a valid `customForm`.
+  - `members.receiver.counteragent` must not reuse sender UID for a physical recipient; use recipient name, `customForm`, and `document`.
+  - `customForm` shape accepted by Dellin: `{ formName, countryUID, juridical }`.
+  - Russia `countryUID`: `0x8f51001438c4d49511dbd774581edb7a` (from `/v1/references/countries`).
+  - Dellin can return successful `requestID` as a number; convert it to string before storing/returning tracking data.
+- Current defaults and overrides:
+  - Sender form defaults from counteragent name prefix (`АО`, `ООО`, etc.) or `DELLIN_SENDER_CUSTOM_FORM_NAME`.
+  - Receiver form defaults to `Физическое лицо` or `DELLIN_RECEIVER_CUSTOM_FORM_NAME`.
+  - Receiver document defaults are test-safe placeholders and can be overridden with `DELLIN_RECEIVER_DOCUMENT_TYPE`, `DELLIN_RECEIVER_DOCUMENT_SERIAL`, `DELLIN_RECEIVER_DOCUMENT_NUMBER`.
+  - Do not treat receiver document placeholders as the final production data policy. For real B2C Dellin bookings, agree whether partner checkout must collect recipient document data, whether orders are B2B-only, or whether a business-approved carrier policy allows a shared/default document value.
 - Typical blockers:
   - `members.*` structure typing
+  - invalid `counteragent.form` guesses such as `juridical`, `person`, `individual`
+  - missing `members.*.counteragent.customForm.formName`
+  - missing `members.*.counteragent.customForm.countryUID`
+  - missing `members.sender.counteragent.inn`
+  - missing `members.receiver.counteragent.document`
   - phone format (`7XXXXXXXXXX`)
   - `delivery` date/time and requester/payment blocks
 - For temporary continuity, draft fallback may be used if configured.
+- Booking readiness checklist (before go-live):
+  - `DELLIN_DRAFT_ONLY=false` for real order placement.
+  - Optional strict mode: `DELLIN_ENFORCE_REAL_BOOKING=true` (blocks silent fallback to draft on `inOrder` validation errors).
+  - Valid sender UID is resolvable (`DELLIN_REQUESTER_UID` or auth/counteragents response).
+  - Sender/recipient contacts and cargo title are filled in order snapshot.
+  - Observe logs for retry diagnostics:
+    - `auth retry ...` (session acquisition)
+    - `retry ... op=request:create ...` (booking transport/rate-limit retries)
+- Verified dev result:
+  - PR #22 fixed Dellin counteragent/customForm/document payload.
+  - PR #23 fixed numeric `requestID` parsing.
+  - Staging real confirm via `/tms-demo` returned `status=CONFIRMED`, `trackingNumber=DELLIN-REQ-62267026`, `carrierOrderReference=62267026`, `carrierId=dellin`.
 
 ### Major
 - EXPRESS and LTL use different SOAP routing/namespaces.
 - Ensure quotes are generated from the correct service channel.
+- Pickup date must be a business day. Use selected `draft.pickupDate` when present, otherwise resolve the next business day before `CreateOrder`.
 
 ### CDEK
 - Print/doc generation can lag behind booking acceptance.
 - Use retry polling before treating doc generation as failed.
+
+## Production Promotion Checklist
+- Confirm latest `dev` deploy completed successfully and staging fast smoke passed.
+- Run one controlled real confirm on staging for the carrier being promoted.
+- Capture the returned `shipmentId`, `trackingNumber`, `carrierOrderReference`, and `requestId`.
+- Confirm no unexpected `5xx`, auth, or validation errors in the carrier logs during the test window.
+- Promote the same code path through `main`/production CI rather than hotpatching production.
+- After production deploy, run non-destructive health/list smoke first, then run a single controlled real booking only if the business owner approves carrier side effects.
+- For Dellin specifically, do not enable broad real booking traffic until the recipient document policy is approved and reflected in partner API requirements/configuration.
 
 ## Escalation matrix
 - L1 Support: reproduce, classify, gather requestId + exact error.

@@ -1,1 +1,24 @@
+# Global fallback
 * @djmasjx-cyber
+
+# Core commerce
+/apps/api/ @djmasjx-cyber
+
+# Transportation (TMS)
+/apps/tms-api/ @djmasjx-cyber
+/packages/tms-sdk/ @djmasjx-cyber
+/packages/tms-domain/ @djmasjx-cyber
+
+# Web/BFF
+/apps/web/ @djmasjx-cyber
+/packages/ui/ @djmasjx-cyber
+
+# Platform governance
+/.github/workflows/ @djmasjx-cyber
+/docs/ARCHITECTURE-BASELINE.md @djmasjx-cyber
+/docs/ENGINEERING-OPERATING-MODEL.md @djmasjx-cyber
+/docs/CI-DEPLOY.md @djmasjx-cyber
+
+# Reserved for WMS context (enable before rollout)
+/apps/wms/ @djmasjx-cyber
+/packages/wms-*/ @djmasjx-cyber
