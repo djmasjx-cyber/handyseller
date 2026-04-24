@@ -212,6 +212,9 @@ paths:
   /tms/v1/shipments/estimate:
     post:
       summary: Рассчитать варианты доставки
+      description: |
+        Используйте этот метод для блока "Способ доставки" в корзине.
+        В ответе вернется shipmentRequestId и массив options для показа пользователю.
       tags: [TMS v1]
       security: [bearerAuth]
       parameters:
@@ -226,9 +229,77 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CreateShipmentRequestInput'
+            examples:
+              websiteCheckout:
+                summary: Пример запроса из checkout сайта
+                value:
+                  snapshot:
+                    sourceSystem: HANDYSELLER_CORE
+                    userId: u_1
+                    coreOrderId: ord_1001
+                    coreOrderNumber: "1001"
+                    marketplace: OWN_SITE
+                    createdAt: "2026-04-24T14:00:00.000Z"
+                    originLabel: Москва, Склад 1
+                    destinationLabel: Казань, ул. Пример 1
+                    cargo:
+                      weightGrams: 1500
+                      widthMm: 200
+                      lengthMm: 300
+                      heightMm: 150
+                      places: 1
+                      declaredValueRub: 10000
+                    itemSummary:
+                      - productId: p1
+                        title: Товар
+                        quantity: 1
+                        weightGrams: 1500
+                    contacts:
+                      shipper:
+                        name: Склад HandySeller
+                        phone: "+79990001122"
+                      recipient:
+                        name: Тестовый получатель
+                        phone: "+79990003344"
+                  draft:
+                    originLabel: Москва, Склад 1
+                    destinationLabel: Казань, ул. Пример 1
+                    serviceFlags: [EXPRESS]
+                  integration:
+                    externalOrderId: 1C-ORDER-1001
+                    orderType: CLIENT_ORDER
       responses:
         '200':
           description: Варианты доставки рассчитаны
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EstimateResponse'
+              examples:
+                estimatedOptions:
+                  summary: Успешный ответ для отрисовки способов доставки
+                  value:
+                    shipmentRequestId: req_01JABCXYZ
+                    options:
+                      - quoteId: q_01JABCXYZ_dellin
+                        carrierId: dellin
+                        carrierName: Деловые Линии
+                        mode: ROAD
+                        priceRub: 610
+                        etaDays: 2
+                        notes: Экспресс, дверь -> дверь
+                      - quoteId: q_01JABCXYZ_cdek
+                        carrierId: cdek
+                        carrierName: CDEK
+                        mode: ROAD
+                        priceRub: 650
+                        etaDays: 3
+        '400':
+          description: Ошибка валидации входных данных
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /tms/v1/shipments:
     get:
@@ -271,6 +342,44 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CreateShipmentRequestInput'
+            examples:
+              createFromOrder:
+                summary: Пример создания shipment-request
+                value:
+                  snapshot:
+                    sourceSystem: HANDYSELLER_CORE
+                    userId: u_1
+                    coreOrderId: ord_1001
+                    coreOrderNumber: "1001"
+                    marketplace: OWN_SITE
+                    createdAt: "2026-04-24T14:00:00.000Z"
+                    originLabel: Москва, Склад 1
+                    destinationLabel: Казань, ул. Пример 1
+                    cargo:
+                      weightGrams: 1500
+                      widthMm: 200
+                      lengthMm: 300
+                      heightMm: 150
+                      places: 1
+                      declaredValueRub: 10000
+                    itemSummary:
+                      - productId: p1
+                        title: Товар
+                        quantity: 1
+                    contacts:
+                      shipper:
+                        name: Склад HandySeller
+                        phone: "+79990001122"
+                      recipient:
+                        name: Тестовый получатель
+                        phone: "+79990003344"
+                  draft:
+                    originLabel: Москва, Склад 1
+                    destinationLabel: Казань, ул. Пример 1
+                    serviceFlags: [EXPRESS]
+                  integration:
+                    externalOrderId: 1C-ORDER-1001
+                    orderType: CLIENT_ORDER
       responses:
         '200':
           description: Заявка создана
@@ -292,6 +401,9 @@ paths:
   /tms/v1/shipments/{id}/confirm:
     post:
       summary: Подтвердить выбранный тариф и забронировать у перевозчика
+      description: |
+        Вызывается после того, как пользователь выбрал вариант доставки.
+        Успешный ответ содержит trackingNumber, который нужно сохранить в заказе клиента.
       tags: [TMS v1]
       security: [bearerAuth]
       parameters:
@@ -306,10 +418,33 @@ paths:
       responses:
         '200':
           description: Shipment подтвержден, возвращается trackingNumber
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfirmResponse'
+              examples:
+                confirmedShipment:
+                  summary: Успешное подтверждение заказа у перевозчика
+                  value:
+                    id: shp_01JABCXYZ
+                    requestId: req_01JABCXYZ
+                    carrierId: dellin
+                    carrierName: Деловые Линии
+                    trackingNumber: DELLIN-REQ-123456789
+                    status: CONFIRMED
+        '400':
+          description: Ошибка подтверждения/бронирования
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /tms/v1/shipments/{id}/select:
     post:
       summary: Выбрать тариф по quoteId
+      description: |
+        Передайте quoteId, выбранный пользователем в корзине.
+        После этого вариант доставки закрепляется за shipmentRequestId.
       tags: [TMS v1]
       security: [bearerAuth]
       parameters:
@@ -329,6 +464,16 @@ paths:
       responses:
         '200':
           description: Тариф выбран
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SelectQuoteResponse'
+        '400':
+          description: Некорректный quoteId или requestId
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /tms/v1/shipments/{id}/events:
     get:
@@ -507,23 +652,272 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        message: { type: string, example: Invalid request payload }
+        error: { type: string, example: Bad Request }
+        statusCode: { type: integer, example: 400 }
+
+    DeliveryOption:
+      type: object
+      properties:
+        quoteId:
+          type: string
+          description: Идентификатор варианта доставки (передается в select)
+          example: q_01JABCXYZ
+        carrierId:
+          type: string
+          example: dellin
+        carrierName:
+          type: string
+          example: Деловые Линии
+        mode:
+          type: string
+          example: ROAD
+        priceRub:
+          type: number
+          example: 610
+        etaDays:
+          type: integer
+          example: 2
+        notes:
+          type: string
+          nullable: true
+          example: Экспресс, дверь -> дверь
+
+    EstimateResponse:
+      type: object
+      properties:
+        shipmentRequestId:
+          type: string
+          description: Сохраните это значение, оно нужно для select/confirm
+          example: req_01JABCXYZ
+        options:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeliveryOption'
+
+    SelectQuoteResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Shipment request id
+          example: req_01JABCXYZ
+        selectedQuoteId:
+          type: string
+          description: Выбранный quoteId
+          example: q_01JABCXYZ
+        status:
+          type: string
+          example: DRAFT
+
+    ConfirmResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Shipment id (храните для статусов/events)
+          example: shp_01JABCXYZ
+        requestId:
+          type: string
+          example: req_01JABCXYZ
+        carrierId:
+          type: string
+          example: dellin
+        carrierName:
+          type: string
+          example: Деловые Линии
+        trackingNumber:
+          type: string
+          description: Трек-номер для возврата в систему клиента
+          example: DELLIN-REQ-123456789
+        status:
+          type: string
+          example: CONFIRMED
+
     CreateShipmentRequestInput:
       type: object
       required: [snapshot, draft]
+      description: Запрос на расчет/создание доставки из корзины сайта или заказа 1С.
       properties:
         snapshot:
-          type: object
-          description: Снимок заказа (товары, адреса, контакты)
-          additionalProperties: true
+          $ref: '#/components/schemas/ShipmentSnapshot'
         draft:
-          type: object
-          description: Черновик маршрута и сервисные флаги
-          additionalProperties: true
+          $ref: '#/components/schemas/ShipmentDraft'
         integration:
-          type: object
-          properties:
-            externalOrderId: { type: string }
-            orderType:
-              type: string
-              enum: [CLIENT_ORDER, INTERNAL_TRANSFER, SUPPLIER_PICKUP]
+          $ref: '#/components/schemas/IntegrationMeta'
+
+    ShipmentSnapshot:
+      type: object
+      required: [userId, originLabel, destinationLabel, cargo, itemSummary]
+      description: |
+        Снимок заказа на момент расчета доставки.
+        Этот блок должен быть достаточным для расчета тарифов и последующего confirm.
+      properties:
+        sourceSystem:
+          type: string
+          description: Система-источник заказа (например, сайт/1С)
+          example: HANDYSELLER_CORE
+        userId:
+          type: string
+          description: Идентификатор клиента/магазина в вашей системе
+          example: u_1
+        coreOrderId:
+          type: string
+          description: Внутренний id заказа в вашей системе
+          example: ord_1001
+        coreOrderNumber:
+          type: string
+          description: Человекочитаемый номер заказа
+          example: 1001
+        marketplace:
+          type: string
+          description: Канал заказа (например OWN_SITE)
+          example: OWN_SITE
+        createdAt:
+          type: string
+          format: date-time
+          description: Время создания заказа (UTC)
+        originLabel:
+          type: string
+          description: Адрес/локация отправителя
+          example: Москва, Склад 1
+        destinationLabel:
+          type: string
+          description: Адрес/локация получателя
+          example: Казань, ул. Пример 1
+        cargo:
+          $ref: '#/components/schemas/CargoSnapshot'
+        itemSummary:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/ItemSummaryRow'
+        contacts:
+          $ref: '#/components/schemas/ShipmentContacts'
+
+    CargoSnapshot:
+      type: object
+      required: [weightGrams]
+      description: Параметры грузоместа/груза для расчета доставки.
+      properties:
+        weightGrams:
+          type: number
+          description: Вес в граммах
+          example: 1500
+        widthMm:
+          type: number
+          description: Ширина в мм
+          example: 200
+        lengthMm:
+          type: number
+          description: Длина в мм
+          example: 300
+        heightMm:
+          type: number
+          description: Высота в мм
+          example: 150
+        places:
+          type: integer
+          description: Количество мест
+          example: 1
+        declaredValueRub:
+          type: number
+          description: Объявленная стоимость в рублях
+          example: 10000
+
+    ItemSummaryRow:
+      type: object
+      required: [title, quantity]
+      properties:
+        productId:
+          type: string
+          description: Внутренний id товара
+          example: p1
+        title:
+          type: string
+          description: Название товара/груза (используется перевозчиками)
+          example: Товар
+        quantity:
+          type: integer
+          example: 1
+        weightGrams:
+          type: number
+          description: Вес позиции в граммах (если известен)
+          example: 1500
+
+    ShipmentContacts:
+      type: object
+      properties:
+        shipper:
+          $ref: '#/components/schemas/ContactPerson'
+        recipient:
+          $ref: '#/components/schemas/ContactPerson'
+
+    ContactPerson:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Имя/название контакта
+          example: Тестовый получатель
+        phone:
+          type: string
+          description: Телефон контакта (рекомендуется формат +7XXXXXXXXXX)
+          example: +79990003344
+        email:
+          type: string
+          format: email
+          description: Email контакта (опционально)
+          example: user@example.com
+
+    ShipmentDraft:
+      type: object
+      required: [originLabel, destinationLabel]
+      description: Черновик маршрута и сервисных параметров доставки.
+      properties:
+        originLabel:
+          type: string
+          description: Откуда забирать груз (может отличаться от snapshot.originLabel)
+          example: Москва, Склад 1
+        destinationLabel:
+          type: string
+          description: Куда доставлять груз (может отличаться от snapshot.destinationLabel)
+          example: Казань, ул. Пример 1
+        serviceFlags:
+          type: array
+          description: Флаги сервиса доставки
+          items:
+            type: string
+            enum: [EXPRESS, CONSOLIDATED]
+          example: [EXPRESS]
+        pickupDate:
+          type: string
+          format: date
+          description: Желаемая дата забора (YYYY-MM-DD)
+          example: 2026-04-27
+        pickupTimeStart:
+          type: string
+          description: Начало окна забора (HH:mm)
+          example: 09:00
+        pickupTimeEnd:
+          type: string
+          description: Конец окна забора (HH:mm)
+          example: 18:00
+
+    IntegrationMeta:
+      type: object
+      description: Поля для связи сущностей между системой клиента и HandySeller.
+      properties:
+        externalOrderId:
+          type: string
+          description: Внешний id заказа в системе клиента (ключ для lookup)
+          example: 1C-ORDER-1001
+        orderType:
+          type: string
+          enum: [CLIENT_ORDER, INTERNAL_TRANSFER, SUPPLIER_PICKUP]
+          description: Тип заказа в системе клиента
+          example: CLIENT_ORDER
 `;
