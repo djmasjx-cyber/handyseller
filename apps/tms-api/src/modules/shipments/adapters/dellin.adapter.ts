@@ -27,6 +27,8 @@ const DELLIN_REQUEST_PATH = '/v2/request';
 const DELLIN_COUNTERAGENTS_PATH = '/v2/counteragents';
 /** Печатные формы по заявке/накладной. */
 const DELLIN_REQUEST_PDF_PATH = '/v1/customers/request/pdf';
+/** UID России из справочника ДЛ `/v1/references/countries`. */
+const DELLIN_RUSSIA_COUNTRY_UID = '0x8f51001438c4d49511dbd774581edb7a';
 
 function asNumber(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -328,6 +330,14 @@ type DellinJsonResponse = {
   data: Record<string, unknown> | null;
 };
 
+type DellinCounteragentProfile = {
+  uid: string;
+  name: string | null;
+  inn: string | null;
+  juridical: boolean | null;
+  isCurrent: boolean;
+};
+
 function maskPhone(value: string): string {
   const digits = value.replace(/\D+/g, '');
   if (digits.length < 6) return '***';
@@ -383,6 +393,61 @@ function isValidHm(value: string | null | undefined): boolean {
 }
 
 type DellinCounteragentForm = string | number | Record<string, unknown> | null;
+
+function dellinCounteragentPatch(value: DellinCounteragentForm): Record<string, unknown> {
+  if (value == null) return {};
+  if (typeof value === 'object' && !Array.isArray(value) && 'customForm' in value) {
+    return value;
+  }
+  return { form: value };
+}
+
+function dellinCustomForm(formName: string, juridical: boolean): Record<string, unknown> {
+  return {
+    formName,
+    countryUID: process.env.DELLIN_COUNTRY_UID?.trim() || DELLIN_RUSSIA_COUNTRY_UID,
+    juridical,
+  };
+}
+
+function defaultDellinLegalFormName(name: string | null | undefined): string {
+  const value = (name ?? '').trim();
+  const prefix = value.match(/^(АО|ОАО|ЗАО|ПАО|ООО|ИП)\b/iu)?.[1];
+  return prefix?.toUpperCase() || 'Юридическое лицо';
+}
+
+function dellinReceiverDocument(): Record<string, unknown> {
+  return {
+    type: process.env.DELLIN_RECEIVER_DOCUMENT_TYPE?.trim() || 'foreignPassport',
+    serial: process.env.DELLIN_RECEIVER_DOCUMENT_SERIAL?.trim() || '0000',
+    number: process.env.DELLIN_RECEIVER_DOCUMENT_NUMBER?.trim() || '000000',
+  };
+}
+
+function findDellinCounteragentProfiles(node: unknown, out: DellinCounteragentProfile[] = []): DellinCounteragentProfile[] {
+  if (!node) return out;
+  if (Array.isArray(node)) {
+    for (const item of node) findDellinCounteragentProfiles(item, out);
+    return out;
+  }
+  if (typeof node !== 'object') return out;
+  const obj = node as Record<string, unknown>;
+  const uid = firstNonEmptyString(obj.uid, obj.counteragentUID, obj.counteragentUid);
+  const name = firstNonEmptyString(obj.name, obj.fullName, obj.shortName);
+  if (isDellinUid(uid) && name) {
+    out.push({
+      uid,
+      name,
+      inn: firstNonEmptyString(obj.inn),
+      juridical: typeof obj.juridical === 'boolean' ? obj.juridical : null,
+      isCurrent: obj.isCurrent === true,
+    });
+  }
+  for (const value of Object.values(obj)) {
+    findDellinCounteragentProfiles(value, out);
+  }
+  return out;
+}
 
 function collectDellinForms(node: unknown, out: Array<string | number | Record<string, unknown>>): void {
   if (!node) return;
@@ -915,18 +980,35 @@ export class DellinAdapter implements CarrierAdapter {
       requestId,
       traceId,
     );
+    const counteragentProfile = await this.resolveCounteragentProfile(
+      base,
+      appKey,
+      sessionID,
+      requesterUidSafe,
+      requestId,
+      traceId,
+    );
     const senderCandidates: DellinCounteragentForm[] = [];
+    pushUniqueForm(senderCandidates, {
+      customForm: dellinCustomForm(
+        process.env.DELLIN_SENDER_CUSTOM_FORM_NAME?.trim() ||
+          defaultDellinLegalFormName(counteragentProfile?.name ?? shipperName),
+        counteragentProfile?.juridical ?? true,
+      ),
+      ...(counteragentProfile?.inn ? { inn: counteragentProfile.inn } : {}),
+    });
     for (const variant of extractDellinFormVariants(discoveredForm)) {
       pushUniqueForm(senderCandidates, variant);
     }
-    for (const fallback of ['juridical', 'legal', 'person', 'individual']) {
-      pushUniqueForm(senderCandidates, fallback);
-    }
     pushUniqueForm(senderCandidates, null);
     const receiverCandidates: DellinCounteragentForm[] = [];
-    for (const fallback of ['person', 'individual', 'juridical', 'legal']) {
-      pushUniqueForm(receiverCandidates, fallback);
-    }
+    pushUniqueForm(receiverCandidates, {
+      customForm: dellinCustomForm(
+        process.env.DELLIN_RECEIVER_CUSTOM_FORM_NAME?.trim() || 'Физическое лицо',
+        false,
+      ),
+      document: dellinReceiverDocument(),
+    });
     pushUniqueForm(receiverCandidates, null);
     const formAttempts: Array<{
       sender: DellinCounteragentForm;
@@ -986,7 +1068,7 @@ export class DellinAdapter implements CarrierAdapter {
             ? {
                 counteragent: {
                   uid: requesterUid,
-                  ...(senderForm != null ? { form: senderForm } : {}),
+                  ...dellinCounteragentPatch(senderForm),
                   name: shipperName,
                   phone: shipperPhone,
                 },
@@ -1003,8 +1085,7 @@ export class DellinAdapter implements CarrierAdapter {
           ...(useSenderReceiverCounteragent
             ? {
                 counteragent: {
-                  uid: requesterUid,
-                  ...(receiverForm != null ? { form: receiverForm } : {}),
+                  ...dellinCounteragentPatch(receiverForm),
                   name: recipientName,
                   phone: recipientPhone,
                 },
@@ -1363,6 +1444,40 @@ export class DellinAdapter implements CarrierAdapter {
     if (this.dellinDebug && resolved != null) {
       const formLog = typeof resolved === 'object' ? JSON.stringify(resolved) : String(resolved);
       this.logger.log(`[dellin-booking] counteragent form resolved requestId=${requestId} form=${formLog}`);
+    }
+    return resolved;
+  }
+
+  private async resolveCounteragentProfile(
+    base: string,
+    appKey: string,
+    sessionID: string,
+    requesterUid: string,
+    requestId: string,
+    traceId?: string | null,
+  ): Promise<DellinCounteragentProfile | null> {
+    const url = dellinJsonUrl(base, DELLIN_COUNTERAGENTS_PATH);
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: withRequestIdHeaders({ Accept: 'application/json', 'Content-Type': 'application/json' }, traceId ?? requestId),
+      body: JSON.stringify({ appkey: appKey, sessionID, fullInfo: true }),
+      cache: 'no-store',
+    }).catch(() => null);
+    if (!res?.ok) {
+      this.logger.warn(
+        `[dellin-booking] counteragent profile lookup failed requestId=${requestId} status=${res?.status ?? 'n/a'}`,
+      );
+      return null;
+    }
+
+    const data = (await res.json().catch(() => null)) as unknown;
+    const profiles = findDellinCounteragentProfiles(data);
+    const exact = profiles.find((profile) => profile.uid.trim().toLowerCase() === requesterUid.trim().toLowerCase());
+    const resolved = exact ?? profiles.find((profile) => profile.isCurrent) ?? profiles[0] ?? null;
+    if (this.dellinDebug && resolved) {
+      this.logger.log(
+        `[dellin-booking] counteragent profile resolved requestId=${requestId} uid=${resolved.uid} name=${resolved.name ?? 'n/a'} hasInn=${Boolean(resolved.inn)} juridical=${resolved.juridical ?? 'n/a'}`,
+      );
     }
     return resolved;
   }
