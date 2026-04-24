@@ -165,6 +165,14 @@ function firstNonEmptyString(...values: unknown[]): string | null {
   return null;
 }
 
+function firstNonEmptyStringOrNumber(...values: unknown[]): string | null {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  }
+  return null;
+}
+
 function parseDellinSessionId(payload: unknown): string | null {
   const root = asObject(payload);
   if (!root) return null;
@@ -1193,7 +1201,7 @@ export class DellinAdapter implements CarrierAdapter {
           );
         }
         const businessErrors = parseDellinErrors(data);
-        const requestUid = firstNonEmptyString(
+        const requestUid = firstNonEmptyStringOrNumber(
           data?.requestID,
           data?.requestId,
           asObject(data?.data)?.requestID,
