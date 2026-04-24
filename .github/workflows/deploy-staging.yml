@@ -177,7 +177,6 @@ jobs:
           CLIENT_ID: ${{ secrets.TMS_CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.TMS_CLIENT_SECRET }}
           API_BASE_URL: ${{ vars.API_BASE_URL || 'https://api.handyseller.ru/api' }}
-          PREFERRED_CARRIER_ID: dellin
           DOWNLOAD_DOC: "false"
         run: |
           set -euo pipefail
