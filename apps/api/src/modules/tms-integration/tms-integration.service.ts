@@ -15,6 +15,7 @@ import type {
   OrderLogisticsScenario,
   UpsertCarrierConnectionInput,
 } from '@handyseller/tms-sdk';
+import { CoreToTmsSnapshotAcl } from './core-to-tms-snapshot.acl';
 
 @Injectable()
 export class TmsIntegrationService {
@@ -94,75 +95,7 @@ export class TmsIntegrationService {
     if (!order) {
       throw new NotFoundException('Заказ не найден');
     }
-
-    const totalWeightGrams = order.items.reduce(
-      (sum, item) => sum + (item.product?.weight ?? 0) * item.quantity,
-      0,
-    );
-    const maxWidthMm = order.items.reduce(
-      (max, item) => Math.max(max, item.product?.width ?? 0),
-      0,
-    );
-    const maxLengthMm = order.items.reduce(
-      (max, item) => Math.max(max, item.product?.length ?? 0),
-      0,
-    );
-    const totalHeightMm = order.items.reduce(
-      (sum, item) => sum + (item.product?.height ?? 0) * item.quantity,
-      0,
-    );
-
-    const cargoOv = this.parseTmsCargoOverride(order.tmsCargoOverride);
-    const weightGrams = cargoOv?.weightGrams ?? totalWeightGrams;
-    const widthMm = cargoOv?.widthMm ?? (maxWidthMm || null);
-    const lengthMm = cargoOv?.lengthMm ?? (maxLengthMm || null);
-    const heightMm = cargoOv?.heightMm ?? (totalHeightMm || null);
-    const places = cargoOv?.places ?? Math.max(order.items.length, 1);
-    const declaredValueRub = cargoOv?.declaredValueRub ?? Number(order.totalAmount);
-    const cargoDescription = cargoOv?.cargoDescription;
-    const pickupDatePreferred = cargoOv?.pickupDate ?? null;
-
-    const destinationLabel =
-      order.deliveryAddressLabel?.trim() ||
-      (order.marketplace === 'MANUAL' ? 'Ручной канал' : `${order.marketplace} order`);
-    const contactOv = this.parseTmsContactOverride(order.tmsContactOverride);
-
-    return {
-      sourceSystem: 'HANDYSELLER_CORE',
-      userId,
-      coreOrderId: order.id,
-      coreOrderNumber: order.externalId,
-      marketplace: order.marketplace,
-      logisticsScenario: this.resolveLogisticsScenario(order.marketplace),
-      createdAt: order.createdAt.toISOString(),
-      originLabel: order.warehouseName ?? null,
-      destinationLabel,
-      contacts: {
-        shipper: {
-          name: contactOv?.shipperName ?? null,
-          phone: contactOv?.shipperPhone ?? null,
-        },
-        recipient: {
-          name: contactOv?.recipientName ?? null,
-          phone: contactOv?.recipientPhone ?? null,
-        },
-      },
-      pickupDatePreferred,
-      cargo: {
-        weightGrams,
-        widthMm,
-        lengthMm,
-        heightMm,
-        places,
-        declaredValueRub,
-      },
-      itemSummary: order.items.map((item) => ({
-        productId: item.product?.id ?? null,
-        title: cargoDescription || item.product?.title || 'Товар',
-        quantity: item.quantity,
-        weightGrams: item.product?.weight ?? null,
-      })),
-    };
+    return CoreToTmsSnapshotAcl.map(userId, order);
   }
 
   async listCarrierConnections(userId: string): Promise<CarrierConnectionRecord[]> {
@@ -418,49 +351,6 @@ export class TmsIntegrationService {
       where: { id: order.id },
       include: { items: { include: { product: true } } },
     });
-  }
-
-  private parseTmsCargoOverride(raw: unknown): {
-    weightGrams?: number;
-    lengthMm?: number;
-    widthMm?: number;
-    heightMm?: number;
-    places?: number;
-    declaredValueRub?: number;
-    cargoDescription?: string;
-    pickupDate?: string;
-  } | null {
-    if (raw == null || typeof raw !== 'object') return null;
-    const o = raw as Record<string, unknown>;
-    const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
-    const str = (v: unknown) => (typeof v === 'string' ? v.trim() || undefined : undefined);
-    return {
-      weightGrams: num(o.weightGrams),
-      lengthMm: num(o.lengthMm),
-      widthMm: num(o.widthMm),
-      heightMm: num(o.heightMm),
-      places: num(o.places),
-      declaredValueRub: num(o.declaredValueRub),
-      cargoDescription: str(o.cargoDescription),
-      pickupDate: str(o.pickupDate),
-    };
-  }
-
-  private parseTmsContactOverride(raw: unknown): {
-    shipperName?: string;
-    shipperPhone?: string;
-    recipientName?: string;
-    recipientPhone?: string;
-  } | null {
-    if (raw == null || typeof raw !== 'object') return null;
-    const o = raw as Record<string, unknown>;
-    const str = (v: unknown) => (typeof v === 'string' ? v.trim() || undefined : undefined);
-    return {
-      shipperName: str(o.shipperName),
-      shipperPhone: str(o.shipperPhone),
-      recipientName: str(o.recipientName),
-      recipientPhone: str(o.recipientPhone),
-    };
   }
 
   private async getOrCreateTmsEstimateProduct(userId: string): Promise<string> {
