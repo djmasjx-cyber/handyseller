@@ -873,6 +873,12 @@ export class DellinAdapter implements CarrierAdapter {
     const cargoWidth = Math.max((cargo.widthMm ?? 100) / 1000, 0.01);
     const cargoHeight = Math.max((cargo.heightMm ?? 100) / 1000, 0.01);
     const draftOnlyByEnv = process.env.DELLIN_DRAFT_ONLY === 'true';
+    const enforceRealBooking = process.env.DELLIN_ENFORCE_REAL_BOOKING === 'true';
+    if (draftOnlyByEnv && enforceRealBooking) {
+      throw new Error(
+        'Dellin booking readiness failed: DELLIN_DRAFT_ONLY=true conflicts with DELLIN_ENFORCE_REAL_BOOKING=true. Disable draft-only mode to place real orders.',
+      );
+    }
 
     const deliveryType = input.draft.serviceFlags.includes('EXPRESS') ? 'express' : 'auto';
     const logisticsTimeZone = process.env.TMS_LOGISTICS_TIMEZONE?.trim() || 'Europe/Moscow';
@@ -1082,6 +1088,12 @@ export class DellinAdapter implements CarrierAdapter {
           `request:create produceDate=${produceDate} form=${formChoice.label} inOrder=${!effectiveDraftOnly}`,
         );
         if (!effectiveDraftOnly && res?.status === 400) {
+          if (enforceRealBooking) {
+            const strictErrors = parseDellinErrors(data).join('; ');
+            throw new Error(
+              `Dellin booking readiness failed: inOrder validation rejected by carrier${strictErrors ? `; ${strictErrors}` : ''}. Keep DELLIN_DRAFT_ONLY=false and fix mandatory sender/receiver/members payload fields.`,
+            );
+          }
           effectiveDraftOnly = true;
           payload = makePayload(
             true,
