@@ -156,7 +156,57 @@ jobs:
             DC="docker compose"
             command -v docker-compose >/dev/null 2>&1 && DC="docker-compose"
             docker network create handyseller_handyseller 2>/dev/null || true
-            $DC -f docker-compose.ci.yml --env-file "${ENV_FILE}" pull api web tms-api
+            free_mb() {
+              df --output=avail -Bm / | tail -1 | tr -dc '0-9'
+            }
+            ensure_disk_headroom() {
+              local min_mb="${1:-1200}"
+              local avail
+              avail="$(free_mb)"
+              if [ "${avail}" -ge "${min_mb}" ]; then
+                return 0
+              fi
+              echo "Low disk space (${avail}MB). Running emergency cleanup..."
+              docker system df || true
+              docker image prune -af >/dev/null 2>&1 || true
+              docker builder prune -af >/dev/null 2>&1 || true
+              docker container prune -f >/dev/null 2>&1 || true
+              docker volume prune -f >/dev/null 2>&1 || true
+              sudo -n journalctl --vacuum-size=200M >/dev/null 2>&1 || true
+              sudo -n rm -rf /var/cache/apt/archives/*.deb >/dev/null 2>&1 || true
+              sudo -n apt-get clean >/dev/null 2>&1 || true
+              df -h /
+            }
+            pull_with_fallback() {
+              local svc="$1"
+              local cname="$2"
+              local old_image=""
+              old_image="$(docker inspect "${cname}" --format '{{.Image}}' 2>/dev/null || true)"
+              ensure_disk_headroom 1200
+              for i in 1 2 3; do
+                echo "Image pull attempt ${i}/3 service=${svc}"
+                if $DC -f docker-compose.ci.yml --env-file "${ENV_FILE}" pull "${svc}"; then
+                  return 0
+                fi
+                echo "Pull failed for ${svc}; running emergency cleanup and retrying..."
+                ensure_disk_headroom 1200
+                if [ "${i}" -eq 2 ]; then
+                  echo "Low-space fallback for ${svc}: recycle old container/image."
+                  docker stop "${cname}" >/dev/null 2>&1 || true
+                  docker rm "${cname}" >/dev/null 2>&1 || true
+                  if [ -n "${old_image}" ]; then
+                    docker image rm -f "${old_image}" >/dev/null 2>&1 || true
+                  fi
+                  ensure_disk_headroom 1200
+                fi
+                [ "${i}" -eq 3 ] && return 1
+                sleep $((i * 5))
+              done
+              return 1
+            }
+            pull_with_fallback api handyseller-api || { echo "API image pull failed"; exit 1; }
+            pull_with_fallback tms-api handyseller-tms-api || { echo "TMS API image pull failed"; exit 1; }
+            pull_with_fallback web handyseller-web || { echo "WEB image pull failed"; exit 1; }
             $DC -f docker-compose.ci.yml --env-file "${ENV_FILE}" up -d --no-deps redis
             $DC -f docker-compose.ci.yml --env-file "${ENV_FILE}" up -d --no-deps api tms-api web
             for i in $(seq 1 30); do
