@@ -41,6 +41,16 @@ When smoke fails:
    - quick fix on `dev` + redeploy staging
    - rollback if production degradation exists
 
+## CI stability note (2026-04-24)
+
+`CI Checks` on `dev` must evaluate only the current push delta, not full `main...dev` drift.
+
+- In `.github/workflows/ci.yml` (`detect-context`), `dorny/paths-filter` uses:
+  - PRs: `base = github.base_ref`
+  - Pushes: `base = github.event.before`
+- This prevents false-red runs from legacy lint debt in unrelated domains.
+- If CI starts failing unexpectedly across unrelated scopes, first verify the `detect-context` diff base in workflow logs.
+
 ## Rollback procedure
 
 `Deploy Production` already has auto rollback.
