@@ -4,6 +4,17 @@ on:
   schedule:
     - cron: "15 2 * * *"
   workflow_dispatch:
+    inputs:
+      carrier:
+        description: "Carrier to run in manual mode"
+        required: false
+        default: "all"
+        type: choice
+        options:
+          - all
+          - dellin
+          - cdek
+          - major-express
   workflow_run:
     workflows: ["Deploy Staging"]
     types: [completed]
@@ -22,10 +33,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        carrier:
-          - dellin
-          - cdek
-          - major-express
+        carrier: ${{ fromJSON(
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.carrier == 'dellin' && '["dellin"]')
+          || (github.event_name == 'workflow_dispatch' && github.event.inputs.carrier == 'cdek' && '["cdek"]')
+          || (github.event_name == 'workflow_dispatch' && github.event.inputs.carrier == 'major-express' && '["major-express"]')
+          || '["dellin","cdek","major-express"]'
+          ) }}
     env:
       CLIENT_ID: ${{ secrets.TMS_CLIENT_ID }}
       CLIENT_SECRET: ${{ secrets.TMS_CLIENT_SECRET }}
