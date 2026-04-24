@@ -1154,32 +1154,58 @@ export class DellinAdapter implements CarrierAdapter {
     traceId?: string | null,
   ): Promise<DellinAuthSession | null> {
     const url = dellinJsonUrl(base, DELLIN_AUTH_LOGIN_PATH);
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: withRequestIdHeaders(
-        { Accept: 'application/json', 'Content-Type': 'application/json' },
-        traceId ?? requestId,
-      ),
-      body: JSON.stringify({ appkey: appKey, login, password }),
-      cache: 'no-store',
-    }).catch(() => null);
-    const data = (await res?.json().catch(() => null)) as Record<string, unknown> | null;
-    if (!res?.ok) {
+    const maxAttemptsRaw = Number.parseInt(process.env.DELLIN_AUTH_MAX_ATTEMPTS ?? '3', 10);
+    const maxAttempts = Number.isFinite(maxAttemptsRaw) ? Math.min(Math.max(maxAttemptsRaw, 1), 6) : 3;
+    const baseDelayRaw = Number.parseInt(process.env.DELLIN_AUTH_RETRY_DELAY_MS ?? '1200', 10);
+    const baseDelayMs = Number.isFinite(baseDelayRaw) ? Math.min(Math.max(baseDelayRaw, 250), 10_000) : 1200;
+    let lastFailure = 'unknown auth failure';
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: withRequestIdHeaders(
+          { Accept: 'application/json', 'Content-Type': 'application/json' },
+          traceId ?? requestId,
+        ),
+        body: JSON.stringify({ appkey: appKey, login, password }),
+        cache: 'no-store',
+      }).catch(() => null);
+      const data = (await res?.json().catch(() => null)) as Record<string, unknown> | null;
       const details = parseDellinErrors(data).join('; ');
-      this.logger.warn(
-        `Dellin auth failed: status=${res?.status ?? 'n/a'}; requestId=${requestId}${details ? `; ${details}` : ''}`,
-      );
+      const sessionID = parseDellinSessionId(data);
+
+      if (res?.ok && sessionID) {
+        if (this.dellinDebug) {
+          this.logger.log(`[dellin-booking] auth ok requestId=${requestId} attempt=${attempt}/${maxAttempts}`);
+        }
+        return {
+          sessionID,
+          requesterUid: parseDellinRequesterUid(data),
+        };
+      }
+
+      const status = res?.status ?? 0;
+      const retryableStatus = !res || status === 429 || status >= 500;
+      const retryableDetail = /rate|too many requests|timeout|temporar|unavailable|session/i.test(details);
+      const missingSessionWithOk = Boolean(res?.ok && !sessionID);
+      const retryable = retryableStatus || retryableDetail || missingSessionWithOk;
+      lastFailure = `status=${status || 'n/a'}${details ? `; ${details}` : ''}${missingSessionWithOk ? '; missing sessionID' : ''}`;
+
+      if (attempt < maxAttempts && retryable) {
+        const delayMs = baseDelayMs * attempt;
+        this.logger.warn(
+          `Dellin auth retry ${attempt}/${maxAttempts}: requestId=${requestId}; ${lastFailure}; nextDelayMs=${delayMs}`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        continue;
+      }
+
+      this.logger.warn(`Dellin auth failed: requestId=${requestId}; ${lastFailure}`);
       return null;
     }
-    if (this.dellinDebug) {
-      this.logger.log(`[dellin-booking] auth ok requestId=${requestId}`);
-    }
-    const sessionID = parseDellinSessionId(data);
-    if (!sessionID) return null;
-    return {
-      sessionID,
-      requesterUid: parseDellinRequesterUid(data),
-    };
+
+    this.logger.warn(`Dellin auth failed: requestId=${requestId}; ${lastFailure}`);
+    return null;
   }
 
   private async resolveRequesterUid(
