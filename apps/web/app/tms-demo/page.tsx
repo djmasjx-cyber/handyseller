@@ -93,7 +93,7 @@ export default function TmsDemoPage() {
     setError(null)
     setConfirmResult(null)
     try {
-      const data = await postJson<EstimateResponse>("/api/tms-demo/estimate", checkoutPayload)
+      const data = await postJson<EstimateResponse>("/api/tms/demo/estimate", checkoutPayload)
       setEstimate(data)
       setSelectedQuoteId(data.options[0]?.quoteId ?? "")
     } catch (err) {
@@ -108,8 +108,8 @@ export default function TmsDemoPage() {
     setLoading("confirm")
     setError(null)
     try {
-      await postJson("/api/tms-demo/select", { requestId: estimate.shipmentRequestId, quoteId: selectedQuoteId })
-      const data = await postJson<ConfirmResponse>("/api/tms-demo/confirm", {
+      await postJson("/api/tms/demo/select", { requestId: estimate.shipmentRequestId, quoteId: selectedQuoteId })
+      const data = await postJson<ConfirmResponse>("/api/tms/demo/confirm", {
         requestId: estimate.shipmentRequestId,
         externalOrderId: estimate.externalOrderId,
         allowRealBooking,
