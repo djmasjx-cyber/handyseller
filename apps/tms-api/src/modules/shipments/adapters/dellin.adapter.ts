@@ -812,9 +812,6 @@ export class DellinAdapter implements CarrierAdapter {
       shipment.requestId,
       traceId,
     );
-    if (!auth) {
-      throw new Error('Dellin document download failed: cannot obtain sessionID');
-    }
     const sessionID = auth.sessionID;
     const pdf = await this.fetchPrintableFormPdf(base, appKey, sessionID, marker.requestId, marker.kind, traceId);
     return {
@@ -837,7 +834,6 @@ export class DellinAdapter implements CarrierAdapter {
     }
     const base = (process.env.DELLIN_API_BASE ?? 'https://api.dellin.ru').replace(/\/+$/, '');
     const auth = await this.getSessionAuth(base, appKey, credentials.login, credentials.password, requestId, traceId);
-    if (!auth) throw new Error('Dellin booking failed: cannot obtain sessionID');
     const sessionID = auth.sessionID;
 
     const fromAddress = (input.draft.originLabel || input.snapshot.originLabel || '').trim();
@@ -1169,7 +1165,7 @@ export class DellinAdapter implements CarrierAdapter {
     password: string,
     requestId: string,
     traceId?: string | null,
-  ): Promise<DellinAuthSession | null> {
+  ): Promise<DellinAuthSession> {
     const url = dellinJsonUrl(base, DELLIN_AUTH_LOGIN_PATH);
     const maxAttemptsRaw = Number.parseInt(process.env.DELLIN_AUTH_MAX_ATTEMPTS ?? '3', 10);
     const maxAttempts = Number.isFinite(maxAttemptsRaw) ? Math.min(Math.max(maxAttemptsRaw, 1), 6) : 3;
@@ -1218,11 +1214,11 @@ export class DellinAdapter implements CarrierAdapter {
       }
 
       this.logger.warn(`Dellin auth failed: requestId=${requestId}; ${lastFailure}`);
-      return null;
+      throw new Error(`Dellin auth failed: ${lastFailure}`);
     }
 
     this.logger.warn(`Dellin auth failed: requestId=${requestId}; ${lastFailure}`);
-    return null;
+    throw new Error(`Dellin auth failed: ${lastFailure}`);
   }
 
   private async postDellinJsonWithRetry(
