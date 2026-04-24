@@ -1,0 +1,45 @@
+name: Dellin Nightly E2E
+
+on:
+  schedule:
+    - cron: "15 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dellin-nightly-e2e:
+    runs-on: ubuntu-latest
+    environment: staging
+    env:
+      CLIENT_ID: ${{ secrets.TMS_CLIENT_ID }}
+      CLIENT_SECRET: ${{ secrets.TMS_CLIENT_SECRET }}
+      API_BASE_URL: ${{ vars.API_BASE_URL || 'https://api.handyseller.ru/api' }}
+      PREFERRED_CARRIER_ID: dellin
+      DOWNLOAD_DOC: "true"
+      TRACE_ID_PREFIX: nightly-dellin
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate Dellin smoke secrets
+        run: |
+          if [ -z "${CLIENT_ID}" ] || [ -z "${CLIENT_SECRET}" ]; then
+            echo "::error::Missing TMS_CLIENT_ID/TMS_CLIENT_SECRET in staging environment"
+            exit 1
+          fi
+
+      - name: Run Dellin e2e (capture logs)
+        run: |
+          set -euo pipefail
+          bash scripts/tms-partner-e2e.sh 2>&1 | tee dellin-nightly.log
+
+      - name: Upload Dellin nightly artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dellin-nightly-${{ github.run_id }}
+          path: |
+            dellin-nightly.log
+            /tmp/tms-smoke-doc.bin
+          if-no-files-found: ignore

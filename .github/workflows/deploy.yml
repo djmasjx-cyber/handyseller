@@ -1,24 +1,12 @@
-# HandySeller: CI/CD — сборка образов в GitHub, деплой на VM
-# Триггер: push в main или ручной запуск (workflow_dispatch)
-#
-# Секреты в Settings → Secrets and variables → Actions:
-#   VM_HOST        — IP или hostname VM (158.160.x.x)
-#   VM_SSH_KEY     — приватный ключ в base64: cat ~/.ssh/yandex_vm | base64
-#   VM_USER        — (опционально) пользователь SSH, по умолчанию ubuntu
-#   CR_PAT         — (опционально) GitHub PAT с read:packages для pull из ghcr.io
-#
-# Одноразовая настройка VM: /opt/handyseller/.env.production, nginx, Docker
-
-name: Build and Deploy
+name: Deploy Production
 
 on:
   push:
-    branches: [main, master]
+    branches: [main]
   workflow_dispatch:
 
-# При новом push — отменять предыдущие ранки (один активный на ветку)
 concurrency:
-  group: deploy-${{ github.ref }}
+  group: deploy-production-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -27,9 +15,10 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
+  IMAGE_TAG: sha-${{ github.sha }}
 
 jobs:
-  verify-build:
+  verify-build-and-lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -38,18 +27,19 @@ jobs:
           node-version: '20'
           cache: 'npm'
       - run: npm ci
+      - run: npm run lint
       - run: npx prisma generate --schema=./apps/api/prisma/schema.prisma
       - run: npm run build --workspace=api
       - run: npm run build --workspace=tms-api
       - run: npm run build --workspace=web
 
-  build-and-push:
-    needs: verify-build
+  build-and-push-images:
+    needs: verify-build-and-lint
     runs-on: ubuntu-latest
     outputs:
-      image_api: ${{ steps.meta-api.outputs.tags }}
-      image_web: ${{ steps.meta-web.outputs.tags }}
-      image_tms_api: ${{ steps.meta-tms-api.outputs.tags }}
+      image_api: ${{ steps.image_refs.outputs.image_api }}
+      image_web: ${{ steps.image_refs.outputs.image_web }}
+      image_tms_api: ${{ steps.image_refs.outputs.image_tms_api }}
 
     steps:
       - name: Checkout
@@ -71,8 +61,8 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/handyseller-api
           tags: |
-            type=sha,prefix=
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' }}
+            type=raw,value=${{ env.IMAGE_TAG }}
+            type=raw,value=prod-latest,enable=${{ github.ref == 'refs/heads/main' }}
 
       - name: Build and push API
         uses: docker/build-push-action@v6
@@ -91,8 +81,8 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/handyseller-tms-api
           tags: |
-            type=sha,prefix=
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' }}
+            type=raw,value=${{ env.IMAGE_TAG }}
+            type=raw,value=prod-latest,enable=${{ github.ref == 'refs/heads/main' }}
 
       - name: Build and push TMS API
         uses: docker/build-push-action@v6
@@ -111,8 +101,8 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/handyseller-web
           tags: |
-            type=sha,prefix=
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' }}
+            type=raw,value=${{ env.IMAGE_TAG }}
+            type=raw,value=prod-latest,enable=${{ github.ref == 'refs/heads/main' }}
 
       - name: Build and push Web
         uses: docker/build-push-action@v6
@@ -125,9 +115,21 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  deploy:
-    needs: build-and-push
+      - name: Export immutable image refs
+        id: image_refs
+        run: |
+          echo "image_api=${{ env.REGISTRY }}/${{ github.repository_owner }}/handyseller-api:${{ env.IMAGE_TAG }}" >> "$GITHUB_OUTPUT"
+          echo "image_web=${{ env.REGISTRY }}/${{ github.repository_owner }}/handyseller-web:${{ env.IMAGE_TAG }}" >> "$GITHUB_OUTPUT"
+          echo "image_tms_api=${{ env.REGISTRY }}/${{ github.repository_owner }}/handyseller-tms-api:${{ env.IMAGE_TAG }}" >> "$GITHUB_OUTPUT"
+
+  deploy-production:
+    needs: build-and-push-images
     runs-on: ubuntu-latest
+    environment: production
+    outputs:
+      previous_image_api: ${{ steps.capture_previous.outputs.prev_image_api }}
+      previous_image_web: ${{ steps.capture_previous.outputs.prev_image_web }}
+      previous_image_tms_api: ${{ steps.capture_previous.outputs.prev_image_tms_api }}
 
     steps:
       - name: Checkout
@@ -147,6 +149,20 @@ jobs:
         run: |
           mkdir -p ~/.ssh
           ssh-keyscan -H "${{ secrets.VM_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Capture previous deployment images
+        id: capture_previous
+        shell: bash
+        run: |
+          set -euo pipefail
+          HOST="${{ secrets.VM_HOST }}"
+          USER="${{ secrets.VM_USER || 'ubuntu' }}"
+          PREV_API="$(ssh -i deploy_key.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "${USER}@${HOST}" "grep '^IMAGE_API=' /opt/handyseller/.env.production | cut -d= -f2- || true")"
+          PREV_WEB="$(ssh -i deploy_key.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "${USER}@${HOST}" "grep '^IMAGE_WEB=' /opt/handyseller/.env.production | cut -d= -f2- || true")"
+          PREV_TMS="$(ssh -i deploy_key.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "${USER}@${HOST}" "grep '^IMAGE_TMS_API=' /opt/handyseller/.env.production | cut -d= -f2- || true")"
+          echo "prev_image_api=${PREV_API}" >> "$GITHUB_OUTPUT"
+          echo "prev_image_web=${PREV_WEB}" >> "$GITHUB_OUTPUT"
+          echo "prev_image_tms_api=${PREV_TMS}" >> "$GITHUB_OUTPUT"
 
       - name: Prepare VM directory
         shell: bash
@@ -197,14 +213,16 @@ jobs:
         shell: bash
         env:
           CR_PAT: ${{ secrets.CR_PAT }}
+          IMAGE_API: ${{ needs.build-and-push-images.outputs.image_api }}
+          IMAGE_WEB: ${{ needs.build-and-push-images.outputs.image_web }}
+          IMAGE_TMS_API: ${{ needs.build-and-push-images.outputs.image_tms_api }}
         run: |
           set -euo pipefail
           HOST="${{ secrets.VM_HOST }}"
           USER="${{ secrets.VM_USER || 'ubuntu' }}"
           ssh -i deploy_key.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
             "${USER}@${HOST}" <<'SSH'
-            # Деплой: down → prune → pull → up. Watchdog отключаем на время (иначе гонка: он видит down и делает up).
-            set -e
+            set -euo pipefail
             cd /opt/handyseller
 
             sudo rm -f /etc/cron.d/handyseller-watchdog
@@ -215,14 +233,10 @@ jobs:
               exit 1
             fi
 
-            IMAGE_API="ghcr.io/${{ github.repository_owner }}/handyseller-api:latest"
-            IMAGE_WEB="ghcr.io/${{ github.repository_owner }}/handyseller-web:latest"
-            IMAGE_TMS_API="ghcr.io/${{ github.repository_owner }}/handyseller-tms-api:latest"
-
             grep -v '^IMAGE_API=' .env.production | grep -v '^IMAGE_WEB=' | grep -v '^IMAGE_TMS_API=' > .env.production.tmp
-            echo "IMAGE_API=$IMAGE_API" >> .env.production.tmp
-            echo "IMAGE_WEB=$IMAGE_WEB" >> .env.production.tmp
-            echo "IMAGE_TMS_API=$IMAGE_TMS_API" >> .env.production.tmp
+            echo "IMAGE_API=${IMAGE_API}" >> .env.production.tmp
+            echo "IMAGE_WEB=${IMAGE_WEB}" >> .env.production.tmp
+            echo "IMAGE_TMS_API=${IMAGE_TMS_API}" >> .env.production.tmp
             mv .env.production.tmp .env.production
 
             if [ -n "$CR_PAT" ]; then
@@ -237,30 +251,7 @@ jobs:
             # Сеть external — создаём один раз, compose её не создаёт (нет конфликтов с watchdog)
             docker network create handyseller_handyseller 2>/dev/null || true
 
-            echo "=== Disk before ==="
-            df -h /
-            docker system df || true
-
-            # 1. Перезапускаем только app-сервисы. Redis сохраняем, чтобы не зависеть
-            # от Docker Hub на каждом деплое и не терять прогретый volume/image.
-            $DC -f docker-compose.ci.yml --env-file .env.production stop web api tms-api || true
-            docker rm -f handyseller-web handyseller-api handyseller-tms-api 2>/dev/null || true
-
-            # 2. Освобождаем место под новый rollout, не трогая Redis.
-            docker container prune -f
-            docker builder prune -af || true
-            docker images --format '{{.Repository}}:{{.Tag}} {{.ID}}' \
-              | awk '$1 ~ /^ghcr\.io\/djmasjx-cyber\/handyseller-(api|web|tms-api):/ {print $2}' \
-              | sort -u \
-              | xargs -r docker rmi -f || true
-            docker image prune -f
-
-            echo "=== Disk after prune ==="
-            df -h /
-            docker system df || true
-
-            # 3. Pull новых app-образов с retry: сеть на VM бывает нестабильной.
-            echo "=== Pulling app images ==="
+            echo "=== Pulling app images (zero-downtime path) ==="
             for i in 1 2 3 4 5; do
               echo "Pull attempt ${i}/5"
               if $DC -f docker-compose.ci.yml pull api web tms-api; then
@@ -270,8 +261,6 @@ jobs:
               sleep $((i * 5))
             done
 
-            # 4. Redis восстанавливаем отдельно: сначала используем существующий контейнер/образ,
-            # и только если их нет, делаем явный pull с retry.
             if docker ps -a --format '{{.Names}}' | rg -x 'handyseller-redis' >/dev/null; then
               echo "=== Starting existing Redis container ==="
               docker start handyseller-redis 2>/dev/null || true
@@ -291,7 +280,8 @@ jobs:
               $DC -f docker-compose.ci.yml --env-file .env.production up -d --no-deps redis
             fi
 
-            # 5. App-сервисы поднимаем без deps, чтобы compose не инициировал новый redis pull.
+            # Important: do not stop/remove old containers first.
+            # Compose will recreate services to new images with minimal interruption.
             $DC -f docker-compose.ci.yml --env-file .env.production up -d --no-deps api tms-api web
 
             trap - EXIT
@@ -330,5 +320,62 @@ jobs:
             echo "=== Verify TMS API ==="
             curl -sf --connect-timeout 5 http://127.0.0.1:4100/health >/dev/null || { echo "TMS API not responding"; docker logs handyseller-tms-api --tail 60 2>&1; exit 1; }
 
+            # Post-success cleanup (non-blocking) to avoid disk growth.
+            docker image prune -f || true
+
             echo "Deploy complete: https://app.handyseller.ru"
+          SSH
+
+      - name: Post-deploy partner smoke (prod)
+        env:
+          CLIENT_ID: ${{ secrets.TMS_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.TMS_CLIENT_SECRET }}
+          API_BASE_URL: ${{ vars.API_BASE_URL || 'https://api.handyseller.ru/api' }}
+          PREFERRED_CARRIER_ID: dellin
+          DOWNLOAD_DOC: "true"
+        run: |
+          set -euo pipefail
+          bash scripts/tms-partner-e2e.sh
+
+      - name: SLO alert gate (prod)
+        env:
+          CLIENT_ID: ${{ secrets.TMS_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.TMS_CLIENT_SECRET }}
+          API_BASE_URL: ${{ vars.API_BASE_URL || 'https://api.handyseller.ru/api' }}
+        run: |
+          set -euo pipefail
+          TOKEN_RESPONSE="$(curl -sS -X POST "${API_BASE_URL}/tms/oauth/token" \
+            -H "Content-Type: application/json" \
+            -d "{\"grant_type\":\"client_credentials\",\"client_id\":\"${CLIENT_ID}\",\"client_secret\":\"${CLIENT_SECRET}\"}")"
+          ACCESS_TOKEN="$(echo "${TOKEN_RESPONSE}" | jq -r '.access_token // empty')"
+          if [[ -z "${ACCESS_TOKEN}" ]]; then
+            echo "::error::Failed to mint token for SLO check"
+            echo "${TOKEN_RESPONSE}"
+            exit 1
+          fi
+          ACCESS_TOKEN="${ACCESS_TOKEN}" API_BASE_URL="${API_BASE_URL}" bash scripts/tms-slo-alert-check.sh
+
+      - name: Rollback previous images on failure
+        if: ${{ failure() && steps.capture_previous.outputs.prev_image_api != '' && steps.capture_previous.outputs.prev_image_web != '' && steps.capture_previous.outputs.prev_image_tms_api != '' }}
+        shell: bash
+        env:
+          PREV_IMAGE_API: ${{ steps.capture_previous.outputs.prev_image_api }}
+          PREV_IMAGE_WEB: ${{ steps.capture_previous.outputs.prev_image_web }}
+          PREV_IMAGE_TMS_API: ${{ steps.capture_previous.outputs.prev_image_tms_api }}
+        run: |
+          set -euo pipefail
+          HOST="${{ secrets.VM_HOST }}"
+          USER="${{ secrets.VM_USER || 'ubuntu' }}"
+          ssh -i deploy_key.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "${USER}@${HOST}" <<'SSH'
+            set -euo pipefail
+            cd /opt/handyseller
+            grep -v '^IMAGE_API=' .env.production | grep -v '^IMAGE_WEB=' | grep -v '^IMAGE_TMS_API=' > .env.production.tmp
+            echo "IMAGE_API=${PREV_IMAGE_API}" >> .env.production.tmp
+            echo "IMAGE_WEB=${PREV_IMAGE_WEB}" >> .env.production.tmp
+            echo "IMAGE_TMS_API=${PREV_IMAGE_TMS_API}" >> .env.production.tmp
+            mv .env.production.tmp .env.production
+            DC="docker compose"
+            command -v docker-compose >/dev/null 2>&1 && DC="docker-compose"
+            $DC -f docker-compose.ci.yml --env-file .env.production pull api web tms-api
+            $DC -f docker-compose.ci.yml --env-file .env.production up -d --no-deps api tms-api web
           SSH

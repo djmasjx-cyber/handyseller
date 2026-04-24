@@ -1,0 +1,166 @@
+name: Deploy Staging
+
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-staging-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_TAG: sha-${{ github.sha }}
+
+jobs:
+  build-images:
+    runs-on: ubuntu-latest
+    outputs:
+      image_api: ${{ steps.image_refs.outputs.image_api }}
+      image_web: ${{ steps.image_refs.outputs.image_web }}
+      image_tms_api: ${{ steps.image_refs.outputs.image_tms_api }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta-api
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/handyseller-api
+          tags: |
+            type=raw,value=${{ env.IMAGE_TAG }}
+            type=raw,value=staging-latest,enable=true
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./apps/api/Dockerfile
+          push: true
+          tags: ${{ steps.meta-api.outputs.tags }}
+          labels: ${{ steps.meta-api.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - id: meta-tms-api
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/handyseller-tms-api
+          tags: |
+            type=raw,value=${{ env.IMAGE_TAG }}
+            type=raw,value=staging-latest,enable=true
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./apps/tms-api/Dockerfile
+          push: true
+          tags: ${{ steps.meta-tms-api.outputs.tags }}
+          labels: ${{ steps.meta-tms-api.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - id: meta-web
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/handyseller-web
+          tags: |
+            type=raw,value=${{ env.IMAGE_TAG }}
+            type=raw,value=staging-latest,enable=true
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./apps/web/Dockerfile
+          push: true
+          tags: ${{ steps.meta-web.outputs.tags }}
+          labels: ${{ steps.meta-web.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Export immutable image refs
+        id: image_refs
+        run: |
+          echo "image_api=${{ env.REGISTRY }}/${{ github.repository_owner }}/handyseller-api:${{ env.IMAGE_TAG }}" >> "$GITHUB_OUTPUT"
+          echo "image_web=${{ env.REGISTRY }}/${{ github.repository_owner }}/handyseller-web:${{ env.IMAGE_TAG }}" >> "$GITHUB_OUTPUT"
+          echo "image_tms_api=${{ env.REGISTRY }}/${{ github.repository_owner }}/handyseller-tms-api:${{ env.IMAGE_TAG }}" >> "$GITHUB_OUTPUT"
+
+  deploy-staging:
+    needs: build-images
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate secrets
+        run: |
+          if [ -z "${{ secrets.VM_HOST }}" ]; then echo "::error::staging VM_HOST is empty"; exit 1; fi
+          if [ -z "${{ secrets.VM_SSH_KEY }}" ]; then echo "::error::staging VM_SSH_KEY is empty"; exit 1; fi
+
+      - name: Prepare SSH key and known_hosts
+        run: |
+          echo "${{ secrets.VM_SSH_KEY }}" | base64 -d > deploy_key.pem
+          chmod 600 deploy_key.pem
+          mkdir -p ~/.ssh
+          ssh-keyscan -H "${{ secrets.VM_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Deploy to staging VM
+        shell: bash
+        env:
+          CR_PAT: ${{ secrets.CR_PAT }}
+          IMAGE_API: ${{ needs.build-images.outputs.image_api }}
+          IMAGE_WEB: ${{ needs.build-images.outputs.image_web }}
+          IMAGE_TMS_API: ${{ needs.build-images.outputs.image_tms_api }}
+        run: |
+          set -euo pipefail
+          HOST="${{ secrets.VM_HOST }}"
+          USER="${{ secrets.VM_USER || 'ubuntu' }}"
+          ssh -i deploy_key.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "${USER}@${HOST}" <<'SSH'
+            set -euo pipefail
+            APP_DIR="/opt/handyseller"
+            ENV_FILE=".env.staging"
+            cd "${APP_DIR}"
+            if [ ! -f "${ENV_FILE}" ]; then
+              echo "ERROR: ${APP_DIR}/${ENV_FILE} not found"
+              exit 1
+            fi
+            if [ -n "${CR_PAT}" ]; then
+              echo "${CR_PAT}" | docker login ghcr.io -u ${{ github.repository_owner }} --password-stdin
+            fi
+            grep -v '^IMAGE_API=' "${ENV_FILE}" | grep -v '^IMAGE_WEB=' | grep -v '^IMAGE_TMS_API=' > "${ENV_FILE}.tmp"
+            echo "IMAGE_API=${IMAGE_API}" >> "${ENV_FILE}.tmp"
+            echo "IMAGE_WEB=${IMAGE_WEB}" >> "${ENV_FILE}.tmp"
+            echo "IMAGE_TMS_API=${IMAGE_TMS_API}" >> "${ENV_FILE}.tmp"
+            mv "${ENV_FILE}.tmp" "${ENV_FILE}"
+            export IMAGE_API IMAGE_WEB IMAGE_TMS_API
+            DC="docker compose"
+            command -v docker-compose >/dev/null 2>&1 && DC="docker-compose"
+            docker network create handyseller_handyseller 2>/dev/null || true
+            $DC -f docker-compose.ci.yml --env-file "${ENV_FILE}" pull api web tms-api
+            $DC -f docker-compose.ci.yml --env-file "${ENV_FILE}" up -d --no-deps redis
+            $DC -f docker-compose.ci.yml --env-file "${ENV_FILE}" up -d --no-deps api tms-api web
+            curl -sf --connect-timeout 5 http://127.0.0.1:4000/health >/dev/null
+            curl -sf --connect-timeout 5 http://127.0.0.1:4100/health >/dev/null
+          SSH
+
+      - name: Staging partner smoke
+        env:
+          CLIENT_ID: ${{ secrets.TMS_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.TMS_CLIENT_SECRET }}
+          API_BASE_URL: ${{ vars.API_BASE_URL || 'https://api.handyseller.ru/api' }}
+          PREFERRED_CARRIER_ID: dellin
+          DOWNLOAD_DOC: "false"
+        run: |
+          set -euo pipefail
+          bash scripts/tms-partner-e2e.sh

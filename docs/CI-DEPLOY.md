@@ -1,65 +1,79 @@
-# CI/CD: GitHub Actions → ghcr.io → VM
+# CI/CD: dev -> staging -> prod
 
-Сборка образов выполняется в GitHub (без нагрузки на VM). Деплой на VM занимает ~1–2 минуты.
+Сборка, тесты и деплой выполняются в GitHub Actions, без нагрузки на ноутбук.
 
-## Как это устроено
+## Workflows
 
-1. **Push в `main`** или ручной запуск workflow → триггер деплоя
-2. **Build** — образы API и Web собираются в GitHub Actions
-3. **Push** — образы публикуются в GitHub Container Registry (ghcr.io)
-4. **Deploy** — SSH на VM, `docker compose pull` + `up -d`
+- `CI Checks` (`.github/workflows/ci.yml`)
+  - запускается на PR в `dev`/`main` и push в `dev`.
+  - gates: lint + build (`api`, `tms-api`, `web`) + optional quick smoke.
+- `Deploy Staging` (`.github/workflows/deploy-staging.yml`)
+  - автозапуск по push в `dev`, плюс ручной запуск.
+  - deploy в environment `staging` + staging smoke.
+- `Deploy Production` (`.github/workflows/deploy.yml`)
+  - запуск по push в `main` или вручную.
+  - deploy в environment `production` + post-deploy smoke + SLO gate + rollback.
+- `Dellin Nightly E2E` (`.github/workflows/dellin-nightly.yml`)
+  - ночная проверка dellin flow на `staging`, с артефактами логов.
 
-## Настройка (один раз)
+## Требуемая структура GitHub Environments
 
-### 1. Секреты в GitHub
+Создайте environments:
 
-В репозитории: **Settings → Secrets and variables → Actions** добавьте:
+- `staging`
+- `production`
 
-| Секрет     | Описание                            | Обязательный | Пример          |
-|------------|-------------------------------------|--------------|-----------------|
-| `VM_HOST`  | IP или hostname VM                  | Да           | `158.160.209.158` |
-| `VM_SSH_KEY` | Приватный SSH-ключ (полностью)    | Да           | содержимое `~/.ssh/yandex_vm` |
-| `VM_USER`  | Пользователь SSH                    | Да           | `ubuntu`        |
-| `CR_PAT`   | (опционально) PAT для pull приватных образов | Нет  | см. ниже |
+В каждом окружении задайте секреты/vars:
 
-### 2. Environment `production`
+### Секреты
 
-В **Settings → Environments** создайте `production` (используется в workflow).
+- `VM_HOST`
+- `VM_SSH_KEY` (base64 приватного ключа)
+- `VM_USER` (обычно `ubuntu`)
+- `CR_PAT` (опционально, если ghcr приватный)
+- `TMS_CLIENT_ID`
+- `TMS_CLIENT_SECRET`
 
-### 3. Пакеты образов: публичные или приватные
+### Vars
 
-По умолчанию образы в ghcr.io приватные.
+- `API_BASE_URL` (например, `https://api.handyseller.ru/api` или staging URL)
 
-- **Публичные:** В репозитории → Packages → выберите пакет → Package settings → Change visibility → Public. Тогда `CR_PAT` не нужен.
-- **Приватные:** Создайте Personal Access Token (read:packages), добавьте как секрет `CR_PAT`.
+## VM prerequisites
 
-### 4. Одноразовая настройка VM
+На VM должны быть:
 
-На VM должно быть:
+- Docker + docker compose plugin
+- рабочий каталог `/opt/handyseller`
+- env-файл:
+  - `/opt/handyseller/.env.staging` для staging
+  - `/opt/handyseller/.env.production` для prod
+- `docker-compose.ci.yml`
+- nginx (для prod) и корректный DNS/SSL
 
-- Docker
-- `/opt/handyseller/.env.production` с `DATABASE_URL`, `JWT_SECRET`, `ENCRYPTION_KEY`, `CORS_ORIGIN`, `ADMIN_EMAIL`, `ADMIN_PASSWORD` и др.
-- Настроенный Nginx (конфиг в `/etc/nginx/sites-enabled/handyseller`)
+## Branch protection (обязательно)
 
-Выполните один раз вручную или через `deploy-local-vm.sh`:
+Для веток `dev` и `main` включите в GitHub:
 
-```bash
-cd /home/ubuntu/handyseller-dev && bash scripts/deploy-local-vm.sh
-```
+1. Require a pull request before merging
+2. Require status checks to pass before merging
+3. Required checks:
+   - `build-lint-typecheck`
+   - `quick-partner-smoke`
+4. Restrict direct pushes
+5. (для `main`) Require approvals (минимум 1)
 
-Это создаст структуру и `.env.production`. После этого CI будет только обновлять образы и перезапускать контейнеры.
+## Rollback логика в prod
 
-## Ручной запуск
+`Deploy Production` автоматически:
 
-**Actions → Build and Deploy → Run workflow**
+1. сохраняет предыдущие image tags из `.env.production`
+2. деплоит новые image SHA
+3. запускает post-deploy smoke + SLO gate
+4. при ошибке возвращает предыдущие образы
 
-## Проверка после деплоя
+## Быстрый операционный цикл
 
-```bash
-# На VM
-docker ps
-curl -s http://127.0.0.1:4000/health
-curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:3001/
-```
-
-В браузере: https://app.handyseller.ru/
+1. Merge в `dev` -> staging deploy + smoke
+2. Проверка staging
+3. Merge `dev -> main`
+4. Prod deploy с автоматическими проверками и rollback

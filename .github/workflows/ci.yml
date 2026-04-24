@@ -1,0 +1,51 @@
+name: CI Checks
+
+on:
+  pull_request:
+    branches: [dev, main]
+  push:
+    branches: [dev]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-lint-typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npx prisma generate --schema=./apps/api/prisma/schema.prisma
+      - run: npm run build --workspace=api
+      - run: npm run build --workspace=tms-api
+      - run: npm run build --workspace=web
+
+  quick-partner-smoke:
+    runs-on: ubuntu-latest
+    needs: build-lint-typecheck
+    if: ${{ github.event_name == 'pull_request' || github.ref == 'refs/heads/dev' }}
+    env:
+      CLIENT_ID: ${{ secrets.TMS_CLIENT_ID }}
+      CLIENT_SECRET: ${{ secrets.TMS_CLIENT_SECRET }}
+      API_BASE_URL: ${{ vars.API_BASE_URL || 'https://api.handyseller.ru/api' }}
+      PREFERRED_CARRIER_ID: cdek
+      DOWNLOAD_DOC: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Skip smoke when secrets are missing
+        if: ${{ env.CLIENT_ID == '' || env.CLIENT_SECRET == '' }}
+        run: echo "Smoke skipped: missing TMS_CLIENT_ID/TMS_CLIENT_SECRET"
+      - name: Run quick partner smoke
+        if: ${{ env.CLIENT_ID != '' && env.CLIENT_SECRET != '' }}
+        run: bash scripts/tms-partner-e2e.sh
