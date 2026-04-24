@@ -128,6 +128,7 @@ jobs:
           USER="${{ secrets.VM_USER || 'ubuntu' }}"
           ssh -i deploy_key.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "${USER}@${HOST}" <<'SSH'
             set -euo pipefail
+            CR_PAT="${CR_PAT:-}"
             APP_DIR="/opt/handyseller"
             ENV_FILE=".env.staging"
             cd "${APP_DIR}"

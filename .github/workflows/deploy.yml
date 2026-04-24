@@ -223,6 +223,7 @@ jobs:
           ssh -i deploy_key.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
             "${USER}@${HOST}" <<'SSH'
             set -euo pipefail
+            CR_PAT="${CR_PAT:-}"
             cd /opt/handyseller
 
             sudo rm -f /etc/cron.d/handyseller-watchdog
