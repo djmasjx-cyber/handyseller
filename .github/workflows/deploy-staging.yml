@@ -137,10 +137,14 @@ jobs:
               echo "ERROR: ${APP_DIR}/${ENV_FILE} not found"
               exit 1
             fi
-            # Free disk space before pulling fresh images.
-            docker image prune -af >/dev/null 2>&1 || true
-            docker builder prune -af >/dev/null 2>&1 || true
-            docker container prune -f >/dev/null 2>&1 || true
+            # Staging-only aggressive cleanup to avoid no-space pull failures.
+            # It is safe for staging because data is non-critical.
+            df -h /
+            DC="docker compose"
+            command -v docker-compose >/dev/null 2>&1 && DC="docker-compose"
+            $DC -f docker-compose.ci.yml --env-file "${ENV_FILE}" down --remove-orphans >/dev/null 2>&1 || true
+            docker system prune -af --volumes >/dev/null 2>&1 || true
+            df -h /
             if [ -n "${CR_PAT}" ]; then
               echo "${CR_PAT}" | docker login ghcr.io -u ${{ github.repository_owner }} --password-stdin
             fi
