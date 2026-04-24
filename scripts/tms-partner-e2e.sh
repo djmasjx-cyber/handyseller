@@ -38,6 +38,13 @@ classify_error() {
   echo "unknown"
 }
 
+is_rate_limited() {
+  local body="$1"
+  local lower
+  lower="$(printf '%s' "$body" | tr '[:upper:]' '[:lower:]')"
+  [[ "$lower" == *"http 429"* || "$lower" == *"\"code\":429"* || "$lower" == *"too many requests"* ]]
+}
+
 fail_step() {
   local step="$1"
   local body="$2"
@@ -161,7 +168,19 @@ if [[ -z "${SELECTED_QUOTE_ID}" ]]; then fail_step "select_quote" "${SELECT_RESP
 
 echo "4) Confirm..."
 IDEMPOTENCY_KEY="confirm-${EXTERNAL_ORDER_ID}"
-CONFIRM_RESPONSE="$(api_json POST "${API_BASE_URL}/tms/v1/shipments/${REQUEST_ID}/confirm")"
+CONFIRM_RESPONSE=""
+for attempt in 1 2 3; do
+  CONFIRM_RESPONSE="$(api_json POST "${API_BASE_URL}/tms/v1/shipments/${REQUEST_ID}/confirm")"
+  SHIPMENT_ID="$(echo "${CONFIRM_RESPONSE}" | jq -r '.id // empty')"
+  if [[ -n "${SHIPMENT_ID}" ]]; then
+    break
+  fi
+  if is_rate_limited "${CONFIRM_RESPONSE}"; then
+    sleep $((attempt * 5))
+    continue
+  fi
+  break
+done
 unset IDEMPOTENCY_KEY
 SHIPMENT_ID="$(echo "${CONFIRM_RESPONSE}" | jq -r '.id // empty')"
 if [[ -z "${SHIPMENT_ID}" ]]; then
