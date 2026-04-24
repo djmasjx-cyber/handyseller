@@ -34,7 +34,7 @@ EOF
 )"
 
 echo "1) Estimate through web BFF..."
-estimate="$(curl -sS -X POST "${WEB_BASE_URL}/api/tms-demo/estimate" -H "Content-Type: application/json" -d "${payload}")"
+estimate="$(curl -sS -X POST "${WEB_BASE_URL}/api/tms/demo/estimate" -H "Content-Type: application/json" -d "${payload}")"
 request_id="$(echo "${estimate}" | jq -r '.shipmentRequestId // empty')"
 quote_id="$(echo "${estimate}" | jq -r '.options[0].quoteId // empty')"
 if [[ -z "${request_id}" || -z "${quote_id}" ]]; then
@@ -45,7 +45,7 @@ fi
 echo "request_id=${request_id} quote_id=${quote_id}"
 
 echo "2) Select quote..."
-select_response="$(curl -sS -X POST "${WEB_BASE_URL}/api/tms-demo/select" -H "Content-Type: application/json" -d "{\"requestId\":\"${request_id}\",\"quoteId\":\"${quote_id}\"}")"
+select_response="$(curl -sS -X POST "${WEB_BASE_URL}/api/tms/demo/select" -H "Content-Type: application/json" -d "{\"requestId\":\"${request_id}\",\"quoteId\":\"${quote_id}\"}")"
 selected_quote_id="$(echo "${select_response}" | jq -r '.selectedQuoteId // empty')"
 if [[ "${selected_quote_id}" != "${quote_id}" ]]; then
   echo "FAIL step=select" >&2
@@ -59,7 +59,7 @@ if [[ "${REAL_CONFIRM}" != "true" ]]; then
 fi
 
 echo "3) Confirm real booking..."
-confirm="$(curl -sS -X POST "${WEB_BASE_URL}/api/tms-demo/confirm" -H "Content-Type: application/json" -d "{\"requestId\":\"${request_id}\",\"externalOrderId\":\"${EXTERNAL_ORDER_ID}\",\"allowRealBooking\":true}")"
+confirm="$(curl -sS -X POST "${WEB_BASE_URL}/api/tms/demo/confirm" -H "Content-Type: application/json" -d "{\"requestId\":\"${request_id}\",\"externalOrderId\":\"${EXTERNAL_ORDER_ID}\",\"allowRealBooking\":true}")"
 tracking="$(echo "${confirm}" | jq -r '.shipment.trackingNumber // empty')"
 if [[ -z "${tracking}" ]]; then
   echo "FAIL step=confirm" >&2
