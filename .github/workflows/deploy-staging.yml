@@ -112,11 +112,29 @@ jobs:
       - name: Prepare SSH key and known_hosts
         run: |
           SSH_KEY="${{ secrets.VM_SSH_KEY }}"
-          if ! printf '%s' "${SSH_KEY}" | base64 -d > deploy_key.pem 2>/dev/null || ! grep -q "BEGIN .*PRIVATE KEY" deploy_key.pem; then
-            printf '%b' "${SSH_KEY}" > deploy_key.pem
+          CLEAN_KEY="${SSH_KEY#\"}"
+          CLEAN_KEY="${CLEAN_KEY%\"}"
+          CLEAN_KEY="${CLEAN_KEY#\'}"
+          CLEAN_KEY="${CLEAN_KEY%\'}"
+
+          validate_key() {
+            sed -i 's/\r$//' deploy_key.pem
+            chmod 600 deploy_key.pem
+            ssh-keygen -y -f deploy_key.pem >/dev/null 2>&1
+          }
+
+          if printf '%s' "${SSH_KEY}" | base64 -d > deploy_key.pem 2>/dev/null && validate_key; then
+            echo "SSH key decoded from base64"
+          elif printf '%s' "${SSH_KEY}" > deploy_key.pem && validate_key; then
+            echo "SSH key loaded as raw PEM"
+          elif printf '%b' "${SSH_KEY}" > deploy_key.pem && validate_key; then
+            echo "SSH key loaded from escaped-newline PEM"
+          elif printf '%b' "${CLEAN_KEY}" > deploy_key.pem && validate_key; then
+            echo "SSH key loaded from quoted escaped-newline PEM"
+          else
+            echo "::error::VM_SSH_KEY is not a valid private key in base64, raw PEM, or escaped-newline PEM format"
+            exit 1
           fi
-          sed -i 's/\r$//' deploy_key.pem
-          chmod 600 deploy_key.pem
           mkdir -p ~/.ssh
           ssh-keyscan -H "${{ secrets.VM_HOST }}" >> ~/.ssh/known_hosts
 
