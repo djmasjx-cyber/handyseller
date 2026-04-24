@@ -648,6 +648,17 @@ export class ShipmentsService implements OnModuleInit {
     ].join('|');
   }
 
+  private bindQuotesToRequest(requestId: string, quotes: CarrierQuote[]): CarrierQuote[] {
+    return quotes.map((quote) => {
+      const previousRequestId = quote.requestId;
+      const id =
+        previousRequestId && quote.id.startsWith(`${previousRequestId}:`)
+          ? `${requestId}:${quote.id.slice(previousRequestId.length + 1)}`
+          : quote.id;
+      return { ...quote, id, requestId };
+    });
+  }
+
   async getSloMetrics(
     userId: string,
     options?: { staleHours?: number; webhookWindowHours?: number },
@@ -880,23 +891,25 @@ export class ShipmentsService implements OnModuleInit {
     const cached = this.quoteCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
       this.logger.log(`[quote-cache] requestId=${requestId} status=hit quotes=${cached.quotes.length}`);
+      const quotes = this.bindQuotesToRequest(requestId, cached.quotes);
       request.status = cached.quotes.length > 0 ? 'QUOTED' : 'DRAFT';
       request.updatedAt = new Date().toISOString();
       this.requests.set(requestId, request);
       void this.store.saveRequest(request);
-      this.quotes.set(requestId, cached.quotes);
-      return cached.quotes;
+      this.quotes.set(requestId, quotes);
+      return quotes;
     }
     const inFlight = this.quoteInFlight.get(cacheKey);
     if (inFlight) {
       this.logger.log(`[quote-cache] requestId=${requestId} status=singleflight_wait`);
       const sharedQuotes = await inFlight;
+      const quotes = this.bindQuotesToRequest(requestId, sharedQuotes);
       request.status = sharedQuotes.length > 0 ? 'QUOTED' : 'DRAFT';
       request.updatedAt = new Date().toISOString();
       this.requests.set(requestId, request);
       void this.store.saveRequest(request);
-      this.quotes.set(requestId, sharedQuotes);
-      return sharedQuotes;
+      this.quotes.set(requestId, quotes);
+      return quotes;
     }
     const compute = this.computeQuotes(userId, requestId, request, authToken, requestTraceId, cacheKey);
     this.quoteInFlight.set(cacheKey, compute);
