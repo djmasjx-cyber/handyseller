@@ -15,7 +15,7 @@ function getToken(req: NextRequest): string | null {
  * - OAuth and integration-client management stay in core.
  * - Transport API (`/tms/v1/*`) is owned by `tms-api`.
  */
-function useCoreApi(path: string[]): boolean {
+function shouldUseCoreApi(path: string[]): boolean {
   const head = path[0]
   return head === "oauth" || head === "integration-clients" || head === "openapi.yaml"
 }
@@ -24,7 +24,7 @@ function resolveTarget(req: NextRequest, path: string[]): string {
   const qs = req.nextUrl.searchParams.toString()
   const q = qs ? `?${qs}` : ""
   const [scope, ...rest] = path
-  if (useCoreApi(path)) {
+  if (shouldUseCoreApi(path)) {
     return `${API_BASE}/tms/${path.join("/")}${q}`
   }
   // Legacy compatibility path: `/tms/core/*` remains routed to core while clients migrate.

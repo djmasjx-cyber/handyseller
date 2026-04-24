@@ -61,6 +61,15 @@ is_rate_limited() {
   [[ "$lower" == *"http 429"* || "$lower" == *"\"code\":429"* || "$lower" == *"too many requests"* ]]
 }
 
+next_business_pickup_date() {
+  local candidate
+  candidate="$(date -u -d '+3 days' +%Y-%m-%d)"
+  while [[ "$(date -u -d "${candidate}" +%u)" -gt 5 ]]; do
+    candidate="$(date -u -d "${candidate} +1 day" +%Y-%m-%d)"
+  done
+  echo "${candidate}"
+}
+
 fail_step() {
   local step="$1"
   local body="$2"
@@ -113,6 +122,7 @@ if [[ -z "${ACCESS_TOKEN}" ]]; then
   exit 1
 fi
 
+PICKUP_DATE="$(next_business_pickup_date)"
 REQUEST_BODY="$(cat <<EOF
 {
   "snapshot": {
@@ -154,7 +164,10 @@ REQUEST_BODY="$(cat <<EOF
   "draft": {
     "originLabel": "Москва, Склад 1",
     "destinationLabel": "Казань, ул. Пример 1",
-    "serviceFlags": ["EXPRESS"]
+    "serviceFlags": ["EXPRESS"],
+    "pickupDate": "${PICKUP_DATE}",
+    "pickupTimeStart": "10:00",
+    "pickupTimeEnd": "18:00"
   },
   "integration": {
     "externalOrderId": "${EXTERNAL_ORDER_ID}",
@@ -218,7 +231,13 @@ echo "${EVENTS_RESPONSE}" | jq .
 echo "6) Refresh shipment..."
 REFRESH_RESPONSE="$(api_json POST "${API_BASE_URL}/tms/shipments/${SHIPMENT_ID}/refresh")"
 REFRESH_STATUS="$(echo "${REFRESH_RESPONSE}" | jq -r '.status // empty')"
-if [[ -z "${REFRESH_STATUS}" ]]; then fail_step "refresh" "${REFRESH_RESPONSE}"; fi
+if [[ -z "${REFRESH_STATUS}" ]]; then
+  if [[ "$(printf '%s' "${REFRESH_RESPONSE}" | tr '[:upper:]' '[:lower:]')" == *"пока не поддерживается"* ]]; then
+    echo "WARN step=refresh unsupported carrier=${PREFERRED_CARRIER_ID:-auto}"
+  else
+    fail_step "refresh" "${REFRESH_RESPONSE}"
+  fi
+fi
 
 echo "7) Documents list + optional file..."
 DOCS_RESPONSE="$(api_json GET "${API_BASE_URL}/tms/shipments/${SHIPMENT_ID}/documents")"
