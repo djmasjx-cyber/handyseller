@@ -221,7 +221,8 @@ jobs:
           HOST="${{ secrets.VM_HOST }}"
           USER="${{ secrets.VM_USER || 'ubuntu' }}"
           ssh -i deploy_key.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
-            "${USER}@${HOST}" <<'SSH'
+            "${USER}@${HOST}" \
+            "IMAGE_API='${IMAGE_API}' IMAGE_WEB='${IMAGE_WEB}' IMAGE_TMS_API='${IMAGE_TMS_API}' CR_PAT='${CR_PAT}' bash -seu" <<'SSH'
             set -euo pipefail
             CR_PAT="${CR_PAT:-}"
             cd /opt/handyseller
@@ -367,7 +368,8 @@ jobs:
           set -euo pipefail
           HOST="${{ secrets.VM_HOST }}"
           USER="${{ secrets.VM_USER || 'ubuntu' }}"
-          ssh -i deploy_key.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "${USER}@${HOST}" <<'SSH'
+          ssh -i deploy_key.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "${USER}@${HOST}" \
+            "PREV_IMAGE_API='${PREV_IMAGE_API}' PREV_IMAGE_WEB='${PREV_IMAGE_WEB}' PREV_IMAGE_TMS_API='${PREV_IMAGE_TMS_API}' bash -seu" <<'SSH'
             set -euo pipefail
             cd /opt/handyseller
             grep -v '^IMAGE_API=' .env.production | grep -v '^IMAGE_WEB=' | grep -v '^IMAGE_TMS_API=' > .env.production.tmp
