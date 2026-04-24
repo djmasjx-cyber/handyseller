@@ -107,6 +107,36 @@ function isMajorCutoffError(message: string): boolean {
   );
 }
 
+function isMajorWeekendError(message: string): boolean {
+  return message.toLowerCase().includes('дата забора груза не может быть выходным');
+}
+
+function isWeekend(date: Date): boolean {
+  const day = date.getDay();
+  return day === 0 || day === 6;
+}
+
+function nextBusinessDay(date: Date): Date {
+  const d = new Date(date);
+  while (isWeekend(d)) {
+    d.setDate(d.getDate() + 1);
+  }
+  return d;
+}
+
+function parsePickupDate(value: string | null | undefined): Date | null {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+  if (!match) return null;
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function resolveMajorPickupDate(input: CreateShipmentRequestInput): Date {
+  return nextBusinessDay(parsePickupDate(input.draft.pickupDate) ?? new Date());
+}
+
 function toLocalBusinessIso(date: Date): string {
   const d = new Date(date);
   d.setHours(10, 0, 0, 0);
@@ -438,8 +468,9 @@ export class MajorExpressAdapter implements CarrierAdapter {
     }
     const shipperAddress = (input.draft.originLabel || input.snapshot.originLabel || '').trim();
     let created: { orderId: number; waybillNumber: string | null };
+    const requestedPickupDate = resolveMajorPickupDate(input);
     try {
-      const cargoTakenDateIso = toLocalBusinessIso(new Date());
+      const cargoTakenDateIso = toLocalBusinessIso(requestedPickupDate);
       const intervalId = await this.getOrderIntervalId(
         credentials,
         shipperCity.code,
@@ -460,12 +491,11 @@ export class MajorExpressAdapter implements CarrierAdapter {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : '';
-      if (!isMajorCutoffError(message)) {
+      if (!isMajorCutoffError(message) && !isMajorWeekendError(message)) {
         throw error;
       }
-      const tomorrow = new Date();
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      const cargoTakenDateIso = toLocalBusinessIso(tomorrow);
+      const retryDate = nextBusinessDay(new Date(requestedPickupDate.getTime() + 24 * 60 * 60 * 1000));
+      const cargoTakenDateIso = toLocalBusinessIso(retryDate);
       const intervalId = await this.getOrderIntervalId(
         credentials,
         shipperCity.code,
@@ -473,7 +503,7 @@ export class MajorExpressAdapter implements CarrierAdapter {
         cargoTakenDateIso,
       );
       this.logger.warn(
-        `[major-booking] cutoff reached for today, retrying next day requestId=${quote.requestId} date=${tomorrow.toISOString().slice(0, 10)} interval=${intervalId}`,
+        `[major-booking] pickup date rejected, retrying next business day requestId=${quote.requestId} date=${retryDate.toISOString().slice(0, 10)} interval=${intervalId} reason=${message}`,
       );
       created = await this.createOrder({
         quote,
