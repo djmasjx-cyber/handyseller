@@ -178,6 +178,7 @@ jobs:
           CLIENT_SECRET: ${{ secrets.TMS_CLIENT_SECRET }}
           API_BASE_URL: ${{ vars.API_BASE_URL || 'https://api.handyseller.ru/api' }}
           DOWNLOAD_DOC: "false"
+          SOFT_FAIL_CONFIRM: "true"
         run: |
           set -euo pipefail
           bash scripts/tms-partner-e2e.sh

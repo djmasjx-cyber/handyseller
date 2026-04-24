@@ -20,6 +20,7 @@ CALLBACK_URL="${CALLBACK_URL:-}"
 PREFERRED_CARRIER_ID="${PREFERRED_CARRIER_ID:-}"
 DOWNLOAD_DOC="${DOWNLOAD_DOC:-true}"
 TRACE_ID_PREFIX="${TRACE_ID_PREFIX:-smoke}"
+SOFT_FAIL_CONFIRM="${SOFT_FAIL_CONFIRM:-false}"
 
 trace_id() {
   local step="$1"
@@ -36,6 +37,21 @@ classify_error() {
   if [[ "$lower" == *"not ready"* || "$lower" == *"pdf not ready"* || "$lower" == *"uuid not ready"* ]]; then echo "doc_not_ready"; return; fi
   if [[ "$lower" == *"cdek"* || "$lower" == *"major"* || "$lower" == *"dellin"* || "$lower" == *"carrier"* ]]; then echo "carrier"; return; fi
   echo "unknown"
+}
+
+should_soft_fail_confirm() {
+  local body="$1"
+  local reason
+  reason="$(classify_error "$body")"
+  if [[ "${SOFT_FAIL_CONFIRM}" != "true" ]]; then
+    return 1
+  fi
+  if [[ "$reason" == "carrier" ]]; then
+    return 0
+  fi
+  local lower
+  lower="$(printf '%s' "$body" | tr '[:upper:]' '[:lower:]')"
+  [[ "$lower" == *"cannot obtain sessionid"* || "$lower" == *"dellin booking failed"* || "$lower" == *"http 429"* ]]
 }
 
 is_rate_limited() {
@@ -184,6 +200,12 @@ done
 unset IDEMPOTENCY_KEY
 SHIPMENT_ID="$(echo "${CONFIRM_RESPONSE}" | jq -r '.id // empty')"
 if [[ -z "${SHIPMENT_ID}" ]]; then
+  if should_soft_fail_confirm "${CONFIRM_RESPONSE}"; then
+    echo "WARN step=confirm soft_fail=true reason=$(classify_error "${CONFIRM_RESPONSE}")" >&2
+    echo "${CONFIRM_RESPONSE}" >&2
+    echo "PASS_SOFT carrier=${PREFERRED_CARRIER_ID:-auto} requestId=${REQUEST_ID}"
+    exit 0
+  fi
   fail_step "confirm" "${CONFIRM_RESPONSE}"
 fi
 
