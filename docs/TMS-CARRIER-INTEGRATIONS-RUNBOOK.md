@@ -68,6 +68,14 @@ Operational playbook for diagnosing and resolving carrier integration issues (CD
   - phone format (`7XXXXXXXXXX`)
   - `delivery` date/time and requester/payment blocks
 - For temporary continuity, draft fallback may be used if configured.
+- Booking readiness checklist (before go-live):
+  - `DELLIN_DRAFT_ONLY=false` for real order placement.
+  - Optional strict mode: `DELLIN_ENFORCE_REAL_BOOKING=true` (blocks silent fallback to draft on `inOrder` validation errors).
+  - Valid sender UID is resolvable (`DELLIN_REQUESTER_UID` or auth/counteragents response).
+  - Sender/recipient contacts and cargo title are filled in order snapshot.
+  - Observe logs for retry diagnostics:
+    - `auth retry ...` (session acquisition)
+    - `retry ... op=request:create ...` (booking transport/rate-limit retries)
 
 ### Major
 - EXPRESS and LTL use different SOAP routing/namespaces.
