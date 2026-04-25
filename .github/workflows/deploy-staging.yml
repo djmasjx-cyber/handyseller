@@ -116,6 +116,19 @@ jobs:
           mkdir -p ~/.ssh
           ssh-keyscan -H "${{ secrets.VM_HOST }}" >> ~/.ssh/known_hosts
 
+      - name: Copy compose and nginx configs to staging VM
+        shell: bash
+        run: |
+          set -euo pipefail
+          HOST="${{ secrets.VM_HOST }}"
+          USER="${{ secrets.VM_USER || 'ubuntu' }}"
+          ssh -i deploy_key.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "${USER}@${HOST}" \
+            "sudo mkdir -p /opt/handyseller && sudo chown \$(whoami):\$(whoami) /opt/handyseller"
+          scp -i deploy_key.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -r \
+            docker-compose.ci.yml nginx \
+            "${USER}@${HOST}:/opt/handyseller/"
+
       - name: Deploy to staging VM
         shell: bash
         env:
@@ -222,6 +235,14 @@ jobs:
               [ "$i" -eq 30 ] && { echo "TMS API health check timeout"; exit 1; }
               sleep 3
             done
+            if sudo test -f /etc/letsencrypt/live/dev.handyseller.ru/fullchain.pem && [ -f nginx/handyseller-dev-ssl.conf ]; then
+              sudo cp nginx/handyseller-dev-ssl.conf /etc/nginx/sites-available/handyseller-dev
+              sudo ln -sf /etc/nginx/sites-available/handyseller-dev /etc/nginx/sites-enabled/handyseller-dev
+              sudo nginx -t
+              sudo systemctl reload nginx
+            else
+              echo "WARN: dev.handyseller.ru SSL cert or nginx config missing; public dev smoke may fail"
+            fi
           SSH
 
       - name: Staging fast smoke
