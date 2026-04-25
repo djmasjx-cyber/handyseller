@@ -28,10 +28,14 @@ function id(prefix: string): string {
 }
 
 function buildPool(conn: string): Pool {
-  const sslMode = new URL(conn).searchParams.get('sslmode')?.toLowerCase();
+  const url = new URL(conn);
+  const sslMode = url.searchParams.get('sslmode')?.toLowerCase();
   const usesManagedDbSsl = sslMode === 'require' || sslMode === 'prefer' || sslMode === 'verify-ca';
+  if (usesManagedDbSsl) {
+    url.searchParams.delete('sslmode');
+  }
   return new Pool({
-    connectionString: conn,
+    connectionString: usesManagedDbSsl ? url.toString() : conn,
     ssl: usesManagedDbSsl ? { rejectUnauthorized: false } : undefined,
   });
 }
