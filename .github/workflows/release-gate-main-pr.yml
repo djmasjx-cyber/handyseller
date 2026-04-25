@@ -25,6 +25,7 @@ jobs:
       - run: npx prisma generate --schema=./apps/api/prisma/schema.prisma
       - run: npm run build --workspace=api
       - run: npm run build --workspace=tms-api
+      - run: npm run quality:wms
       - run: npm run build --workspace=web
 
   external-carrier-gate:

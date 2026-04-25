@@ -6,13 +6,13 @@
 
 - `CI Checks` (`.github/workflows/ci.yml`)
   - запускается на PR в `dev`/`main` и push в `dev`.
-  - fast-gate: lint + build (`api`, `tms-api`, `web`) + `tms-fast-smoke` (OAuth + protected read endpoints без вызова перевозчиков).
+  - fast-gate: lint + build (`api`, `tms-api`, `wms-api`, `web`) + `tms-fast-smoke` (OAuth + protected read endpoints без вызова перевозчиков).
   - context-aware quality matrix:
     - `core-quality` (api lint/build/unit)
     - `tms-quality` (tms-api build)
     - `web-quality` (web lint/build)
-    - `contracts-quality` (shared SDK/domain build)
-    - `wms-quality` (зарезервированный gate для будущего WMS)
+    - `contracts-quality` (shared SDK/domain build для TMS и WMS)
+    - `wms-quality` (`packages/wms-*` + `apps/wms-api` build)
 - `Deploy Staging` (`.github/workflows/deploy-staging.yml`)
   - автозапуск по push в `dev`, плюс ручной запуск.
   - deploy в environment `staging` на `https://dev.handyseller.ru`.
@@ -66,6 +66,7 @@
   - `/opt/handyseller/.env.production` для prod
 - `docker-compose.ci.yml`
 - nginx (для prod) и корректный DNS/SSL
+- `wms-api` деплоится отдельным контейнером. Для отдельной WMS базы задайте `WMS_DATABASE_URL`; если переменная не задана, MVP использует текущий `DATABASE_URL`.
 
 ## Branch protection (обязательно)
 

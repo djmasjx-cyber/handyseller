@@ -25,6 +25,7 @@ jobs:
       image_api: ${{ steps.image_refs.outputs.image_api }}
       image_web: ${{ steps.image_refs.outputs.image_web }}
       image_tms_api: ${{ steps.image_refs.outputs.image_tms_api }}
+      image_wms_api: ${{ steps.image_refs.outputs.image_wms_api }}
     steps:
       - uses: actions/checkout@v4
 
@@ -72,6 +73,24 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max,ignore-error=true
 
+      - id: meta-wms-api
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/handyseller-wms-api
+          tags: |
+            type=raw,value=${{ env.IMAGE_TAG }}
+            type=raw,value=staging-latest,enable=true
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./apps/wms-api/Dockerfile
+          push: true
+          tags: ${{ steps.meta-wms-api.outputs.tags }}
+          labels: ${{ steps.meta-wms-api.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max,ignore-error=true
+
       - id: meta-web
         uses: docker/metadata-action@v5
         with:
@@ -96,6 +115,7 @@ jobs:
           echo "image_api=${{ env.REGISTRY }}/${{ github.repository_owner }}/handyseller-api:${{ env.IMAGE_TAG }}" >> "$GITHUB_OUTPUT"
           echo "image_web=${{ env.REGISTRY }}/${{ github.repository_owner }}/handyseller-web:${{ env.IMAGE_TAG }}" >> "$GITHUB_OUTPUT"
           echo "image_tms_api=${{ env.REGISTRY }}/${{ github.repository_owner }}/handyseller-tms-api:${{ env.IMAGE_TAG }}" >> "$GITHUB_OUTPUT"
+          echo "image_wms_api=${{ env.REGISTRY }}/${{ github.repository_owner }}/handyseller-wms-api:${{ env.IMAGE_TAG }}" >> "$GITHUB_OUTPUT"
 
   deploy-staging:
     needs: build-images
@@ -136,12 +156,13 @@ jobs:
           IMAGE_API: ${{ needs.build-images.outputs.image_api }}
           IMAGE_WEB: ${{ needs.build-images.outputs.image_web }}
           IMAGE_TMS_API: ${{ needs.build-images.outputs.image_tms_api }}
+          IMAGE_WMS_API: ${{ needs.build-images.outputs.image_wms_api }}
         run: |
           set -euo pipefail
           HOST="${{ secrets.VM_HOST }}"
           USER="${{ secrets.VM_USER || 'ubuntu' }}"
           ssh -i deploy_key.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "${USER}@${HOST}" \
-            "IMAGE_API='${IMAGE_API}' IMAGE_WEB='${IMAGE_WEB}' IMAGE_TMS_API='${IMAGE_TMS_API}' CR_PAT='${CR_PAT}' bash -seu" <<'SSH'
+            "IMAGE_API='${IMAGE_API}' IMAGE_WEB='${IMAGE_WEB}' IMAGE_TMS_API='${IMAGE_TMS_API}' IMAGE_WMS_API='${IMAGE_WMS_API}' CR_PAT='${CR_PAT}' bash -seu" <<'SSH'
             set -euo pipefail
             CR_PAT="${CR_PAT:-}"
             APP_DIR="/opt/handyseller"
@@ -161,13 +182,14 @@ jobs:
             if [ -n "${CR_PAT}" ]; then
               echo "${CR_PAT}" | docker login ghcr.io -u ${{ github.repository_owner }} --password-stdin
             fi
-            grep -v '^IMAGE_API=' "${ENV_FILE}" | grep -v '^IMAGE_WEB=' | grep -v '^IMAGE_TMS_API=' | grep -v '^APP_ENV_FILE=' > "${ENV_FILE}.tmp"
+            grep -v '^IMAGE_API=' "${ENV_FILE}" | grep -v '^IMAGE_WEB=' | grep -v '^IMAGE_TMS_API=' | grep -v '^IMAGE_WMS_API=' | grep -v '^APP_ENV_FILE=' > "${ENV_FILE}.tmp"
             echo "IMAGE_API=${IMAGE_API}" >> "${ENV_FILE}.tmp"
             echo "IMAGE_WEB=${IMAGE_WEB}" >> "${ENV_FILE}.tmp"
             echo "IMAGE_TMS_API=${IMAGE_TMS_API}" >> "${ENV_FILE}.tmp"
+            echo "IMAGE_WMS_API=${IMAGE_WMS_API}" >> "${ENV_FILE}.tmp"
             echo "APP_ENV_FILE=${ENV_FILE}" >> "${ENV_FILE}.tmp"
             mv "${ENV_FILE}.tmp" "${ENV_FILE}"
-            export IMAGE_API IMAGE_WEB IMAGE_TMS_API APP_ENV_FILE="${ENV_FILE}"
+            export IMAGE_API IMAGE_WEB IMAGE_TMS_API IMAGE_WMS_API APP_ENV_FILE="${ENV_FILE}"
             DC="docker compose"
             command -v docker-compose >/dev/null 2>&1 && DC="docker-compose"
             docker network create handyseller_handyseller 2>/dev/null || true
@@ -222,9 +244,10 @@ jobs:
             }
             pull_with_fallback api handyseller-api || exit 1
             pull_with_fallback tms-api handyseller-tms-api || exit 1
+            pull_with_fallback wms-api handyseller-wms-api || exit 1
             pull_with_fallback web handyseller-web || exit 1
             $DC -f docker-compose.ci.yml --env-file "${ENV_FILE}" up -d --no-deps redis
-            $DC -f docker-compose.ci.yml --env-file "${ENV_FILE}" up -d --no-deps api tms-api web
+            $DC -f docker-compose.ci.yml --env-file "${ENV_FILE}" up -d --no-deps api tms-api wms-api web
             for i in $(seq 1 30); do
               curl -sf --connect-timeout 3 http://127.0.0.1:4000/health >/dev/null && break
               [ "$i" -eq 30 ] && { echo "API health check timeout"; exit 1; }
@@ -233,6 +256,11 @@ jobs:
             for i in $(seq 1 30); do
               curl -sf --connect-timeout 3 http://127.0.0.1:4100/health >/dev/null && break
               [ "$i" -eq 30 ] && { echo "TMS API health check timeout"; exit 1; }
+              sleep 3
+            done
+            for i in $(seq 1 30); do
+              curl -sf --connect-timeout 3 http://127.0.0.1:4200/health >/dev/null && break
+              [ "$i" -eq 30 ] && { echo "WMS API health check timeout"; exit 1; }
               sleep 3
             done
             if sudo test -f /etc/letsencrypt/live/dev.handyseller.ru/fullchain.pem && [ -f nginx/handyseller-dev-ssl.conf ]; then
