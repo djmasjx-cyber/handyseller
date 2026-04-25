@@ -27,6 +27,15 @@ function id(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function buildPool(conn: string): Pool {
+  const sslMode = new URL(conn).searchParams.get('sslmode')?.toLowerCase();
+  const usesManagedDbSsl = sslMode === 'require' || sslMode === 'prefer' || sslMode === 'verify-ca';
+  return new Pool({
+    connectionString: conn,
+    ssl: usesManagedDbSsl ? { rejectUnauthorized: false } : undefined,
+  });
+}
+
 @Injectable()
 export class WmsStoreService implements OnModuleInit {
   private readonly logger = new Logger(WmsStoreService.name);
@@ -41,7 +50,7 @@ export class WmsStoreService implements OnModuleInit {
 
   constructor() {
     const conn = process.env.WMS_DATABASE_URL?.trim() || process.env.DATABASE_URL?.trim() || '';
-    this.pool = conn ? new Pool({ connectionString: conn }) : null;
+    this.pool = conn ? buildPool(conn) : null;
   }
 
   async onModuleInit(): Promise<void> {
