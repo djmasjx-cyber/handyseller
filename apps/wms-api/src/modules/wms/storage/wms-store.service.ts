@@ -259,9 +259,20 @@ export class WmsStoreService implements OnModuleInit {
             WHEN (SELECT is_called FROM wms_unit_numeric_barcode_seq)
             THEN COALESCE((SELECT last_value FROM wms_unit_numeric_barcode_seq), 0)
             ELSE 0
-          END
+          END,
+          1
         ),
-        true
+        (
+          COALESCE(
+            (
+              SELECT MAX((payload->>'barcode')::bigint)
+              FROM wms_inventory_unit
+              WHERE (payload->>'barcode') ~ '^[0-9]{12}$'
+            ),
+            0
+          ) > 0
+          OR (SELECT is_called FROM wms_unit_numeric_barcode_seq)
+        )
       );
     `);
   }
