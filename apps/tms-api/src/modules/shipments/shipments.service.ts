@@ -1581,8 +1581,10 @@ export class ShipmentsService implements OnModuleInit {
       {
         type: 'REQUEST_CREATED',
         occurredAt: request.createdAt,
-        title: 'Заявка создана',
-        details: request.integration?.externalOrderId ?? request.snapshot.coreOrderNumber,
+        title: `Заказ получен от ${request.snapshot.marketplace || request.snapshot.sourceSystem}`,
+        details: request.integration?.externalOrderId
+          ? `Заказ клиента: ${request.integration.externalOrderId}`
+          : request.snapshot.coreOrderNumber,
       },
     ];
     if (request.status === 'QUOTED' || request.status === 'BOOKED') {
@@ -1590,15 +1592,15 @@ export class ShipmentsService implements OnModuleInit {
         type: 'QUOTES_CALCULATED',
         occurredAt: request.updatedAt,
         title: 'Тарифы рассчитаны',
-        details: request.selectedQuoteId ? `Выбран quoteId: ${request.selectedQuoteId}` : null,
+        details: request.selectedQuoteId ? `Выбран тариф: ${request.selectedQuoteId}` : null,
       });
     }
     for (const shipment of shipments) {
       events.push({
         type: shipment.status === 'SUPERSEDED' ? 'SHIPMENT_REPLACED' : 'BOOKING_CONFIRMED',
         occurredAt: shipment.createdAt,
-        title: shipment.status === 'SUPERSEDED' ? 'Отгрузка заменена' : 'Бронирование подтверждено',
-        details: `${shipment.carrierName}: ${shipment.trackingNumber}`,
+        title: shipment.status === 'SUPERSEDED' ? 'Отгрузка заменена' : 'Заявка в ТК создана',
+        details: `${shipment.carrierName}: ${shipment.carrierOrderReference || shipment.carrierOrderNumber || shipment.trackingNumber}`,
       });
     }
     for (const event of tracking) {
@@ -1617,7 +1619,7 @@ export class ShipmentsService implements OnModuleInit {
         details: doc.type,
       });
     }
-    return events.sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
+    return events.sort((a, b) => a.occurredAt.localeCompare(b.occurredAt));
   }
 
   private getRequestOrThrow(userId: string, requestId: string): ShipmentRequestRecord {

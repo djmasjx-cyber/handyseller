@@ -112,7 +112,39 @@ export default function TmsRegistryOrderPage() {
   const [activeTab, setActiveTab] = useState<TabId>("cart")
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [documentError, setDocumentError] = useState<string | null>(null)
   const token = getToken()
+
+  const openDocument = async (shipmentId: string, documentId: string, print: boolean) => {
+    if (!token) return
+    setDocumentError(null)
+    try {
+      const res = await authFetch(`/api/tms/shipments/${shipmentId}/documents/${documentId}/file`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!res.ok) throw new Error("Не удалось получить документ")
+      const blob = await res.blob()
+      if (!blob || blob.size === 0) throw new Error("Документ пустой, попробуйте обновить статус ТК")
+      const objectUrl = URL.createObjectURL(blob)
+      const w = window.open(objectUrl, "_blank", "noopener,noreferrer")
+      if (!w) {
+        URL.revokeObjectURL(objectUrl)
+        return
+      }
+      const revoke = () => URL.revokeObjectURL(objectUrl)
+      w.addEventListener("beforeunload", revoke, { once: true })
+      if (print) {
+        w.onload = () => {
+          w.print()
+          setTimeout(revoke, 120000)
+        }
+      } else {
+        setTimeout(revoke, 300000)
+      }
+    } catch (e) {
+      setDocumentError(e instanceof Error ? e.message : "Не удалось получить документ")
+    }
+  }
 
   useEffect(() => {
     if (!token || !requestId) return
@@ -209,8 +241,9 @@ export default function TmsRegistryOrderPage() {
             ))}
           </div>
 
+          {documentError ? <p className="text-sm text-destructive">{documentError}</p> : null}
           {activeTab === "cart" ? <CartTab detail={detail} /> : null}
-          {activeTab === "shipments" ? <ShipmentsTab detail={detail} /> : null}
+          {activeTab === "shipments" ? <ShipmentsTab detail={detail} onOpenDocument={openDocument} /> : null}
           {activeTab === "history" ? <HistoryTab detail={detail} /> : null}
         </CardContent>
       </Card>
@@ -246,7 +279,13 @@ function CartTab({ detail }: { detail: RegistryDetail }) {
   )
 }
 
-function ShipmentsTab({ detail }: { detail: RegistryDetail }) {
+function ShipmentsTab({
+  detail,
+  onOpenDocument,
+}: {
+  detail: RegistryDetail
+  onOpenDocument: (shipmentId: string, documentId: string, print: boolean) => void
+}) {
   const shipments = detail.shipments ?? []
   const documents = detail.documents ?? []
   return (
@@ -275,8 +314,16 @@ function ShipmentsTab({ detail }: { detail: RegistryDetail }) {
         {documents.length ? (
           <div className="space-y-2">
             {documents.map((doc) => (
-              <div key={doc.id} className="rounded-md border px-3 py-2 text-sm">
-                {doc.title} · {doc.type} · {formatDateTime(doc.createdAt)}
+              <div key={doc.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm">
+                <span>{doc.title} · {doc.type} · {formatDateTime(doc.createdAt)}</span>
+                <span className="flex gap-2">
+                  <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => onOpenDocument(doc.shipmentId, doc.id, false)}>
+                    Открыть
+                  </Button>
+                  <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => onOpenDocument(doc.shipmentId, doc.id, true)}>
+                    Печать
+                  </Button>
+                </span>
               </div>
             ))}
           </div>
