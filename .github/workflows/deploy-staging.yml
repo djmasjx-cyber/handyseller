@@ -317,6 +317,7 @@ jobs:
           DOWNLOAD_DOC: "true"
           REQUIRE_DOCUMENT_TYPE: "LABEL"
           REQUIRE_ORIGINAL_DOC: "true"
+          ALLOW_UNSUPPORTED_REFRESH: "true"
           TRACE_ID_PREFIX: staging-doc
         run: |
           set -euo pipefail

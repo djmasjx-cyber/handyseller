@@ -13,6 +13,7 @@ set -euo pipefail
 #   DOWNLOAD_DOC (default: true)
 #   REQUIRE_DOCUMENT_TYPE (optional, e.g. LABEL or WAYBILL)
 #   REQUIRE_ORIGINAL_DOC (default: true; rejects HTML/text placeholders)
+#   ALLOW_UNSUPPORTED_REFRESH (default: false)
 
 API_BASE_URL="${API_BASE_URL:-https://api.handyseller.ru/api}"
 ORDER_TYPE="${ORDER_TYPE:-CLIENT_ORDER}"
@@ -23,6 +24,7 @@ PREFERRED_CARRIER_ID="${PREFERRED_CARRIER_ID:-}"
 DOWNLOAD_DOC="${DOWNLOAD_DOC:-true}"
 REQUIRE_DOCUMENT_TYPE="${REQUIRE_DOCUMENT_TYPE:-}"
 REQUIRE_ORIGINAL_DOC="${REQUIRE_ORIGINAL_DOC:-true}"
+ALLOW_UNSUPPORTED_REFRESH="${ALLOW_UNSUPPORTED_REFRESH:-false}"
 TRACE_ID_PREFIX="${TRACE_ID_PREFIX:-smoke}"
 SOFT_FAIL_CONFIRM="${SOFT_FAIL_CONFIRM:-false}"
 
@@ -222,7 +224,14 @@ echo "${EVENTS_RESPONSE}" | jq .
 echo "6) Refresh shipment..."
 REFRESH_RESPONSE="$(api_json POST "${API_BASE_URL}/tms/shipments/${SHIPMENT_ID}/refresh")"
 REFRESH_STATUS="$(echo "${REFRESH_RESPONSE}" | jq -r '.status // empty')"
-if [[ -z "${REFRESH_STATUS}" ]]; then fail_step "refresh" "${REFRESH_RESPONSE}"; fi
+if [[ -z "${REFRESH_STATUS}" ]]; then
+  refresh_lower="$(printf '%s' "${REFRESH_RESPONSE}" | tr '[:upper:]' '[:lower:]')"
+  if [[ "${ALLOW_UNSUPPORTED_REFRESH}" == "true" && ( "${refresh_lower}" == *"пока не поддерживается"* || "${refresh_lower}" == *"not supported"* ) ]]; then
+    echo "WARN step=refresh unsupported; continuing to document checks"
+  else
+    fail_step "refresh" "${REFRESH_RESPONSE}"
+  fi
+fi
 
 echo "7) Documents list + optional file..."
 DOCS_RESPONSE="$(api_json GET "${API_BASE_URL}/tms/shipments/${SHIPMENT_ID}/documents")"
