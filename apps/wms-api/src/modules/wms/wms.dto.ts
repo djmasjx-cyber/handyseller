@@ -131,6 +131,14 @@ export class ReceiptLineDto {
   @IsNumber()
   @Min(0)
   unitPrice?: number | null;
+
+  @IsOptional()
+  @IsString()
+  sku?: string | null;
+
+  @IsOptional()
+  @IsString()
+  lineTitle?: string | null;
 }
 
 export class CreateReceiptDto {
@@ -253,4 +261,49 @@ export class MoveInventoryDto {
   @IsOptional()
   @IsBoolean()
   archiveTemporaryContainer?: boolean;
+}
+
+export class NestContainersDto {
+  @IsString()
+  @IsNotEmpty()
+  parentBarcode!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  childBarcode!: string;
+}
+
+export class AssignPutawayTaskDto {
+  @IsString()
+  @IsNotEmpty()
+  assigneeUserId!: string;
+}
+
+export class UnnestContainerDto {
+  @IsString()
+  @IsNotEmpty()
+  childBarcode!: string;
+}
+
+export class CreatePutawayTaskDto {
+  @IsString()
+  @IsNotEmpty()
+  warehouseId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  targetLocationId!: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  unitBarcodes?: string[];
+
+  @IsOptional()
+  @IsString()
+  containerBarcode?: string | null;
+
+  @IsOptional()
+  @IsString()
+  note?: string | null;
 }

@@ -21,9 +21,13 @@
 /build
 apps/api/dist
 apps/tms-api/dist
+apps/wms-api/dist
 packages/tms-sdk/dist
 packages/tms-domain/dist
+packages/wms-sdk/dist
+packages/wms-domain/dist
 apps/tms-api/node_modules
+apps/wms-api/node_modules
 
 # misc
 .DS_Store

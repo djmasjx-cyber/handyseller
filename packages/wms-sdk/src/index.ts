@@ -39,6 +39,7 @@ export type WmsInventoryEventType =
   | 'LOCATION_CREATED'
   | 'ITEM_CREATED'
   | 'RECEIPT_CREATED'
+  | 'RECEIPT_COMPLETED'
   | 'BARCODE_RESERVED'
   | 'UNIT_RECEIVED'
   | 'LPN_CREATED'
@@ -50,7 +51,10 @@ export type WmsInventoryEventType =
   | 'PACKED'
   | 'COUNTED'
   | 'ADJUSTED'
-  | 'SHIPPED';
+  | 'SHIPPED'
+  | 'TASK_CREATED'
+  | 'TASK_STATUS_CHANGED'
+  | 'TASK_COMPLETED';
 
 export interface WmsWarehouseRecord {
   id: string;
@@ -106,6 +110,10 @@ export interface WmsReceiptLineInput {
   unitLabel?: string | null;
   /** Цена строки накладной (руб.), опционально — для инвойса/прихода. */
   unitPrice?: number | null;
+  /** Снимок SKU/артикула на момент документа (для UI и аудита). */
+  sku?: string | null;
+  /** Снимок названия строки на момент документа. */
+  lineTitle?: string | null;
 }
 
 export interface WmsReceiptRecord {
@@ -132,6 +140,8 @@ export interface WmsInventoryUnitRecord {
   locationId: string | null;
   containerId: string | null;
   orderWorkId: string | null;
+  /** Цена единицы из строки прихода (руб.), фиксируется при резерве штрихкода. */
+  declaredUnitPrice?: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -147,6 +157,29 @@ export interface WmsContainerRecord {
   parentContainerId: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** Складская задача (MVP: в первую очередь PUTAWAY). */
+export interface WmsTaskRecord {
+  id: string;
+  userId: string;
+  warehouseId: string | null;
+  type: WmsTaskType;
+  status: WmsTaskStatus;
+  assigneeUserId: string | null;
+  priority: number;
+  payload: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Полезная нагрузка задачи размещения. */
+export interface PutawayTaskPayload {
+  kind: 'PUTAWAY';
+  targetLocationId: string;
+  unitBarcodes?: string[];
+  containerBarcode?: string | null;
+  note?: string | null;
 }
 
 export interface WmsInventoryEventRecord {
@@ -213,4 +246,12 @@ export interface MoveInventoryInput {
   containerBarcode?: string;
   toLocationId: string;
   archiveTemporaryContainer?: boolean;
+}
+
+export interface CreatePutawayTaskInput {
+  warehouseId: string;
+  targetLocationId: string;
+  unitBarcodes?: string[];
+  containerBarcode?: string | null;
+  note?: string | null;
 }

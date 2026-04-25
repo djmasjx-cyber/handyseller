@@ -1,5 +1,15 @@
 import type { WmsLocationRecord } from '@handyseller/wms-sdk';
 
+export {
+  canExecutePutawayTaskStatus,
+  nextStatusOnAssignFromOpen,
+  nextStatusOnStartFromOpenOrAssigned,
+  assertStartPutawayFrom,
+  assertAssignFromOpen,
+  taskTypeSupportsAssignment,
+  PUTAWAY_LIVELY_STATUSES,
+} from './task-workflow';
+
 const UNIT_PREFIX = 'HU';
 const LPN_PREFIX = 'HL';
 
@@ -52,4 +62,41 @@ export function rankPutawayLocations(locations: WmsLocationRecord[]): WmsLocatio
   return [...locations]
     .filter((location) => location.status === 'ACTIVE')
     .sort((a, b) => a.path.localeCompare(b.path));
+}
+
+/** Ребро «родительская тара содержит дочернюю LPN» в `wms_container_content`. */
+export type WmsContainerNestingEdge = {
+  parentContainerId: string;
+  childContainerId: string;
+};
+
+/**
+ * Запрет циклов во вложенности LPN: если `child` уже (транзитивно) содержит `parent`,
+ * добавление `parent` → `child` замкнёт граф.
+ */
+export function assertNoContainerNestingCycle(
+  parentContainerId: string,
+  childContainerId: string,
+  existingEdges: WmsContainerNestingEdge[],
+): void {
+  if (parentContainerId === childContainerId) {
+    throw new Error('Container cannot be nested into itself');
+  }
+  const parentsOf = new Map<string, string[]>();
+  for (const e of existingEdges) {
+    const list = parentsOf.get(e.childContainerId) ?? [];
+    list.push(e.parentContainerId);
+    parentsOf.set(e.childContainerId, list);
+  }
+  const queue = [...(parentsOf.get(parentContainerId) ?? [])];
+  const seen = new Set<string>();
+  while (queue.length) {
+    const x = queue.shift()!;
+    if (x === childContainerId) {
+      throw new Error('Container nesting would create a cycle');
+    }
+    if (seen.has(x)) continue;
+    seen.add(x);
+    queue.push(...(parentsOf.get(x) ?? []));
+  }
 }
