@@ -148,12 +148,13 @@ jobs:
             if [ -n "${CR_PAT}" ]; then
               echo "${CR_PAT}" | docker login ghcr.io -u ${{ github.repository_owner }} --password-stdin
             fi
-            grep -v '^IMAGE_API=' "${ENV_FILE}" | grep -v '^IMAGE_WEB=' | grep -v '^IMAGE_TMS_API=' > "${ENV_FILE}.tmp"
+            grep -v '^IMAGE_API=' "${ENV_FILE}" | grep -v '^IMAGE_WEB=' | grep -v '^IMAGE_TMS_API=' | grep -v '^APP_ENV_FILE=' > "${ENV_FILE}.tmp"
             echo "IMAGE_API=${IMAGE_API}" >> "${ENV_FILE}.tmp"
             echo "IMAGE_WEB=${IMAGE_WEB}" >> "${ENV_FILE}.tmp"
             echo "IMAGE_TMS_API=${IMAGE_TMS_API}" >> "${ENV_FILE}.tmp"
+            echo "APP_ENV_FILE=${ENV_FILE}" >> "${ENV_FILE}.tmp"
             mv "${ENV_FILE}.tmp" "${ENV_FILE}"
-            export IMAGE_API IMAGE_WEB IMAGE_TMS_API
+            export IMAGE_API IMAGE_WEB IMAGE_TMS_API APP_ENV_FILE="${ENV_FILE}"
             DC="docker compose"
             command -v docker-compose >/dev/null 2>&1 && DC="docker-compose"
             docker network create handyseller_handyseller 2>/dev/null || true
@@ -227,7 +228,47 @@ jobs:
         env:
           CLIENT_ID: ${{ secrets.TMS_CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.TMS_CLIENT_SECRET }}
-          API_BASE_URL: ${{ vars.API_BASE_URL || 'https://api.handyseller.ru/api' }}
+          API_BASE_URL: ${{ vars.API_BASE_URL || 'https://dev.handyseller.ru/api' }}
         run: |
           set -euo pipefail
           bash scripts/tms-fast-smoke.sh
+
+      - name: Staging registry smoke
+        env:
+          CLIENT_ID: ${{ secrets.TMS_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.TMS_CLIENT_SECRET }}
+          API_BASE_URL: ${{ vars.API_BASE_URL || 'https://dev.handyseller.ru/api' }}
+        run: |
+          set -euo pipefail
+          TOKEN_RESPONSE="$(curl -sS -X POST "${API_BASE_URL}/tms/oauth/token" \
+            -H "Content-Type: application/json" \
+            -d "{\"grant_type\":\"client_credentials\",\"client_id\":\"${CLIENT_ID}\",\"client_secret\":\"${CLIENT_SECRET}\"}")"
+          TMS_ACCESS_TOKEN="$(echo "${TOKEN_RESPONSE}" | jq -r '.access_token // empty')"
+          if [[ -z "${TMS_ACCESS_TOKEN}" ]]; then
+            echo "::error::Failed to mint staging token for registry smoke"
+            echo "${TOKEN_RESPONSE}"
+            exit 1
+          fi
+          TMS_BASE_URL="${API_BASE_URL}/tms" TMS_ACCESS_TOKEN="${TMS_ACCESS_TOKEN}" bash scripts/tms-registry-smoke.sh
+
+      - name: Staging demo checkout smoke
+        env:
+          WEB_BASE_URL: ${{ vars.WEB_BASE_URL || 'https://dev.handyseller.ru' }}
+          REAL_CONFIRM: "false"
+        run: |
+          set -euo pipefail
+          bash scripts/tms-demo-checkout-smoke.sh
+
+      - name: Staging carrier document smoke
+        env:
+          CLIENT_ID: ${{ secrets.TMS_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.TMS_CLIENT_SECRET }}
+          API_BASE_URL: ${{ vars.API_BASE_URL || 'https://dev.handyseller.ru/api' }}
+          PREFERRED_CARRIER_ID: ${{ vars.STAGING_DOCUMENT_CARRIER_ID || 'dellin' }}
+          DOWNLOAD_DOC: "true"
+          REQUIRE_DOCUMENT_TYPE: "LABEL"
+          REQUIRE_ORIGINAL_DOC: "true"
+          TRACE_ID_PREFIX: staging-doc
+        run: |
+          set -euo pipefail
+          bash scripts/tms-partner-e2e.sh

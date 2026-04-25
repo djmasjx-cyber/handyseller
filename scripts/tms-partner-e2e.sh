@@ -11,6 +11,8 @@ set -euo pipefail
 #   CALLBACK_URL (for webhook subscription creation)
 #   PREFERRED_CARRIER_ID (e.g. cdek, major-express, dellin)
 #   DOWNLOAD_DOC (default: true)
+#   REQUIRE_DOCUMENT_TYPE (optional, e.g. LABEL or WAYBILL)
+#   REQUIRE_ORIGINAL_DOC (default: true; rejects HTML/text placeholders)
 
 API_BASE_URL="${API_BASE_URL:-https://api.handyseller.ru/api}"
 ORDER_TYPE="${ORDER_TYPE:-CLIENT_ORDER}"
@@ -19,6 +21,8 @@ EXTERNAL_ORDER_ID="${EXTERNAL_ORDER_ID:-1C-ORDER-$(date +%s)}"
 CALLBACK_URL="${CALLBACK_URL:-}"
 PREFERRED_CARRIER_ID="${PREFERRED_CARRIER_ID:-}"
 DOWNLOAD_DOC="${DOWNLOAD_DOC:-true}"
+REQUIRE_DOCUMENT_TYPE="${REQUIRE_DOCUMENT_TYPE:-}"
+REQUIRE_ORIGINAL_DOC="${REQUIRE_ORIGINAL_DOC:-true}"
 TRACE_ID_PREFIX="${TRACE_ID_PREFIX:-smoke}"
 SOFT_FAIL_CONFIRM="${SOFT_FAIL_CONFIRM:-false}"
 
@@ -222,20 +226,35 @@ if [[ -z "${REFRESH_STATUS}" ]]; then fail_step "refresh" "${REFRESH_RESPONSE}";
 
 echo "7) Documents list + optional file..."
 DOCS_RESPONSE="$(api_json GET "${API_BASE_URL}/tms/shipments/${SHIPMENT_ID}/documents")"
-DOC_ID="$(echo "${DOCS_RESPONSE}" | jq -r '.[0].id // empty')"
+if [[ -n "${REQUIRE_DOCUMENT_TYPE}" ]]; then
+  DOC_ID="$(echo "${DOCS_RESPONSE}" | jq -r --arg type "${REQUIRE_DOCUMENT_TYPE}" '.[] | select(.type==$type) | .id' | head -n 1)"
+else
+  DOC_ID="$(echo "${DOCS_RESPONSE}" | jq -r '.[0].id // empty')"
+fi
 if [[ -z "${DOC_ID}" ]]; then
   fail_step "documents_list" "${DOCS_RESPONSE}"
 fi
 if [[ "${DOWNLOAD_DOC}" == "true" ]]; then
   DOC_REQ_ID="$(trace_id docfile)"
+  DOC_HEADERS="/tmp/tms-smoke-doc.headers"
   DOC_STATUS="$(
-    curl -sS -o /tmp/tms-smoke-doc.bin -w "%{http_code}" \
+    curl -sS -D "${DOC_HEADERS}" -o /tmp/tms-smoke-doc.bin -w "%{http_code}" \
       -X GET "${API_BASE_URL}/tms/shipments/${SHIPMENT_ID}/documents/${DOC_ID}/file" \
       -H "Authorization: Bearer ${ACCESS_TOKEN}" \
       -H "X-Request-Id: ${DOC_REQ_ID}"
   )"
   if [[ "${DOC_STATUS}" != "200" ]]; then
     fail_step "document_file" "HTTP ${DOC_STATUS} for documentId=${DOC_ID}"
+  fi
+  if [[ ! -s /tmp/tms-smoke-doc.bin ]]; then
+    fail_step "document_file" "empty document for documentId=${DOC_ID}"
+  fi
+  if [[ "${REQUIRE_ORIGINAL_DOC}" == "true" ]]; then
+    DOC_CONTENT_TYPE="$(tr -d '\r' < "${DOC_HEADERS}" | awk -F': ' 'tolower($1)=="content-type"{print tolower($2); exit}')"
+    DOC_HEAD="$(dd if=/tmp/tms-smoke-doc.bin bs=64 count=1 2>/dev/null | tr -d '\000' | tr '[:upper:]' '[:lower:]')"
+    if [[ "${DOC_CONTENT_TYPE}" == text/html* || "${DOC_CONTENT_TYPE}" == text/plain* || "${DOC_HEAD}" == *"<html"* || "${DOC_HEAD}" == *"<!doctype"* ]]; then
+      fail_step "document_file" "non-original document response contentType=${DOC_CONTENT_TYPE:-unknown} documentId=${DOC_ID}"
+    fi
   fi
 fi
 

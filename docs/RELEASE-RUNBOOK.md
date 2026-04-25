@@ -7,22 +7,58 @@
 3. Wait for required CI checks:
    - `build-lint-typecheck`
    - `quick-partner-smoke`
-4. Merge -> auto `Deploy Staging`.
-5. Validate staging:
+4. Merge -> auto `Deploy Staging` to `https://dev.handyseller.ru`.
+5. Validate dev/staging before any production promotion:
    - core health endpoints
    - partner smoke flow
-   - Dellin critical path (estimate/select/confirm/doc)
+   - registry list/detail smoke
+   - demo checkout smoke without real booking
+   - carrier document smoke with original `LABEL` download
+   - manual UI check for the changed scenario
 6. PR `dev -> main`.
-7. Merge -> `Deploy Production`.
-8. Verify post-deploy smoke and SLO gate.
+7. Wait for `Release Gate (PR -> main)`: build/lint and carrier e2e with original document downloads.
+8. Merge -> `Deploy Production`.
+9. Verify post-deploy smoke and SLO gate.
 
 ## Production release checklist
 
 - Required checks are green in `dev`.
-- Staging deploy is green.
+- Dev/staging deploy is green on `https://dev.handyseller.ru`.
+- The changed UI flow has been checked on dev before merging to `main`.
+- TMS carrier documents open from both shipment pages and registry cards as original carrier files, not generated placeholders.
 - Environment secrets are актуальны.
 - Rollback target (previous image tags) available in `.env.production`.
 - Known incidents reviewed.
+
+## Dev/staging validation checklist
+
+Use this checklist after every `dev` deploy and before opening/merging `dev -> main`:
+
+1. Open `https://dev.handyseller.ru/dashboard/tms/requests`.
+2. Verify the page loads without 500/502 and the relevant filters work.
+3. Open `https://dev.handyseller.ru/dashboard/tms/registry`.
+4. Open a real order card and check:
+   - history is visible and sorted newest first when required by product behavior
+   - shipments and documents are present
+   - waybill opens from the backend document endpoint
+   - label opens as the original carrier label from the carrier document endpoint
+5. If the release touches carriers, run or wait for carrier e2e with `DOWNLOAD_DOC=true`.
+6. If any dev check fails, fix in `dev`; do not promote to `main`.
+
+## Environment contract
+
+- `staging` GitHub environment must use `API_BASE_URL=https://dev.handyseller.ru/api`.
+- `production` GitHub environment must use `API_BASE_URL=https://api.handyseller.ru/api`.
+- `Deploy Staging` uses `/opt/handyseller/.env.staging`.
+- `Deploy Production` uses `/opt/handyseller/.env.production`.
+- `docker-compose.ci.yml` reads the active env file from `APP_ENV_FILE`; never rely on staging containers reading production env by accident.
+
+## Required gates before production
+
+- PR to `dev`: fast CI and quick partner smoke.
+- Push to `dev`: staging deploy plus registry, demo checkout, and carrier document smoke.
+- PR `dev -> main`: release gate with all critical carriers and `DOWNLOAD_DOC=true`.
+- Push to `main`: production deploy, post-deploy partner smoke with document download, SLO check, and rollback guard.
 
 ## Incident triage
 
