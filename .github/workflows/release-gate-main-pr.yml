@@ -25,6 +25,7 @@ jobs:
       - run: npx prisma generate --schema=./apps/api/prisma/schema.prisma
       - run: npm run build --workspace=api
       - run: npm run build --workspace=tms-api
+      - run: npm run quality:wms
       - run: npm run build --workspace=web
 
   external-carrier-gate:
@@ -41,9 +42,12 @@ jobs:
     env:
       CLIENT_ID: ${{ secrets.TMS_CLIENT_ID }}
       CLIENT_SECRET: ${{ secrets.TMS_CLIENT_SECRET }}
-      API_BASE_URL: ${{ vars.API_BASE_URL || 'https://api.handyseller.ru/api' }}
+      API_BASE_URL: ${{ vars.API_BASE_URL || 'https://dev.handyseller.ru/api' }}
       PREFERRED_CARRIER_ID: ${{ matrix.carrier }}
-      DOWNLOAD_DOC: "false"
+      DOWNLOAD_DOC: "true"
+      REQUIRE_DOCUMENT_TYPE: "LABEL"
+      REQUIRE_ORIGINAL_DOC: "true"
+      ALLOW_UNSUPPORTED_REFRESH: "true"
       TRACE_ID_PREFIX: pr-main-${{ matrix.carrier }}
     steps:
       - uses: actions/checkout@v4

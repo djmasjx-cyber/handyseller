@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, ReactNode } from "react"
 import { useRouter, usePathname } from "next/navigation"
 import Link from "next/link"
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from "@handyseller/ui"
-import { LayoutDashboard, Package, BarChart3, Settings, Menu, Palette, LogIn, ShoppingCart, Shield, CreditCard, X, ChevronDown, DollarSign, Truck } from "lucide-react"
+import { LayoutDashboard, Package, BarChart3, Settings, Menu, Palette, LogIn, ShoppingCart, Shield, CreditCard, X, ChevronDown, DollarSign, Truck, Warehouse } from "lucide-react"
 import { LogoutButton } from "@/components/logout-button"
 import { AUTH_STORAGE_KEYS, isAdmin } from "@/lib/auth-storage"
 
@@ -100,6 +100,7 @@ export function DashboardAuthGate({ children }: { children: ReactNode }) {
   const isOnFinanceFbs = pathname === "/dashboard/finance/fbs"
   const isOnFinance = isOnFinanceFbo || isOnFinanceFbs
   const isOnTms = pathname?.startsWith("/dashboard/tms") ?? false
+  const isOnWms = pathname?.startsWith("/dashboard/wms") ?? false
 
   // Загрузка или авторизован — рендерим layout
   return (
@@ -330,6 +331,7 @@ export function DashboardAuthGate({ children }: { children: ReactNode }) {
                   <>
                     {[
                       ["/dashboard/tms/requests", "Сравнение тарифов"],
+                      ["/dashboard/tms/registry", "Журнал заказов"],
                       ["/dashboard/tms/marketplace-orders", "Заказы МП"],
                       ["/dashboard/tms/orders", "Заказы вне МП"],
                       ["/dashboard/tms", "Дашборд"],
@@ -353,6 +355,14 @@ export function DashboardAuthGate({ children }: { children: ReactNode }) {
                   </>
                 )}
               </div>
+              <Link
+                href="/dashboard/wms"
+                onClick={() => setMenuOpen(false)}
+                className={`flex items-center space-x-3 px-3 py-3 rounded-md min-h-[44px] touch-manipulation ${isOnWms ? "text-primary bg-primary/10 font-medium" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+              >
+                <Warehouse className="h-5 w-5 flex-shrink-0" />
+                <span>WMS</span>
+              </Link>
               {/* Остальные пункты */}
               {navLinks.slice(1).map((item) => {
                 const isActive = pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(item.href))
@@ -552,6 +562,7 @@ export function DashboardAuthGate({ children }: { children: ReactNode }) {
                     <>
                       {[
                         ["/dashboard/tms/requests", "Сравнение тарифов"],
+                        ["/dashboard/tms/registry", "Журнал заказов"],
                         ["/dashboard/tms/marketplace-orders", "Заказы МП"],
                         ["/dashboard/tms/orders", "Заказы вне МП"],
                         ["/dashboard/tms", "Дашборд"],
@@ -574,6 +585,13 @@ export function DashboardAuthGate({ children }: { children: ReactNode }) {
                     </>
                   )}
                 </div>
+                <Link
+                  href="/dashboard/wms"
+                  className={`flex items-center space-x-3 px-3 py-2 rounded-md ${isOnWms ? "text-primary bg-primary/10 font-medium" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+                >
+                  <Warehouse className="h-5 w-5" />
+                  <span>WMS</span>
+                </Link>
                 <Link
                   href="/dashboard/analytics"
                   className={`flex items-center space-x-3 px-3 py-2 rounded-md ${pathname === "/dashboard/analytics" ? "text-primary bg-primary/10 font-medium" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}

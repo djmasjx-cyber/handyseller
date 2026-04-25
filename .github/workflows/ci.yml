@@ -42,8 +42,10 @@ jobs:
             contracts:
               - 'packages/tms-sdk/**'
               - 'packages/tms-domain/**'
+              - 'packages/wms-sdk/**'
+              - 'packages/wms-domain/**'
             wms:
-              - 'apps/wms/**'
+              - 'apps/wms-api/**'
               - 'packages/wms-*/**'
 
   core-quality:
@@ -141,6 +143,10 @@ jobs:
         run: npm run build --workspace=@handyseller/tms-sdk
       - if: ${{ env.RUN_SCOPE == 'true' }}
         run: npm run build --workspace=@handyseller/tms-domain
+      - if: ${{ env.RUN_SCOPE == 'true' }}
+        run: npm run build --workspace=@handyseller/wms-sdk
+      - if: ${{ env.RUN_SCOPE == 'true' }}
+        run: npm run build --workspace=@handyseller/wms-domain
 
   wms-quality:
     runs-on: ubuntu-latest
@@ -150,10 +156,17 @@ jobs:
     steps:
       - if: ${{ env.RUN_SCOPE != 'true' }}
         run: echo "wms-quality skipped"
+      - uses: actions/checkout@v4
+        if: ${{ env.RUN_SCOPE == 'true' }}
+      - uses: actions/setup-node@v4
+        if: ${{ env.RUN_SCOPE == 'true' }}
+        with:
+          node-version: "20"
+          cache: npm
       - if: ${{ env.RUN_SCOPE == 'true' }}
-        run: |
-          echo "::warning::WMS paths changed but quality workflow is not wired yet."
-          echo "::warning::Create apps/wms quality scripts before enabling blocking WMS gate."
+        run: npm ci
+      - if: ${{ env.RUN_SCOPE == 'true' }}
+        run: npm run quality:wms
 
   build-lint-typecheck:
     runs-on: ubuntu-latest

@@ -153,6 +153,23 @@ export class TmsStoreService implements OnModuleInit {
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         payload JSONB
       );
+      CREATE INDEX IF NOT EXISTS ix_tms_shipment_request_user_updated
+        ON tms_shipment_request(user_id, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS ix_tms_shipment_request_external_order
+        ON tms_shipment_request(user_id, ((payload -> 'integration' ->> 'externalOrderId')));
+      CREATE INDEX IF NOT EXISTS ix_tms_shipment_request_order_type
+        ON tms_shipment_request(user_id, ((payload -> 'integration' ->> 'orderType')));
+      CREATE INDEX IF NOT EXISTS ix_tms_shipment_user_request_created
+        ON tms_shipment(user_id, request_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS ix_tms_shipment_user_status_updated
+        ON tms_shipment(user_id, status, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS ix_tms_shipment_state_tracking
+        ON tms_shipment_state(tracking_number)
+        WHERE tracking_number IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS ix_tms_tracking_event_shipment_occurred
+        ON tms_tracking_event(shipment_id, occurred_at DESC);
+      CREATE INDEX IF NOT EXISTS ix_tms_document_asset_shipment_updated
+        ON tms_document_asset(shipment_id, updated_at DESC);
     `);
   }
 
@@ -603,7 +620,7 @@ export class TmsStoreService implements OnModuleInit {
     const rows = await this.pool.query<StaleShipmentCandidateRow>(
       `SELECT id, user_id, carrier, status, updated_at::text
        FROM tms_shipment
-       WHERE status NOT IN ('DELIVERED', 'CANCELLED')
+       WHERE status NOT IN ('DELIVERED', 'CANCELLED', 'SUPERSEDED')
          AND updated_at <= NOW() - make_interval(mins => $1::int)
        ORDER BY updated_at ASC
        LIMIT $2`,

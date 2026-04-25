@@ -9,6 +9,16 @@ Operational playbook for diagnosing and resolving carrier integration issues (CD
 - Documents flow (`waybill/label download`)
 - Tracking refresh flow
 - Carrier inbound webhooks (`carrier -> TMS`)
+- Permanent TMS order registry and no-delete retention policy
+
+## TMS order registry and retention
+- Internal operators use `/dashboard/tms/registry` as the primary operational journal for orders that passed through HandySeller TMS.
+- The registry must include the whole lifecycle: request created, quotes calculated, quote selected, booking confirmed/failed, tracking events, and documents.
+- TMS requests and shipments are not physically deleted in normal production flows. This is required for support, disputes, carrier reconciliation, and client integration diagnostics.
+- Rebooking must preserve history. If an old pending shipment is replaced, mark it as `SUPERSEDED` instead of deleting its shipment, tracking, or documents.
+- The narrower `/dashboard/tms/shipments` page can stay focused on active shipments, but it is not the source of truth for historical TMS orders.
+- Default retention is forever: no TTL, no purge job, no UI delete button. If legal deletion/anonymization is needed later, implement it as a separate admin-only compliance flow that anonymizes personal data while preserving operational facts.
+- Smoke check after deployment: `TMS_BASE_URL=https://api.handyseller.ru/api/tms TMS_ACCESS_TOKEN=<token> npm run smoke:tms:registry`.
 
 ## Fast triage (5 minutes)
 1. Confirm API entrypoint currently used by partner/client:
