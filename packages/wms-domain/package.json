@@ -1,0 +1,23 @@
+{
+  "name": "@handyseller/wms-domain",
+  "version": "0.0.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@handyseller/wms-sdk": "file:../wms-sdk"
+  },
+  "devDependencies": {
+    "typescript": "^5"
+  }
+}

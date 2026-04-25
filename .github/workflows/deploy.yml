@@ -81,6 +81,7 @@ jobs:
       - run: npx prisma generate --schema=./apps/api/prisma/schema.prisma
       - run: npm run build --workspace=api
       - run: npm run build --workspace=tms-api
+      - run: npm run quality:wms
       - run: npm run build --workspace=web
 
   external-carrier-gate:
@@ -123,6 +124,7 @@ jobs:
       image_api: ${{ steps.image_refs.outputs.image_api }}
       image_web: ${{ steps.image_refs.outputs.image_web }}
       image_tms_api: ${{ steps.image_refs.outputs.image_tms_api }}
+      image_wms_api: ${{ steps.image_refs.outputs.image_wms_api }}
 
     steps:
       - name: Checkout
@@ -178,6 +180,26 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max,ignore-error=true
 
+      - name: Extract metadata for WMS API
+        id: meta-wms-api
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/handyseller-wms-api
+          tags: |
+            type=raw,value=${{ env.IMAGE_TAG }}
+            type=raw,value=prod-latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build and push WMS API
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./apps/wms-api/Dockerfile
+          push: true
+          tags: ${{ steps.meta-wms-api.outputs.tags }}
+          labels: ${{ steps.meta-wms-api.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max,ignore-error=true
+
       - name: Extract metadata for Web
         id: meta-web
         uses: docker/metadata-action@v5
@@ -204,6 +226,7 @@ jobs:
           echo "image_api=${{ env.REGISTRY }}/${{ github.repository_owner }}/handyseller-api:${{ env.IMAGE_TAG }}" >> "$GITHUB_OUTPUT"
           echo "image_web=${{ env.REGISTRY }}/${{ github.repository_owner }}/handyseller-web:${{ env.IMAGE_TAG }}" >> "$GITHUB_OUTPUT"
           echo "image_tms_api=${{ env.REGISTRY }}/${{ github.repository_owner }}/handyseller-tms-api:${{ env.IMAGE_TAG }}" >> "$GITHUB_OUTPUT"
+          echo "image_wms_api=${{ env.REGISTRY }}/${{ github.repository_owner }}/handyseller-wms-api:${{ env.IMAGE_TAG }}" >> "$GITHUB_OUTPUT"
 
   deploy-production:
     needs: [governance-check, build-and-push-images]
@@ -213,6 +236,7 @@ jobs:
       previous_image_api: ${{ steps.capture_previous.outputs.prev_image_api }}
       previous_image_web: ${{ steps.capture_previous.outputs.prev_image_web }}
       previous_image_tms_api: ${{ steps.capture_previous.outputs.prev_image_tms_api }}
+      previous_image_wms_api: ${{ steps.capture_previous.outputs.prev_image_wms_api }}
 
     steps:
       - name: Checkout
@@ -243,9 +267,11 @@ jobs:
           PREV_API="$(ssh -i deploy_key.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "${USER}@${HOST}" "grep '^IMAGE_API=' /opt/handyseller/.env.production | cut -d= -f2- || true")"
           PREV_WEB="$(ssh -i deploy_key.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "${USER}@${HOST}" "grep '^IMAGE_WEB=' /opt/handyseller/.env.production | cut -d= -f2- || true")"
           PREV_TMS="$(ssh -i deploy_key.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "${USER}@${HOST}" "grep '^IMAGE_TMS_API=' /opt/handyseller/.env.production | cut -d= -f2- || true")"
+          PREV_WMS="$(ssh -i deploy_key.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "${USER}@${HOST}" "grep '^IMAGE_WMS_API=' /opt/handyseller/.env.production | cut -d= -f2- || true")"
           echo "prev_image_api=${PREV_API}" >> "$GITHUB_OUTPUT"
           echo "prev_image_web=${PREV_WEB}" >> "$GITHUB_OUTPUT"
           echo "prev_image_tms_api=${PREV_TMS}" >> "$GITHUB_OUTPUT"
+          echo "prev_image_wms_api=${PREV_WMS}" >> "$GITHUB_OUTPUT"
 
       - name: Prepare VM directory
         shell: bash
@@ -299,13 +325,14 @@ jobs:
           IMAGE_API: ${{ needs.build-and-push-images.outputs.image_api }}
           IMAGE_WEB: ${{ needs.build-and-push-images.outputs.image_web }}
           IMAGE_TMS_API: ${{ needs.build-and-push-images.outputs.image_tms_api }}
+          IMAGE_WMS_API: ${{ needs.build-and-push-images.outputs.image_wms_api }}
         run: |
           set -euo pipefail
           HOST="${{ secrets.VM_HOST }}"
           USER="${{ secrets.VM_USER || 'ubuntu' }}"
           ssh -i deploy_key.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
             "${USER}@${HOST}" \
-            "IMAGE_API='${IMAGE_API}' IMAGE_WEB='${IMAGE_WEB}' IMAGE_TMS_API='${IMAGE_TMS_API}' CR_PAT='${CR_PAT}' bash -seu" <<'SSH'
+            "IMAGE_API='${IMAGE_API}' IMAGE_WEB='${IMAGE_WEB}' IMAGE_TMS_API='${IMAGE_TMS_API}' IMAGE_WMS_API='${IMAGE_WMS_API}' CR_PAT='${CR_PAT}' bash -seu" <<'SSH'
             set -euo pipefail
             CR_PAT="${CR_PAT:-}"
             cd /opt/handyseller
@@ -322,10 +349,11 @@ jobs:
             docker builder prune -af >/dev/null 2>&1 || true
             docker container prune -f >/dev/null 2>&1 || true
 
-            grep -v '^IMAGE_API=' .env.production | grep -v '^IMAGE_WEB=' | grep -v '^IMAGE_TMS_API=' | grep -v '^APP_ENV_FILE=' > .env.production.tmp
+            grep -v '^IMAGE_API=' .env.production | grep -v '^IMAGE_WEB=' | grep -v '^IMAGE_TMS_API=' | grep -v '^IMAGE_WMS_API=' | grep -v '^APP_ENV_FILE=' > .env.production.tmp
             echo "IMAGE_API=${IMAGE_API}" >> .env.production.tmp
             echo "IMAGE_WEB=${IMAGE_WEB}" >> .env.production.tmp
             echo "IMAGE_TMS_API=${IMAGE_TMS_API}" >> .env.production.tmp
+            echo "IMAGE_WMS_API=${IMAGE_WMS_API}" >> .env.production.tmp
             echo "APP_ENV_FILE=.env.production" >> .env.production.tmp
             mv .env.production.tmp .env.production
 
@@ -333,7 +361,7 @@ jobs:
               echo "$CR_PAT" | docker login ghcr.io -u ${{ github.repository_owner }} --password-stdin
             fi
 
-            export IMAGE_API IMAGE_WEB IMAGE_TMS_API APP_ENV_FILE=".env.production"
+            export IMAGE_API IMAGE_WEB IMAGE_TMS_API IMAGE_WMS_API APP_ENV_FILE=".env.production"
             chmod +x vm-watchdog.sh handyseller-start.sh 2>/dev/null || true
             DC="docker compose"
             command -v docker-compose >/dev/null 2>&1 && DC="docker-compose"
@@ -344,7 +372,7 @@ jobs:
             echo "=== Pulling app images (zero-downtime path) ==="
             for i in 1 2 3 4 5; do
               echo "Pull attempt ${i}/5"
-              if $DC -f docker-compose.ci.yml pull api web tms-api; then
+              if $DC -f docker-compose.ci.yml pull api web tms-api wms-api; then
                 break
               fi
               [ $i -eq 5 ] && { echo "Pull failed after 5 attempts"; exit 1; }
@@ -372,7 +400,7 @@ jobs:
 
             # Important: do not stop/remove old containers first.
             # Compose will recreate services to new images with minimal interruption.
-            $DC -f docker-compose.ci.yml --env-file .env.production up -d --no-deps api tms-api web
+            $DC -f docker-compose.ci.yml --env-file .env.production up -d --no-deps api tms-api wms-api web
 
             trap - EXIT
             echo "*/2 * * * * root /opt/handyseller/vm-watchdog.sh" | sudo tee /etc/cron.d/handyseller-watchdog
@@ -409,6 +437,8 @@ jobs:
             curl -sf --connect-timeout 5 http://127.0.0.1:3001/ >/dev/null || { echo "Web not responding"; docker logs handyseller-web --tail 30 2>&1; exit 1; }
             echo "=== Verify TMS API ==="
             curl -sf --connect-timeout 5 http://127.0.0.1:4100/health >/dev/null || { echo "TMS API not responding"; docker logs handyseller-tms-api --tail 60 2>&1; exit 1; }
+            echo "=== Verify WMS API ==="
+            curl -sf --connect-timeout 5 http://127.0.0.1:4200/health >/dev/null || { echo "WMS API not responding"; docker logs handyseller-wms-api --tail 60 2>&1; exit 1; }
 
             # Post-success cleanup (non-blocking) to avoid disk growth.
             docker image prune -f || true
@@ -454,25 +484,32 @@ jobs:
           PREV_IMAGE_API: ${{ steps.capture_previous.outputs.prev_image_api }}
           PREV_IMAGE_WEB: ${{ steps.capture_previous.outputs.prev_image_web }}
           PREV_IMAGE_TMS_API: ${{ steps.capture_previous.outputs.prev_image_tms_api }}
+          PREV_IMAGE_WMS_API: ${{ steps.capture_previous.outputs.prev_image_wms_api }}
         run: |
           set -euo pipefail
           HOST="${{ secrets.VM_HOST }}"
           USER="${{ secrets.VM_USER || 'ubuntu' }}"
           ssh -i deploy_key.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "${USER}@${HOST}" \
-            "PREV_IMAGE_API='${PREV_IMAGE_API}' PREV_IMAGE_WEB='${PREV_IMAGE_WEB}' PREV_IMAGE_TMS_API='${PREV_IMAGE_TMS_API}' bash -seu" <<'SSH'
+            "PREV_IMAGE_API='${PREV_IMAGE_API}' PREV_IMAGE_WEB='${PREV_IMAGE_WEB}' PREV_IMAGE_TMS_API='${PREV_IMAGE_TMS_API}' PREV_IMAGE_WMS_API='${PREV_IMAGE_WMS_API}' bash -seu" <<'SSH'
             set -euo pipefail
             cd /opt/handyseller
-            grep -v '^IMAGE_API=' .env.production | grep -v '^IMAGE_WEB=' | grep -v '^IMAGE_TMS_API=' | grep -v '^APP_ENV_FILE=' > .env.production.tmp
+            grep -v '^IMAGE_API=' .env.production | grep -v '^IMAGE_WEB=' | grep -v '^IMAGE_TMS_API=' | grep -v '^IMAGE_WMS_API=' | grep -v '^APP_ENV_FILE=' > .env.production.tmp
             echo "IMAGE_API=${PREV_IMAGE_API}" >> .env.production.tmp
             echo "IMAGE_WEB=${PREV_IMAGE_WEB}" >> .env.production.tmp
             echo "IMAGE_TMS_API=${PREV_IMAGE_TMS_API}" >> .env.production.tmp
+            echo "IMAGE_WMS_API=${PREV_IMAGE_WMS_API:-busybox:latest}" >> .env.production.tmp
             echo "APP_ENV_FILE=.env.production" >> .env.production.tmp
             mv .env.production.tmp .env.production
             DC="docker compose"
             command -v docker-compose >/dev/null 2>&1 && DC="docker-compose"
-            export APP_ENV_FILE=".env.production"
-            $DC -f docker-compose.ci.yml --env-file .env.production pull api web tms-api
-            $DC -f docker-compose.ci.yml --env-file .env.production up -d --no-deps api tms-api web
+            export IMAGE_WMS_API="${PREV_IMAGE_WMS_API:-busybox:latest}" APP_ENV_FILE=".env.production"
+            if [ -n "${PREV_IMAGE_WMS_API}" ]; then
+              $DC -f docker-compose.ci.yml --env-file .env.production pull api web tms-api wms-api
+              $DC -f docker-compose.ci.yml --env-file .env.production up -d --no-deps api tms-api wms-api web
+            else
+              $DC -f docker-compose.ci.yml --env-file .env.production pull api web tms-api
+              $DC -f docker-compose.ci.yml --env-file .env.production up -d --no-deps api tms-api web
+            fi
           SSH
 
       - name: Build release evidence
