@@ -24,7 +24,8 @@ export type ShipmentStatus =
   | 'CONFIRMED'
   | 'IN_TRANSIT'
   | 'OUT_FOR_DELIVERY'
-  | 'DELIVERED';
+  | 'DELIVERED'
+  | 'SUPERSEDED';
 
 export interface CargoSnapshot {
   weightGrams: number;

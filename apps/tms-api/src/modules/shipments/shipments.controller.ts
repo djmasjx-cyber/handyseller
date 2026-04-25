@@ -162,6 +162,44 @@ export class ShipmentsController {
     };
   }
 
+  @Get('v1/orders')
+  @TmsAccess('read')
+  v1ListOrderRegistry(
+    @CurrentUser('userId') userId: string,
+    @Query('q') q?: string,
+    @Query('status') status?: string,
+    @Query('carrierId') carrierId?: string,
+    @Query('externalOrderId') externalOrderId?: string,
+    @Query('orderType') orderType?: 'CLIENT_ORDER' | 'INTERNAL_TRANSFER' | 'SUPPLIER_PICKUP',
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+    @Query('hasShipment') hasShipment?: string,
+    @Query('limit') limit?: string,
+    @Query('cursor') cursor?: string,
+  ) {
+    const parsedLimit = limit ? Number.parseInt(limit, 10) : undefined;
+    const parsedHasShipment =
+      hasShipment === 'true' ? true : hasShipment === 'false' ? false : undefined;
+    return this.shipmentsService.listOrderRegistry(userId, {
+      q,
+      status,
+      carrierId,
+      externalOrderId,
+      orderType,
+      dateFrom,
+      dateTo,
+      hasShipment: parsedHasShipment,
+      limit: Number.isFinite(parsedLimit) ? parsedLimit : undefined,
+      cursor,
+    });
+  }
+
+  @Get('v1/orders/:requestId')
+  @TmsAccess('read')
+  v1GetOrderRegistryDetail(@CurrentUser('userId') userId: string, @Param('requestId') requestId: string) {
+    return this.shipmentsService.getOrderRegistryDetail(userId, requestId);
+  }
+
   @Post('v1/shipments')
   @TmsAccess('write')
   async v1CreateShipment(

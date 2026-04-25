@@ -24,6 +24,52 @@ import { TmsStoreService } from './storage/tms-store.service';
 import { ObjectStorageService } from './storage/object-storage.service';
 import { createHmac, randomBytes } from 'crypto';
 
+type RegistryOrderType = 'CLIENT_ORDER' | 'INTERNAL_TRANSFER' | 'SUPPLIER_PICKUP';
+
+type OrderRegistryFilter = {
+  q?: string;
+  status?: string;
+  carrierId?: string;
+  externalOrderId?: string;
+  orderType?: RegistryOrderType;
+  dateFrom?: string;
+  dateTo?: string;
+  hasShipment?: boolean;
+  limit?: number;
+  cursor?: string;
+};
+
+type OrderRegistryItem = {
+  requestId: string;
+  shipmentId: string | null;
+  shipmentIds: string[];
+  status: string;
+  requestStatus: string;
+  shipmentStatus: string | null;
+  externalOrderId: string | null;
+  orderType: RegistryOrderType | null;
+  sourceSystem: string;
+  coreOrderNumber: string;
+  customerName: string | null;
+  customerPhone: string | null;
+  originLabel: string | null;
+  destinationLabel: string | null;
+  carrierId: string | null;
+  carrierName: string | null;
+  trackingNumber: string | null;
+  carrierOrderNumber: string | null;
+  carrierOrderReference: string | null;
+  priceRub: number | null;
+  etaDays: number | null;
+  documentsCount: number;
+  trackingEventsCount: number;
+  lastEventAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  hasShipment: boolean;
+  hasArchivedShipments: boolean;
+};
+
 @Injectable()
 export class ShipmentsService implements OnModuleInit {
   private readonly logger = new Logger(ShipmentsService.name);
@@ -130,7 +176,55 @@ export class ShipmentsService implements OnModuleInit {
   listShipments(userId: string): ShipmentRecord[] {
     return [...this.shipments.values()]
       .filter((shipment) => shipment.userId === userId)
+      .filter((shipment) => !this.isArchivedShipment(shipment))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  listOrderRegistry(
+    userId: string,
+    filter?: OrderRegistryFilter,
+  ): { items: OrderRegistryItem[]; nextCursor: string | null } {
+    const safeLimit = Math.max(1, Math.min(100, filter?.limit ?? 25));
+    const cursor = filter?.cursor?.trim();
+    const all = [...this.requests.values()]
+      .filter((request) => request.userId === userId)
+      .map((request) => this.buildOrderRegistryItem(request))
+      .filter((item) => this.matchesOrderRegistryFilter(item, filter))
+      .map((item) => ({ ...item, sortKey: `${item.updatedAt}|${item.requestId}` }))
+      .sort((a, b) => b.sortKey.localeCompare(a.sortKey));
+
+    const startIndex = cursor ? all.findIndex((item) => item.sortKey === cursor) + 1 : 0;
+    const itemsWithMeta = all.slice(Math.max(0, startIndex), Math.max(0, startIndex) + safeLimit);
+    const next = all[Math.max(0, startIndex) + safeLimit];
+    return {
+      items: itemsWithMeta.map(({ sortKey: _sortKey, ...item }) => item),
+      nextCursor: next?.sortKey ?? null,
+    };
+  }
+
+  getOrderRegistryDetail(userId: string, requestId: string): OrderRegistryItem & {
+    request: ShipmentRequestRecord;
+    shipments: ShipmentRecord[];
+    activeShipment: ShipmentRecord | null;
+    tracking: TrackingEventRecord[];
+    documents: ShipmentDocumentRecord[];
+    auditEvents: Array<{ type: string; occurredAt: string; title: string; details?: string | null }>;
+  } {
+    const request = this.getRequestOrThrow(userId, requestId);
+    const shipments = this.listShipmentsForRequest(userId, requestId);
+    const activeShipment = this.pickRegistryShipment(shipments);
+    const shipmentIds = shipments.map((shipment) => shipment.id);
+    const tracking = shipmentIds.flatMap((shipmentId) => this.tracking.get(shipmentId) ?? []);
+    const documents = shipmentIds.flatMap((shipmentId) => this.documents.get(shipmentId) ?? []);
+    return {
+      ...this.buildOrderRegistryItem(request),
+      request,
+      shipments,
+      activeShipment,
+      tracking: tracking.sort((a, b) => b.occurredAt.localeCompare(a.occurredAt)),
+      documents: documents.sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+      auditEvents: this.buildOrderRegistryAuditEvents(request, shipments, tracking, documents),
+    };
   }
 
   getShipment(userId: string, shipmentId: string): ShipmentRecord {
@@ -166,7 +260,10 @@ export class ShipmentsService implements OnModuleInit {
     if (!request) {
       throw new NotFoundException('Заявка с externalOrderId не найдена');
     }
-    const shipment = [...this.shipments.values()].find((item) => item.userId === userId && item.requestId === request.id) ?? null;
+    const shipment =
+      [...this.shipments.values()].find(
+        (item) => item.userId === userId && item.requestId === request.id && !this.isArchivedShipment(item),
+      ) ?? null;
     return {
       requestId: request.id,
       shipment,
@@ -213,7 +310,10 @@ export class ShipmentsService implements OnModuleInit {
         return Date.parse(item.updatedAt) >= updatedSinceTs;
       })
       .map((request) => {
-        const shipment = [...this.shipments.values()].find((item) => item.userId === userId && item.requestId === request.id) ?? null;
+        const shipment =
+          [...this.shipments.values()].find(
+            (item) => item.userId === userId && item.requestId === request.id && !this.isArchivedShipment(item),
+          ) ?? null;
         const sortDate = shipment?.createdAt ?? request.updatedAt;
         return {
           requestId: request.id,
@@ -1052,9 +1152,9 @@ export class ShipmentsService implements OnModuleInit {
     if (!request.selectedQuoteId) {
       throw new NotFoundException('Сначала выберите тариф');
     }
-    const existingShipment = [...this.shipments.values()].find(
-      (item) => item.userId === userId && item.requestId === requestId,
-    );
+    const existingShipment = [...this.shipments.values()]
+      .filter((item) => item.userId === userId && item.requestId === requestId && !this.isArchivedShipment(item))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
 
     const quote = (this.quotes.get(requestId) ?? []).find((item) => item.id === request.selectedQuoteId);
     if (!quote) {
@@ -1086,10 +1186,9 @@ export class ShipmentsService implements OnModuleInit {
       this.logger.warn(
         `Found pending shipment; rebooking requestId=${requestId} shipmentId=${existingShipment.id} carrier=${existingShipment.carrierId}`,
       );
-      this.shipments.delete(existingShipment.id);
-      this.tracking.delete(existingShipment.id);
-      this.documents.delete(existingShipment.id);
-      void this.store.deleteShipment(existingShipment.id);
+      const supersededShipment: ShipmentRecord = { ...existingShipment, status: 'SUPERSEDED' };
+      this.shipments.set(existingShipment.id, supersededShipment);
+      void this.store.saveShipment(supersededShipment);
     }
     if (!adapter.descriptor.supportsBooking) {
       throw new BadRequestException(
@@ -1353,12 +1452,162 @@ export class ShipmentsService implements OnModuleInit {
     return updated;
   }
 
+  private buildOrderRegistryItem(request: ShipmentRequestRecord): OrderRegistryItem {
+    const shipments = this.listShipmentsForRequest(request.userId, request.id);
+    const activeShipment = this.pickRegistryShipment(shipments);
+    const shipmentIds = shipments.map((shipment) => shipment.id);
+    const tracking = shipmentIds.flatMap((shipmentId) => this.tracking.get(shipmentId) ?? []);
+    const documents = shipmentIds.flatMap((shipmentId) => this.documents.get(shipmentId) ?? []);
+    const lastEventAt = tracking
+      .map((event) => event.occurredAt)
+      .sort((a, b) => b.localeCompare(a))[0] ?? null;
+    const updatedAt = [request.updatedAt, activeShipment?.createdAt, lastEventAt, ...documents.map((doc) => doc.createdAt)]
+      .filter((value): value is string => Boolean(value))
+      .sort((a, b) => b.localeCompare(a))[0] ?? request.updatedAt;
+
+    return {
+      requestId: request.id,
+      shipmentId: activeShipment?.id ?? null,
+      shipmentIds,
+      status: activeShipment?.status ?? request.status,
+      requestStatus: request.status,
+      shipmentStatus: activeShipment?.status ?? null,
+      externalOrderId: request.integration?.externalOrderId ?? null,
+      orderType: request.integration?.orderType ?? null,
+      sourceSystem: request.snapshot.sourceSystem,
+      coreOrderNumber: request.snapshot.coreOrderNumber,
+      customerName: request.snapshot.contacts?.recipient.name ?? null,
+      customerPhone: request.snapshot.contacts?.recipient.phone ?? null,
+      originLabel: request.draft.originLabel || request.snapshot.originLabel || null,
+      destinationLabel: request.draft.destinationLabel || request.snapshot.destinationLabel || null,
+      carrierId: activeShipment?.carrierId ?? null,
+      carrierName: activeShipment?.carrierName ?? null,
+      trackingNumber: activeShipment?.trackingNumber ?? null,
+      carrierOrderNumber: activeShipment?.carrierOrderNumber ?? null,
+      carrierOrderReference: activeShipment?.carrierOrderReference ?? null,
+      priceRub: activeShipment?.priceRub ?? null,
+      etaDays: activeShipment?.etaDays ?? null,
+      documentsCount: documents.length,
+      trackingEventsCount: tracking.length,
+      lastEventAt,
+      createdAt: request.createdAt,
+      updatedAt,
+      hasShipment: shipments.length > 0,
+      hasArchivedShipments: shipments.some((shipment) => this.isArchivedShipment(shipment)),
+    };
+  }
+
+  private listShipmentsForRequest(userId: string, requestId: string): ShipmentRecord[] {
+    return [...this.shipments.values()]
+      .filter((shipment) => shipment.userId === userId && shipment.requestId === requestId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  private pickRegistryShipment(shipments: ShipmentRecord[]): ShipmentRecord | null {
+    return shipments.find((shipment) => !this.isArchivedShipment(shipment)) ?? shipments[0] ?? null;
+  }
+
+  private matchesOrderRegistryFilter(item: OrderRegistryItem, filter?: OrderRegistryFilter): boolean {
+    if (!filter) return true;
+    const q = filter.q?.trim().toLowerCase();
+    if (q) {
+      const haystack = [
+        item.requestId,
+        item.shipmentId,
+        ...item.shipmentIds,
+        item.externalOrderId,
+        item.coreOrderNumber,
+        item.customerName,
+        item.customerPhone,
+        item.originLabel,
+        item.destinationLabel,
+        item.carrierName,
+        item.trackingNumber,
+        item.carrierOrderNumber,
+        item.carrierOrderReference,
+      ]
+        .filter((value): value is string => Boolean(value))
+        .join(' ')
+        .toLowerCase();
+      if (!haystack.includes(q)) return false;
+    }
+    const status = filter.status?.trim().toUpperCase();
+    if (status && item.status.toUpperCase() !== status && item.requestStatus.toUpperCase() !== status) return false;
+    const carrierId = filter.carrierId?.trim();
+    if (carrierId && item.carrierId !== carrierId) return false;
+    const externalOrderId = filter.externalOrderId?.trim();
+    if (externalOrderId && item.externalOrderId !== externalOrderId) return false;
+    if (filter.orderType && item.orderType !== filter.orderType) return false;
+    if (filter.hasShipment != null && item.hasShipment !== filter.hasShipment) return false;
+    const createdAt = Date.parse(item.createdAt);
+    const dateFrom = filter.dateFrom ? Date.parse(filter.dateFrom) : NaN;
+    const dateTo = filter.dateTo ? Date.parse(filter.dateTo) : NaN;
+    if (Number.isFinite(dateFrom) && Number.isFinite(createdAt) && createdAt < dateFrom) return false;
+    if (Number.isFinite(dateTo) && Number.isFinite(createdAt) && createdAt > dateTo + 24 * 60 * 60 * 1000 - 1) {
+      return false;
+    }
+    return true;
+  }
+
+  private buildOrderRegistryAuditEvents(
+    request: ShipmentRequestRecord,
+    shipments: ShipmentRecord[],
+    tracking: TrackingEventRecord[],
+    documents: ShipmentDocumentRecord[],
+  ): Array<{ type: string; occurredAt: string; title: string; details?: string | null }> {
+    const events: Array<{ type: string; occurredAt: string; title: string; details?: string | null }> = [
+      {
+        type: 'REQUEST_CREATED',
+        occurredAt: request.createdAt,
+        title: 'Заявка создана',
+        details: request.integration?.externalOrderId ?? request.snapshot.coreOrderNumber,
+      },
+    ];
+    if (request.status === 'QUOTED' || request.status === 'BOOKED') {
+      events.push({
+        type: 'QUOTES_CALCULATED',
+        occurredAt: request.updatedAt,
+        title: 'Тарифы рассчитаны',
+        details: request.selectedQuoteId ? `Выбран quoteId: ${request.selectedQuoteId}` : null,
+      });
+    }
+    for (const shipment of shipments) {
+      events.push({
+        type: shipment.status === 'SUPERSEDED' ? 'SHIPMENT_REPLACED' : 'BOOKING_CONFIRMED',
+        occurredAt: shipment.createdAt,
+        title: shipment.status === 'SUPERSEDED' ? 'Отгрузка заменена' : 'Бронирование подтверждено',
+        details: `${shipment.carrierName}: ${shipment.trackingNumber}`,
+      });
+    }
+    for (const event of tracking) {
+      events.push({
+        type: 'TRACKING_UPDATED',
+        occurredAt: event.occurredAt,
+        title: event.description,
+        details: event.location ?? event.status,
+      });
+    }
+    for (const doc of documents) {
+      events.push({
+        type: 'DOCUMENT_READY',
+        occurredAt: doc.createdAt,
+        title: `Документ готов: ${doc.title}`,
+        details: doc.type,
+      });
+    }
+    return events.sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
+  }
+
   private getRequestOrThrow(userId: string, requestId: string): ShipmentRequestRecord {
     const request = this.requests.get(requestId);
     if (!request || request.userId !== userId) {
       throw new NotFoundException('Заявка на перевозку не найдена');
     }
     return request;
+  }
+
+  private isArchivedShipment(shipment: ShipmentRecord): boolean {
+    return shipment.status === 'SUPERSEDED';
   }
 
   private resolveTmsOrderStatus(
