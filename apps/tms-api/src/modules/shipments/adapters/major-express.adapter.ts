@@ -1419,18 +1419,17 @@ export class MajorExpressAdapter implements CarrierAdapter {
 
   private mapMajorOrderStatus(code: number, waybillNumber: string): ShipmentRecord['status'] {
     if (!waybillNumber) return 'CREATED';
-    // Точного enum в документации нет в разрезе TMS, поэтому используем безопасное приближение.
-    if (code >= 10) return 'DELIVERED';
-    if (code >= 6) return 'OUT_FOR_DELIVERY';
+    // Major order code is not a delivery lifecycle status; do not mark delivered from it.
+    if (code >= 6) return 'IN_TRANSIT';
     if (code >= 2) return 'IN_TRANSIT';
     return 'CONFIRMED';
   }
 
   private mapMajorHistoryStatus(event: string, comments: string): ShipmentRecord['status'] {
     const text = `${event} ${comments}`.toLowerCase();
-    if (/вруч|доставл|получ/.test(text)) return 'DELIVERED';
+    if (/вруч|доставлен|доставлено|получено получателем|получатель получил/.test(text)) return 'DELIVERED';
     if (/курьер|выдано|out for delivery/.test(text)) return 'OUT_FOR_DELIVERY';
-    if (/транзит|прибыл|отправлен|принят/.test(text)) return 'IN_TRANSIT';
+    if (/транзит|прибыл|отправлен|принят|получен/.test(text)) return 'IN_TRANSIT';
     return 'CONFIRMED';
   }
 
