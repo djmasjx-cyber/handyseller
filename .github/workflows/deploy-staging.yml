@@ -260,7 +260,7 @@ jobs:
             done
             for i in $(seq 1 30); do
               curl -sf --connect-timeout 3 http://127.0.0.1:4200/health >/dev/null && break
-              [ "$i" -eq 30 ] && { echo "WMS API health check timeout"; exit 1; }
+              [ "$i" -eq 30 ] && { echo "WMS API health check timeout"; docker logs handyseller-wms-api --tail 80 2>&1 || true; exit 1; }
               sleep 3
             done
             if sudo test -f /etc/letsencrypt/live/dev.handyseller.ru/fullchain.pem && [ -f nginx/handyseller-dev-ssl.conf ]; then
