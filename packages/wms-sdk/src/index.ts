@@ -104,6 +104,8 @@ export interface WmsReceiptLineInput {
   itemId: string;
   expectedQty: number;
   unitLabel?: string | null;
+  /** Цена строки накладной (руб.), опционально — для инвойса/прихода. */
+  unitPrice?: number | null;
 }
 
 export interface WmsReceiptRecord {

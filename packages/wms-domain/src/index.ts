@@ -22,6 +22,16 @@ export function buildLpnBarcode(tenantSeed: string, serial: number): string {
   return `${core}${checksum(core)}`;
 }
 
+/** Сквозная нумерация единиц вида 000000123456 (фиксированная длина). */
+export function buildNumericUnitBarcode(serial: number, width = 12): string {
+  const n = Math.max(0, Math.floor(serial));
+  const s = String(n);
+  if (s.length > width) {
+    throw new Error(`Numeric barcode overflow: serial ${n} exceeds width ${width}`);
+  }
+  return s.padStart(width, '0');
+}
+
 export function buildLocationPath(parentPath: string | null | undefined, code: string): string {
   const normalizedCode = code.trim().toUpperCase();
   return parentPath ? `${parentPath}/${normalizedCode}` : normalizedCode;

@@ -1,5 +1,5 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { buildLocationPath, buildLpnBarcode, buildUnitBarcode } from '@handyseller/wms-domain';
+import { buildLocationPath, buildLpnBarcode, buildNumericUnitBarcode } from '@handyseller/wms-domain';
 import type {
   CreateContainerInput,
   CreateItemInput,
@@ -378,7 +378,7 @@ export class WmsStoreService implements OnModuleInit {
   }
 
   async reserveReceiptBarcodes(userId: string, receiptId: string, receiptLineId?: string): Promise<WmsInventoryUnitRecord[]> {
-    const receipt = await this.getReceipt(userId, receiptId);
+    const receipt = await this.loadReceipt(userId, receiptId);
     const lines = receipt.lines.filter((line) => !receiptLineId || line.id === receiptLineId);
     const created: WmsInventoryUnitRecord[] = [];
     const nextUnitSerial = await this.nextSerial('wms_inventory_unit', userId);
@@ -390,7 +390,7 @@ export class WmsStoreService implements OnModuleInit {
           id: id('unit'),
           userId,
           itemId: line.itemId,
-          barcode: buildUnitBarcode(userId, nextUnitSerial + created.length),
+          barcode: buildNumericUnitBarcode(nextUnitSerial + created.length),
           status: 'RESERVED',
           receiptId: receipt.id,
           receiptLineId: line.id,
@@ -523,7 +523,146 @@ export class WmsStoreService implements OnModuleInit {
     return this.events.filter((e) => e.userId === userId).slice(-limit).reverse();
   }
 
-  private async getReceipt(userId: string, receiptId: string): Promise<WmsReceiptRecord> {
+  async listReceipts(userId: string): Promise<WmsReceiptRecord[]> {
+    if (this.pool) {
+      const res = await this.pool.query<JsonRow<WmsReceiptRecord>>(
+        'SELECT payload FROM wms_receipt WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 100',
+        [userId],
+      );
+      return res.rows.map((r) => r.payload);
+    }
+    return [...this.receipts.values()]
+      .filter((r) => r.userId === userId)
+      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+  }
+
+  async findItemBySku(userId: string, sku: string): Promise<WmsItemRecord | null> {
+    const key = sku.trim();
+    if (!key) return null;
+    if (this.pool) {
+      const res = await this.pool.query<JsonRow<WmsItemRecord>>(
+        'SELECT payload FROM wms_item WHERE user_id = $1 AND sku = $2 LIMIT 1',
+        [userId, key],
+      );
+      return res.rows[0]?.payload ?? null;
+    }
+    return [...this.items.values()].find((item) => item.userId === userId && item.sku === key) ?? null;
+  }
+
+  async updateItemDimensions(
+    userId: string,
+    itemId: string,
+    dims: { weightGrams: number; lengthMm: number; widthMm: number; heightMm: number },
+  ): Promise<WmsItemRecord> {
+    const item = await this.loadItem(userId, itemId);
+    item.dimensions = { ...item.dimensions, ...dims };
+    item.updatedAt = nowIso();
+    this.items.set(item.id, item);
+    await this.upsert('wms_item', item.id, userId, item, {
+      sku: item.sku,
+      core_product_id: item.coreProductId,
+    });
+    await this.appendEvent(userId, {
+      type: 'COUNTED',
+      referenceType: 'ITEM',
+      referenceId: item.id,
+      payload: { title: 'Item dimensions updated', sku: item.sku },
+    });
+    return item;
+  }
+
+  async createInvoiceReceipt(
+    userId: string,
+    input: {
+      warehouseId: string;
+      number: string;
+      lines: Array<{ article: string; title: string; quantity: number; price: number }>;
+    },
+  ): Promise<{ receipt: WmsReceiptRecord; units: WmsInventoryUnitRecord[] }> {
+    const builtLines: CreateReceiptInput['lines'] = [];
+    for (const row of input.lines) {
+      const sku = row.article.trim();
+      const title = row.title.trim();
+      const qty = Math.floor(Number(row.quantity));
+      const price = Number(row.price);
+      if (!sku || !title || qty < 1 || Number.isNaN(price) || price < 0) continue;
+      let item = await this.findItemBySku(userId, sku);
+      if (!item) {
+        item = await this.createItem(userId, { sku, article: sku, title, serialTracking: true });
+      }
+      builtLines.push({ itemId: item.id, expectedQty: qty, unitPrice: price });
+    }
+    if (!builtLines.length) {
+      throw new Error('Invoice must contain at least one valid line.');
+    }
+    const receipt = await this.createReceipt(userId, {
+      warehouseId: input.warehouseId,
+      number: input.number.trim(),
+      source: 'INVOICE',
+      supplierName: null,
+      lines: builtLines,
+    });
+    const units = await this.reserveReceiptBarcodes(userId, receipt.id);
+    const fresh = await this.loadReceipt(userId, receipt.id);
+    return { receipt: fresh, units };
+  }
+
+  async acceptReceipt(userId: string, receiptId: string): Promise<WmsReceiptRecord> {
+    const receipt = await this.loadReceipt(userId, receiptId);
+    if (receipt.status === 'RECEIVED' || receipt.status === 'CLOSED') {
+      return receipt;
+    }
+    const incomplete: string[] = [];
+    for (const line of receipt.lines) {
+      const item = await this.loadItem(userId, line.itemId);
+      if (!this.isAgxComplete(item)) incomplete.push(item.sku);
+    }
+    if (incomplete.length) {
+      throw new Error(`AGX incomplete for SKU: ${incomplete.join(', ')}`);
+    }
+    const units = await this.listUnitsForReceipt(userId, receiptId);
+    for (const unit of units) {
+      if (unit.status !== 'RESERVED') continue;
+      unit.status = 'RECEIVED';
+      unit.updatedAt = nowIso();
+      await this.upsertUnit(unit);
+      await this.appendEvent(userId, {
+        type: 'UNIT_RECEIVED',
+        warehouseId: receipt.warehouseId,
+        unitId: unit.id,
+        referenceType: 'RECEIPT',
+        referenceId: receipt.id,
+        payload: { barcode: unit.barcode, receiptLineId: unit.receiptLineId },
+      });
+    }
+    receipt.status = 'RECEIVED';
+    receipt.updatedAt = nowIso();
+    await this.upsert('wms_receipt', receipt.id, userId, receipt, {
+      warehouse_id: receipt.warehouseId,
+      number: receipt.number,
+      status: receipt.status,
+    });
+    return receipt;
+  }
+
+  private isAgxComplete(item: WmsItemRecord): boolean {
+    const d = item.dimensions ?? {};
+    const ok = (v: unknown) => typeof v === 'number' && Number.isFinite(v) && v > 0;
+    return ok(d.weightGrams) && ok(d.lengthMm) && ok(d.widthMm) && ok(d.heightMm);
+  }
+
+  private async listUnitsForReceipt(userId: string, receiptId: string): Promise<WmsInventoryUnitRecord[]> {
+    if (this.pool) {
+      const res = await this.pool.query<JsonRow<WmsInventoryUnitRecord>>(
+        `SELECT payload FROM wms_inventory_unit WHERE user_id = $1 AND (payload->>'receiptId') = $2`,
+        [userId, receiptId],
+      );
+      return res.rows.map((r) => r.payload);
+    }
+    return [...this.units.values()].filter((u) => u.userId === userId && u.receiptId === receiptId);
+  }
+
+  private async loadReceipt(userId: string, receiptId: string): Promise<WmsReceiptRecord> {
     if (this.pool) {
       const res = await this.pool.query<JsonRow<WmsReceiptRecord>>(
         'SELECT payload FROM wms_receipt WHERE user_id = $1 AND id = $2',
@@ -535,6 +674,20 @@ export class WmsStoreService implements OnModuleInit {
     const receipt = this.receipts.get(receiptId);
     if (!receipt || receipt.userId !== userId) throw new Error('Receipt not found');
     return receipt;
+  }
+
+  private async loadItem(userId: string, itemId: string): Promise<WmsItemRecord> {
+    if (this.pool) {
+      const res = await this.pool.query<JsonRow<WmsItemRecord>>(
+        'SELECT payload FROM wms_item WHERE user_id = $1 AND id = $2',
+        [userId, itemId],
+      );
+      const item = res.rows[0]?.payload;
+      if (item) return item;
+    }
+    const item = this.items.get(itemId);
+    if (!item || item.userId !== userId) throw new Error('Item not found');
+    return item;
   }
 
   private async getLocation(userId: string, locationId: string): Promise<WmsLocationRecord> {

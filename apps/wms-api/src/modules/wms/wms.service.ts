@@ -2,12 +2,14 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { WmsStoreService } from './storage/wms-store.service';
 import {
   CreateContainerDto,
+  CreateInvoiceReceiptDto,
   CreateItemDto,
   CreateLocationDto,
   CreateReceiptDto,
   CreateWarehouseDto,
   MoveInventoryDto,
   ReserveReceiptBarcodesDto,
+  UpdateItemAgxDto,
 } from './wms.dto';
 
 @Injectable()
@@ -43,6 +45,44 @@ export class WmsService {
       throw new BadRequestException('Receipt must contain at least one line.');
     }
     return this.guardErrors(() => this.store.createReceipt(userId, input));
+  }
+
+  listReceipts(userId: string) {
+    return this.guardErrors(() => this.store.listReceipts(userId));
+  }
+
+  createInvoiceReceipt(userId: string, input: CreateInvoiceReceiptDto) {
+    if (!input.lines?.length) {
+      throw new BadRequestException('Invoice must contain at least one line.');
+    }
+    const number = input.number?.trim() || `INV-${Date.now()}`;
+    return this.guardErrors(() =>
+      this.store.createInvoiceReceipt(userId, {
+        warehouseId: input.warehouseId,
+        number,
+        lines: input.lines.map((l) => ({
+          article: l.article,
+          title: l.title,
+          quantity: l.quantity,
+          price: l.price,
+        })),
+      }),
+    );
+  }
+
+  acceptReceipt(userId: string, receiptId: string) {
+    return this.guardErrors(() => this.store.acceptReceipt(userId, receiptId));
+  }
+
+  updateItemAgx(userId: string, itemId: string, input: UpdateItemAgxDto) {
+    return this.guardErrors(() =>
+      this.store.updateItemDimensions(userId, itemId, {
+        weightGrams: input.weightGrams,
+        lengthMm: input.lengthMm,
+        widthMm: input.widthMm,
+        heightMm: input.heightMm,
+      }),
+    );
   }
 
   reserveReceiptBarcodes(userId: string, receiptId: string, input: ReserveReceiptBarcodesDto) {
