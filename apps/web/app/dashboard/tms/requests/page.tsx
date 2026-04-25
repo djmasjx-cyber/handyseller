@@ -86,6 +86,17 @@ function formatServiceFlags(flags: string[] | undefined): string {
   return flags.map((f) => SERVICE_LABELS[f] ?? f).join(" · ")
 }
 
+function isManualCustomerDelivery(item: ShipmentRequest): boolean {
+  const marketplace = item.snapshot.marketplace?.trim().toUpperCase()
+  return (
+    item.snapshot.logisticsScenario === "CARRIER_DELIVERY" ||
+    item.snapshot.tmsWorkType === "CUSTOMER_DELIVERY" ||
+    marketplace === "MANUAL" ||
+    marketplace === "РУЧНОЙ" ||
+    marketplace === "РУЧНОЙ ЗАКАЗ"
+  )
+}
+
 function quoteMatchesDraft(quote: Quote, draftFlags: string[]): boolean {
   if (!draftFlags.length) return true
   const qf = quote.serviceFlags ?? []
@@ -410,7 +421,7 @@ export default function TmsRequestsPage() {
     if (workQueue === "MARKETPLACE_RC") {
       rows = rows.filter((item) => item.snapshot.logisticsScenario === "MARKETPLACE_RC")
     } else if (workQueue === "CARRIER_DELIVERY") {
-      rows = rows.filter((item) => item.snapshot.logisticsScenario === "CARRIER_DELIVERY")
+      rows = rows.filter((item) => isManualCustomerDelivery(item))
     } else if (workQueue === "INTERNAL_TRANSFER") {
       rows = rows.filter((item) => item.snapshot.tmsWorkType === "INTERNAL_TRANSFER")
     }

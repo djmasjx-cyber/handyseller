@@ -1619,7 +1619,7 @@ export class ShipmentsService implements OnModuleInit {
         details: doc.type,
       });
     }
-    return events.sort((a, b) => a.occurredAt.localeCompare(b.occurredAt));
+    return events.sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
   }
 
   private getRequestOrThrow(userId: string, requestId: string): ShipmentRequestRecord {
