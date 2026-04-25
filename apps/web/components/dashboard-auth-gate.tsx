@@ -330,6 +330,7 @@ export function DashboardAuthGate({ children }: { children: ReactNode }) {
                   <>
                     {[
                       ["/dashboard/tms/requests", "Сравнение тарифов"],
+                      ["/dashboard/tms/registry", "Журнал заказов"],
                       ["/dashboard/tms/marketplace-orders", "Заказы МП"],
                       ["/dashboard/tms/orders", "Заказы вне МП"],
                       ["/dashboard/tms", "Дашборд"],
@@ -552,6 +553,7 @@ export function DashboardAuthGate({ children }: { children: ReactNode }) {
                     <>
                       {[
                         ["/dashboard/tms/requests", "Сравнение тарифов"],
+                        ["/dashboard/tms/registry", "Журнал заказов"],
                         ["/dashboard/tms/marketplace-orders", "Заказы МП"],
                         ["/dashboard/tms/orders", "Заказы вне МП"],
                         ["/dashboard/tms", "Дашборд"],
