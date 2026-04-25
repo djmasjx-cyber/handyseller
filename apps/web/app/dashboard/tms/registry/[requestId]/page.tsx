@@ -47,7 +47,6 @@ type RegistryDetail = {
 
 type TabId = "cart" | "shipments" | "history"
 type RegistryDocument = NonNullable<RegistryDetail["documents"]>[number]
-type RegistryShipment = NonNullable<RegistryDetail["shipments"]>[number]
 
 function getToken(): string | null {
   if (typeof window === "undefined") return null
@@ -107,63 +106,6 @@ function orderTypeLabel(value: string | null): string {
   }
 }
 
-function escapeHtml(value: string | null | undefined): string {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;")
-}
-
-function buildLabelHtml(detail: RegistryDetail, shipment: RegistryShipment, doc: RegistryDocument, print: boolean): string {
-  const track = shipment.trackingNumber || shipment.carrierOrderReference || shipment.carrierOrderNumber || "—"
-  return `<!doctype html>
-<html lang="ru">
-<head>
-  <meta charset="utf-8" />
-  <title>${escapeHtml(doc.title)}</title>
-  <style>
-    @page { size: 70mm 120mm; margin: 0; }
-    * { box-sizing: border-box; }
-    html, body { width: 70mm; min-height: 120mm; margin: 0; padding: 0; background: #fff; color: #111827; font-family: Arial, sans-serif; }
-    .label { width: 70mm; min-height: 120mm; padding: 5mm; display: flex; flex-direction: column; gap: 3mm; border: 1px solid #111827; }
-    .top { display: flex; justify-content: space-between; gap: 3mm; font-size: 9px; text-transform: uppercase; letter-spacing: .04em; }
-    .carrier { font-size: 16px; font-weight: 700; }
-    .track { padding: 3mm 0; border-top: 1px solid #111827; border-bottom: 1px solid #111827; text-align: center; }
-    .track-title { font-size: 9px; text-transform: uppercase; color: #4b5563; }
-    .track-value { margin-top: 1mm; font-size: 19px; font-weight: 700; word-break: break-word; }
-    .row { font-size: 10px; line-height: 1.25; }
-    .row strong { display: block; margin-bottom: 1mm; font-size: 8px; color: #4b5563; text-transform: uppercase; }
-    .footer { margin-top: auto; display: flex; justify-content: space-between; gap: 2mm; font-size: 8px; color: #4b5563; }
-    @media print { body { print-color-adjust: exact; -webkit-print-color-adjust: exact; } }
-  </style>
-</head>
-<body>
-  <section class="label">
-    <div class="top">
-      <span>HandySeller TMS</span>
-      <span>${escapeHtml(detail.internalOrderNumber)}</span>
-    </div>
-    <div class="carrier">${escapeHtml(shipment.carrierName)}</div>
-    <div class="track">
-      <div class="track-title">Трек / номер ТК</div>
-      <div class="track-value">${escapeHtml(track)}</div>
-    </div>
-    <div class="row"><strong>Получатель</strong>${escapeHtml(detail.customerName || "—")}<br />${escapeHtml(detail.customerPhone || "")}</div>
-    <div class="row"><strong>Куда</strong>${escapeHtml(detail.destinationLabel || "—")}</div>
-    <div class="row"><strong>Откуда</strong>${escapeHtml(detail.originLabel || "—")}</div>
-    <div class="row"><strong>Заказ клиента</strong>${escapeHtml(detail.externalOrderId || detail.coreOrderId || "—")}</div>
-    <div class="footer">
-      <span>70×120 мм</span>
-      <span>${escapeHtml(formatDateTime(doc.createdAt))}</span>
-    </div>
-  </section>
-  ${print ? "<script>window.addEventListener('load', () => setTimeout(() => window.print(), 100));</script>" : ""}
-</body>
-</html>`
-}
-
 export default function TmsRegistryOrderPage() {
   const params = useParams<{ requestId: string }>()
   const requestId = decodeURIComponent(params.requestId)
@@ -177,15 +119,6 @@ export default function TmsRegistryOrderPage() {
   const openDocument = async (doc: RegistryDocument, print: boolean) => {
     if (!token || !detail) return
     setDocumentError(null)
-    const shipment = detail.shipments?.find((item) => item.id === doc.shipmentId)
-    if (doc.type === "LABEL" && shipment) {
-      const w = window.open("", "_blank")
-      if (!w) return
-      w.document.open()
-      w.document.write(buildLabelHtml(detail, shipment, doc, print))
-      w.document.close()
-      return
-    }
     try {
       const res = await authFetch(`/api/tms/shipments/${doc.shipmentId}/documents/${doc.id}/file`, {
         headers: { Authorization: `Bearer ${token}` },

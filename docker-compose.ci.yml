@@ -1,6 +1,6 @@
 # Для CI: образы из ghcr.io. IMAGE_API, IMAGE_WEB, IMAGE_TMS_API задаются при деплое.
 # Сеть external — создаётся один раз, переиспользуется (деплой + watchdog без конфликтов).
-# Использование: IMAGE_API=... IMAGE_WEB=... docker compose -f docker-compose.ci.yml up -d
+# Использование: IMAGE_API=... IMAGE_WEB=... APP_ENV_FILE=.env.staging docker compose -f docker-compose.ci.yml up -d
 
 services:
   redis:
@@ -22,7 +22,7 @@ services:
     image: ${IMAGE_API}
     container_name: handyseller-api
     restart: unless-stopped
-    env_file: .env.production
+    env_file: ${APP_ENV_FILE:-.env.production}
     environment:
       NODE_ENV: production
       PORT: "4000"
@@ -80,7 +80,7 @@ services:
     image: ${IMAGE_TMS_API}
     container_name: handyseller-tms-api
     restart: unless-stopped
-    env_file: .env.production
+    env_file: ${APP_ENV_FILE:-.env.production}
     environment:
       NODE_ENV: production
       PORT: "4100"

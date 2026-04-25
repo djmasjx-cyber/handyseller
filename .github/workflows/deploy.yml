@@ -97,9 +97,11 @@ jobs:
     env:
       CLIENT_ID: ${{ secrets.TMS_CLIENT_ID }}
       CLIENT_SECRET: ${{ secrets.TMS_CLIENT_SECRET }}
-      API_BASE_URL: ${{ vars.API_BASE_URL || 'https://api.handyseller.ru/api' }}
+      API_BASE_URL: ${{ vars.API_BASE_URL || 'https://dev.handyseller.ru/api' }}
       PREFERRED_CARRIER_ID: ${{ matrix.carrier }}
-      DOWNLOAD_DOC: "false"
+      DOWNLOAD_DOC: "true"
+      REQUIRE_DOCUMENT_TYPE: "LABEL"
+      REQUIRE_ORIGINAL_DOC: "true"
       TRACE_ID_PREFIX: preprod-${{ matrix.carrier }}
     steps:
       - uses: actions/checkout@v4
@@ -320,17 +322,18 @@ jobs:
             docker builder prune -af >/dev/null 2>&1 || true
             docker container prune -f >/dev/null 2>&1 || true
 
-            grep -v '^IMAGE_API=' .env.production | grep -v '^IMAGE_WEB=' | grep -v '^IMAGE_TMS_API=' > .env.production.tmp
+            grep -v '^IMAGE_API=' .env.production | grep -v '^IMAGE_WEB=' | grep -v '^IMAGE_TMS_API=' | grep -v '^APP_ENV_FILE=' > .env.production.tmp
             echo "IMAGE_API=${IMAGE_API}" >> .env.production.tmp
             echo "IMAGE_WEB=${IMAGE_WEB}" >> .env.production.tmp
             echo "IMAGE_TMS_API=${IMAGE_TMS_API}" >> .env.production.tmp
+            echo "APP_ENV_FILE=.env.production" >> .env.production.tmp
             mv .env.production.tmp .env.production
 
             if [ -n "$CR_PAT" ]; then
               echo "$CR_PAT" | docker login ghcr.io -u ${{ github.repository_owner }} --password-stdin
             fi
 
-            export IMAGE_API IMAGE_WEB IMAGE_TMS_API
+            export IMAGE_API IMAGE_WEB IMAGE_TMS_API APP_ENV_FILE=".env.production"
             chmod +x vm-watchdog.sh handyseller-start.sh 2>/dev/null || true
             DC="docker compose"
             command -v docker-compose >/dev/null 2>&1 && DC="docker-compose"
@@ -420,6 +423,8 @@ jobs:
           API_BASE_URL: ${{ vars.API_BASE_URL || 'https://api.handyseller.ru/api' }}
           PREFERRED_CARRIER_ID: dellin
           DOWNLOAD_DOC: "true"
+          REQUIRE_DOCUMENT_TYPE: "LABEL"
+          REQUIRE_ORIGINAL_DOC: "true"
         run: |
           set -euo pipefail
           bash scripts/tms-partner-e2e.sh
@@ -457,13 +462,15 @@ jobs:
             "PREV_IMAGE_API='${PREV_IMAGE_API}' PREV_IMAGE_WEB='${PREV_IMAGE_WEB}' PREV_IMAGE_TMS_API='${PREV_IMAGE_TMS_API}' bash -seu" <<'SSH'
             set -euo pipefail
             cd /opt/handyseller
-            grep -v '^IMAGE_API=' .env.production | grep -v '^IMAGE_WEB=' | grep -v '^IMAGE_TMS_API=' > .env.production.tmp
+            grep -v '^IMAGE_API=' .env.production | grep -v '^IMAGE_WEB=' | grep -v '^IMAGE_TMS_API=' | grep -v '^APP_ENV_FILE=' > .env.production.tmp
             echo "IMAGE_API=${PREV_IMAGE_API}" >> .env.production.tmp
             echo "IMAGE_WEB=${PREV_IMAGE_WEB}" >> .env.production.tmp
             echo "IMAGE_TMS_API=${PREV_IMAGE_TMS_API}" >> .env.production.tmp
+            echo "APP_ENV_FILE=.env.production" >> .env.production.tmp
             mv .env.production.tmp .env.production
             DC="docker compose"
             command -v docker-compose >/dev/null 2>&1 && DC="docker-compose"
+            export APP_ENV_FILE=".env.production"
             $DC -f docker-compose.ci.yml --env-file .env.production pull api web tms-api
             $DC -f docker-compose.ci.yml --env-file .env.production up -d --no-deps api tms-api web
           SSH
