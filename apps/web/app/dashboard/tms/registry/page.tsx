@@ -1,6 +1,7 @@
 "use client"
 
-import { Fragment, useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
+import Link from "next/link"
 import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from "@handyseller/ui"
 import { Loader2, Search } from "lucide-react"
 import { authFetch } from "@/lib/auth-fetch"
@@ -9,6 +10,8 @@ import { AUTH_STORAGE_KEYS } from "@/lib/auth-storage"
 type RegistryOrder = {
   requestId: string
   shipmentId: string | null
+  internalOrderNumber: string
+  coreOrderId: string
   status: string
   requestStatus: string
   shipmentStatus: string | null
@@ -33,29 +36,6 @@ type RegistryOrder = {
   updatedAt: string
   hasShipment: boolean
   hasArchivedShipments: boolean
-}
-
-type RegistryDetail = RegistryOrder & {
-  request?: {
-    selectedQuoteId?: string
-    draft?: { originLabel?: string; destinationLabel?: string; serviceFlags?: string[]; notes?: string }
-    snapshot?: {
-      itemSummary?: Array<{ title: string; quantity: number }>
-      cargo?: { weightGrams?: number; places?: number; declaredValueRub?: number }
-    }
-  }
-  shipments?: Array<{
-    id: string
-    carrierName: string
-    trackingNumber: string
-    status: string
-    priceRub: number
-    etaDays: number
-    createdAt: string
-  }>
-  tracking?: Array<{ id: string; description: string; status: string; occurredAt: string; location?: string }>
-  documents?: Array<{ id: string; title: string; type: string; createdAt: string }>
-  auditEvents?: Array<{ type: string; occurredAt: string; title: string; details?: string | null }>
 }
 
 type RegistryResponse = {
@@ -131,9 +111,6 @@ export default function TmsRegistryPage() {
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [expandedRequestId, setExpandedRequestId] = useState<string | null>(null)
-  const [detailsByRequest, setDetailsByRequest] = useState<Record<string, RegistryDetail>>({})
-  const [detailLoadingId, setDetailLoadingId] = useState<string | null>(null)
 
   const token = getToken()
 
@@ -171,29 +148,6 @@ export default function TmsRegistryPage() {
     } finally {
       setLoading(false)
       setLoadingMore(false)
-    }
-  }
-
-  const loadDetail = async (requestId: string) => {
-    if (!token) return
-    if (expandedRequestId === requestId) {
-      setExpandedRequestId(null)
-      return
-    }
-    setExpandedRequestId(requestId)
-    if (detailsByRequest[requestId]) return
-    setDetailLoadingId(requestId)
-    try {
-      const res = await authFetch(`/api/tms/v1/orders/${requestId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      const data = (await res.json().catch(() => ({}))) as RegistryDetail
-      if (!res.ok) throw new Error("Не удалось загрузить карточку заказа")
-      setDetailsByRequest((prev) => ({ ...prev, [requestId]: data }))
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Не удалось загрузить карточку заказа")
-    } finally {
-      setDetailLoadingId(null)
     }
   }
 
@@ -266,67 +220,53 @@ export default function TmsRegistryPage() {
             <p className="text-sm text-muted-foreground">В журнале пока нет TMS-заказов.</p>
           ) : (
             <div className="overflow-x-auto rounded-lg border">
-              <table className="w-full min-w-[1050px] text-sm">
+              <table className="w-full min-w-[1120px] text-sm">
                 <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
                   <tr>
                     <th className="px-3 py-2">Дата</th>
                     <th className="px-3 py-2">Заказ</th>
+                    <th className="px-3 py-2">Заказ клиента</th>
                     <th className="px-3 py-2">Получатель</th>
                     <th className="px-3 py-2">Маршрут</th>
                     <th className="px-3 py-2">Перевозчик</th>
                     <th className="px-3 py-2">Статус</th>
-                    <th className="px-3 py-2">Трек</th>
                     <th className="px-3 py-2 text-right">Сумма</th>
                   </tr>
                 </thead>
                 <tbody>
                   {items.map((item) => (
-                    <Fragment key={item.requestId}>
-                      <tr className="border-t align-top">
-                        <td className="px-3 py-3 whitespace-nowrap">{formatDateTime(item.createdAt)}</td>
-                        <td className="px-3 py-3">
-                          <button
-                            type="button"
-                            className="font-medium text-primary underline-offset-2 hover:underline"
-                            onClick={() => void loadDetail(item.requestId)}
-                          >
-                            {item.externalOrderId || item.coreOrderNumber || item.requestId}
-                          </button>
-                          <p className="text-xs text-muted-foreground">{orderTypeLabel(item.orderType)}</p>
-                          {item.hasArchivedShipments ? <Badge variant="secondary">Есть история замен</Badge> : null}
-                        </td>
-                        <td className="px-3 py-3">
-                          <p>{item.customerName || "—"}</p>
-                          <p className="text-xs text-muted-foreground">{item.customerPhone || "—"}</p>
-                        </td>
-                        <td className="px-3 py-3">
-                          <p>{item.originLabel || "—"}</p>
-                          <p className="text-xs text-muted-foreground">→ {item.destinationLabel || "—"}</p>
-                        </td>
-                        <td className="px-3 py-3">{item.carrierName || "Еще не выбран"}</td>
-                        <td className="px-3 py-3">
-                          <Badge variant="outline">{statusLabel(item.status)}</Badge>
-                        </td>
-                        <td className="px-3 py-3">{item.trackingNumber || "—"}</td>
-                        <td className="px-3 py-3 text-right">
-                          {item.priceRub != null ? `${item.priceRub.toLocaleString("ru-RU")} ₽` : "—"}
-                        </td>
-                      </tr>
-                      {expandedRequestId === item.requestId ? (
-                        <tr className="border-t bg-muted/20">
-                          <td colSpan={8} className="px-3 py-4">
-                            {detailLoadingId === item.requestId ? (
-                              <div className="flex items-center gap-2 text-muted-foreground">
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                                Загружаем карточку заказа...
-                              </div>
-                            ) : (
-                              <RegistryDetailPanel detail={detailsByRequest[item.requestId]} />
-                            )}
-                          </td>
-                        </tr>
-                      ) : null}
-                    </Fragment>
+                    <tr key={item.requestId} className="border-t align-top">
+                      <td className="px-3 py-3 whitespace-nowrap">{formatDateTime(item.createdAt)}</td>
+                      <td className="px-3 py-3">
+                        <Link
+                          href={`/dashboard/tms/registry/${encodeURIComponent(item.requestId)}`}
+                          className="font-medium text-primary underline-offset-2 hover:underline"
+                        >
+                          {item.internalOrderNumber || item.coreOrderNumber || item.requestId}
+                        </Link>
+                        <p className="text-xs text-muted-foreground">ID: {item.coreOrderId || item.requestId}</p>
+                        {item.hasArchivedShipments ? <Badge variant="secondary">Есть история замен</Badge> : null}
+                      </td>
+                      <td className="px-3 py-3">
+                        <p>{item.externalOrderId || "—"}</p>
+                        <p className="text-xs text-muted-foreground">{orderTypeLabel(item.orderType)}</p>
+                      </td>
+                      <td className="px-3 py-3">
+                        <p>{item.customerName || "—"}</p>
+                        <p className="text-xs text-muted-foreground">{item.customerPhone || "—"}</p>
+                      </td>
+                      <td className="px-3 py-3">
+                        <p>{item.originLabel || "—"}</p>
+                        <p className="text-xs text-muted-foreground">→ {item.destinationLabel || "—"}</p>
+                      </td>
+                      <td className="px-3 py-3">{item.carrierName || "Еще не выбран"}</td>
+                      <td className="px-3 py-3">
+                        <Badge variant="outline">{statusLabel(item.status)}</Badge>
+                      </td>
+                      <td className="px-3 py-3 text-right">
+                        {item.priceRub != null ? `${item.priceRub.toLocaleString("ru-RU")} ₽` : "—"}
+                      </td>
+                    </tr>
                   ))}
                 </tbody>
               </table>
@@ -341,65 +281,6 @@ export default function TmsRegistryPage() {
           ) : null}
         </CardContent>
       </Card>
-    </div>
-  )
-}
-
-function RegistryDetailPanel({ detail }: { detail?: RegistryDetail }) {
-  if (!detail) return null
-  const items = detail.request?.snapshot?.itemSummary ?? []
-  const audit = detail.auditEvents ?? []
-  return (
-    <div className="grid gap-4 lg:grid-cols-3">
-      <div className="space-y-2">
-        <p className="font-medium">Корзина и заявка</p>
-        <p className="text-xs text-muted-foreground">requestId: {detail.requestId}</p>
-        <p className="text-xs text-muted-foreground">quoteId: {detail.request?.selectedQuoteId ?? "не выбран"}</p>
-        <div className="rounded-md border bg-background p-3">
-          {items.length ? (
-            items.map((item) => (
-              <p key={`${item.title}-${item.quantity}`} className="text-sm">
-                {item.title} × {item.quantity}
-              </p>
-            ))
-          ) : (
-            <p className="text-sm text-muted-foreground">Состав корзины не передан.</p>
-          )}
-        </div>
-      </div>
-      <div className="space-y-2">
-        <p className="font-medium">Отгрузки и документы</p>
-        {(detail.shipments ?? []).length ? (
-          detail.shipments?.map((shipment) => (
-            <div key={shipment.id} className="rounded-md border bg-background p-3 text-sm">
-              <p className="font-medium">{shipment.carrierName}</p>
-              <p className="text-muted-foreground">Трек: {shipment.trackingNumber}</p>
-              <p className="text-muted-foreground">Статус: {statusLabel(shipment.status)}</p>
-            </div>
-          ))
-        ) : (
-          <p className="text-sm text-muted-foreground">Перевозка еще не забронирована.</p>
-        )}
-        <p className="text-xs text-muted-foreground">
-          Документов: {detail.documents?.length ?? 0}, событий трекинга: {detail.tracking?.length ?? 0}
-        </p>
-      </div>
-      <div className="space-y-2">
-        <p className="font-medium">История</p>
-        <div className="max-h-72 space-y-2 overflow-y-auto">
-          {audit.length ? (
-            audit.map((event) => (
-              <div key={`${event.type}-${event.occurredAt}-${event.title}`} className="rounded-md border bg-background p-3 text-sm">
-                <p className="font-medium">{event.title}</p>
-                <p className="text-xs text-muted-foreground">{formatDateTime(event.occurredAt)}</p>
-                {event.details ? <p className="text-xs text-muted-foreground">{event.details}</p> : null}
-              </div>
-            ))
-          ) : (
-            <p className="text-sm text-muted-foreground">История пока пустая.</p>
-          )}
-        </div>
-      </div>
     </div>
   )
 }

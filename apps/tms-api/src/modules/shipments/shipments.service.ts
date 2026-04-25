@@ -43,6 +43,8 @@ type OrderRegistryItem = {
   requestId: string;
   shipmentId: string | null;
   shipmentIds: string[];
+  internalOrderNumber: string;
+  coreOrderId: string;
   status: string;
   requestStatus: string;
   shipmentStatus: string | null;
@@ -1469,6 +1471,8 @@ export class ShipmentsService implements OnModuleInit {
       requestId: request.id,
       shipmentId: activeShipment?.id ?? null,
       shipmentIds,
+      internalOrderNumber: this.buildInternalOrderNumber(request),
+      coreOrderId: request.snapshot.coreOrderId,
       status: activeShipment?.status ?? request.status,
       requestStatus: request.status,
       shipmentStatus: activeShipment?.status ?? null,
@@ -1515,6 +1519,8 @@ export class ShipmentsService implements OnModuleInit {
         item.requestId,
         item.shipmentId,
         ...item.shipmentIds,
+        item.internalOrderNumber,
+        item.coreOrderId,
         item.externalOrderId,
         item.coreOrderNumber,
         item.customerName,
@@ -1547,6 +1553,22 @@ export class ShipmentsService implements OnModuleInit {
       return false;
     }
     return true;
+  }
+
+  private buildInternalOrderNumber(request: ShipmentRequestRecord): string {
+    const sequence =
+      [...this.requests.values()]
+        .filter((item) => item.userId === request.userId)
+        .sort((a, b) => {
+          const dateSort = a.createdAt.localeCompare(b.createdAt);
+          return dateSort === 0 ? a.id.localeCompare(b.id) : dateSort;
+        })
+        .findIndex((item) => item.id === request.id) + 1;
+    const itemCount = request.snapshot.itemSummary.reduce(
+      (sum, item) => sum + Math.max(0, Math.round(item.quantity || 0)),
+      0,
+    );
+    return `${String(Math.max(1, sequence)).padStart(6, '0')}-${String(Math.min(99, itemCount)).padStart(2, '0')}`;
   }
 
   private buildOrderRegistryAuditEvents(
