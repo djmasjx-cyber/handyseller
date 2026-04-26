@@ -1,5 +1,5 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { buildLocationPath, buildLpnBarcode, buildUnitBarcode } from '@handyseller/wms-domain';
+import { buildLocationPath, buildLpnBarcode, buildUnitBarcode, isCanonicalUnitBarcode } from '@handyseller/wms-domain';
 import type {
   CreateContainerInput,
   CreateItemInput,
@@ -348,13 +348,13 @@ export class WmsStoreService implements OnModuleInit {
     return { receipt, units: allAfter.filter((u) => u.receiptId === receiptId) };
   }
 
-  /** Легаси-штрихкоды (HU… и др.) заменяем на цифровой формат при открытии накладной. */
+  /** Неканонические штрихкоды единиц (HU…, длинные цифры и т.д.) → 12 цифр `0…` при открытии накладной. */
   private async migrateLegacyUnitBarcodesToNumeric(
     userId: string,
     units: WmsInventoryUnitRecord[],
     receipt: WmsReceiptRecord,
   ): Promise<void> {
-    const legacy = units.filter((u) => Boolean(u.barcode) && !/^\d+$/.test(u.barcode));
+    const legacy = units.filter((u) => Boolean(u.barcode) && !isCanonicalUnitBarcode(u.barcode));
     if (!legacy.length) return;
 
     let seq = (await this.nextSerial('wms_inventory_unit', userId)) + 10_000_000;

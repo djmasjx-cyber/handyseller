@@ -302,7 +302,7 @@ export default function WmsReceiptDetailPage() {
                               <td className="p-2 pr-3 max-w-xs">{title}</td>
                               <td className="p-2 pr-3 font-mono tabular-nums text-xs">
                                 {u.barcode ? (
-                                  <span className={/\D/.test(u.barcode) ? "text-amber-900" : undefined}>{u.barcode}</span>
+                                  <span className={/^0\d{11}$/.test(u.barcode) ? undefined : "text-amber-900"}>{u.barcode}</span>
                                 ) : (
                                   "—"
                                 )}
@@ -357,7 +357,7 @@ export default function WmsReceiptDetailPage() {
                 </div>
                 <p className="text-xs text-muted-foreground mt-2">
                   Строки накладной: {receipt.lines.length}. Если товаров меньше, сначала создайте/зарезервируйте штрихкоды. В колонке «ID товара» —
-                  порядковый номер строки (000001…). Штрихкоды — только цифры; устаревшие при открытии накладной пересохраняются автоматически.
+                  порядковый номер строки (000001…). Штрихкод единицы — 12 цифр, сквозной номер вида 000000000001; старые форматы при открытии накладной пересохраняются автоматически.
                 </p>
               </div>
             </>

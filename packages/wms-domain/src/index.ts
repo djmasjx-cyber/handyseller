@@ -1,35 +1,30 @@
 import type { WmsLocationRecord } from '@handyseller/wms-sdk';
 
-const UNIT_KIND = '20';
-const LPN_KIND = '21';
+/** 11 цифр счётчика (0 … 99_999_999_999). */
+const MOD_11 = 100_000_000_000;
 
-/** Стабильные десятичные цифры из строки (например userId) для вкрапления в штрихкод. */
-function tenantDigits(seed: string, len: number): string {
-  let h = 2166136261;
-  for (let i = 0; i < seed.length; i += 1) {
-    h ^= seed.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  const u = h >>> 0;
-  const mod = 10 ** len;
-  return String(u % mod).padStart(len, '0');
+/**
+ * Единица хранения: ровно **12 цифр**, сквозной номер `000000000001`, `000000000002`, …
+ * Первая цифра `0` — тип «единица», чтобы не пересекаться с тарой (LPN).
+ *
+ * `tenantSeed` оставлен в сигнатуре для совместимости вызовов; не используется.
+ */
+export function buildUnitBarcode(_tenantSeed: string, serial: number): string {
+  const n = Math.max(0, Math.floor(serial)) % MOD_11;
+  return `0${String(n).padStart(11, '0')}`;
 }
 
 /**
- * Штрихкод единицы: только цифры, 20 знаков.
- * Префикс 20 — единица хранения; 13-значный серийный номер; 5 цифр от тенанта.
+ * Тара (LPN): ровно **12 цифр**, первая цифра `8` — отличие от единиц (`0…`).
  */
-export function buildUnitBarcode(tenantSeed: string, serial: number): string {
-  const ser = Math.max(0, Math.floor(serial)) % 10 ** 13;
-  return `${UNIT_KIND}${String(ser).padStart(13, '0')}${tenantDigits(tenantSeed, 5)}`;
+export function buildLpnBarcode(_tenantSeed: string, serial: number): string {
+  const n = Math.max(0, Math.floor(serial)) % MOD_11;
+  return `8${String(n).padStart(11, '0')}`;
 }
 
-/**
- * Штрихкод тары (LPN): только цифры, 20 знаков. Префикс 21 — отличие от единиц.
- */
-export function buildLpnBarcode(tenantSeed: string, serial: number): string {
-  const ser = Math.max(0, Math.floor(serial)) % 10 ** 13;
-  return `${LPN_KIND}${String(ser).padStart(13, '0')}${tenantDigits(tenantSeed, 5)}`;
+/** Штрихкод единицы в каноническом 12-значном виде. */
+export function isCanonicalUnitBarcode(barcode: string): boolean {
+  return /^0\d{11}$/.test(barcode);
 }
 
 export function buildLocationPath(parentPath: string | null | undefined, code: string): string {
