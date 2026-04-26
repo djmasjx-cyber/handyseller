@@ -269,59 +269,7 @@ jobs:
               sudo nginx -t
               sudo systemctl reload nginx
             else
-              echo "WARN: dev.handyseller.ru SSL cert or nginx config missing; public dev smoke may fail"
+              echo "WARN: dev.handyseller.ru SSL cert or nginx config missing; HTTPS and public dev URL may be unavailable"
             fi
           SSH
-
-      - name: Staging fast smoke
-        env:
-          CLIENT_ID: ${{ secrets.TMS_CLIENT_ID }}
-          CLIENT_SECRET: ${{ secrets.TMS_CLIENT_SECRET }}
-          API_BASE_URL: ${{ vars.API_BASE_URL || 'https://dev.handyseller.ru/api' }}
-        run: |
-          set -euo pipefail
-          bash scripts/tms-fast-smoke.sh
-
-      - name: Staging registry smoke
-        env:
-          CLIENT_ID: ${{ secrets.TMS_CLIENT_ID }}
-          CLIENT_SECRET: ${{ secrets.TMS_CLIENT_SECRET }}
-          API_BASE_URL: ${{ vars.API_BASE_URL || 'https://dev.handyseller.ru/api' }}
-        run: |
-          set -euo pipefail
-          TOKEN_RESPONSE="$(curl -sS -X POST "${API_BASE_URL}/tms/oauth/token" \
-            -H "Content-Type: application/json" \
-            -d "{\"grant_type\":\"client_credentials\",\"client_id\":\"${CLIENT_ID}\",\"client_secret\":\"${CLIENT_SECRET}\"}")"
-          TMS_ACCESS_TOKEN="$(echo "${TOKEN_RESPONSE}" | jq -r '.access_token // empty')"
-          if [[ -z "${TMS_ACCESS_TOKEN}" ]]; then
-            echo "::error::Failed to mint staging token for registry smoke"
-            echo "${TOKEN_RESPONSE}"
-            exit 1
-          fi
-          TMS_BASE_URL="${API_BASE_URL}/tms" TMS_ACCESS_TOKEN="${TMS_ACCESS_TOKEN}" bash scripts/tms-registry-smoke.sh
-
-      - name: Staging demo checkout smoke
-        env:
-          WEB_BASE_URL: ${{ vars.WEB_BASE_URL || 'https://dev.handyseller.ru' }}
-          REAL_CONFIRM: "false"
-        run: |
-          set -euo pipefail
-          bash scripts/tms-demo-checkout-smoke.sh
-
-      # По умолчанию ВЫКЛ: шаг вызывает confirm в реальную ТК (ДЛ/СДЭК/Major) и создаёт настоящие заказы.
-      # Включите в GitHub → Settings → Variables: STAGING_TMS_CARRIER_DOC_SMOKE=true только когда нужна ручная проверка этикетки.
-      - name: Staging carrier document smoke
-        if: ${{ vars.STAGING_TMS_CARRIER_DOC_SMOKE == 'true' }}
-        env:
-          CLIENT_ID: ${{ secrets.TMS_CLIENT_ID }}
-          CLIENT_SECRET: ${{ secrets.TMS_CLIENT_SECRET }}
-          API_BASE_URL: ${{ vars.API_BASE_URL || 'https://dev.handyseller.ru/api' }}
-          PREFERRED_CARRIER_ID: ${{ vars.STAGING_DOCUMENT_CARRIER_ID || 'dellin' }}
-          DOWNLOAD_DOC: "true"
-          REQUIRE_DOCUMENT_TYPE: "LABEL"
-          REQUIRE_ORIGINAL_DOC: "true"
-          ALLOW_UNSUPPORTED_REFRESH: "true"
-          TRACE_ID_PREFIX: staging-doc
-        run: |
-          set -euo pipefail
-          bash scripts/tms-partner-e2e.sh
+      # Post-deploy: без вызовов TMS/ТК (нет estimate/select/confirm, нет тестовых заявок). Проверка — curl health внутри SSH выше.
