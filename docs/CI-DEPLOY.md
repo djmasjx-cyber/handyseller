@@ -15,8 +15,8 @@
     - `wms-quality` (`packages/wms-*` + `apps/wms-api` build)
 - `Deploy Staging` (`.github/workflows/deploy-staging.yml`)
   - автозапуск по push в `dev`, плюс ручной запуск.
-  - на VM обновляется **только** стэк staging: `docker-compose.staging.yml` (порты 4010/3010/4110/4210, контейнеры `handyseller-staging-*`). **Прод-стэк** (`docker-compose.ci.yml`, 4000/3001) этим job **не** перезапускается.
-  - Nginx: `https://dev.handyseller.ru` — см. `nginx/handyseller-dev-ssl.conf`. Подробно: `docs/DEV-PROD-STACK.md`.
+  - на VM обновляется **только** стэк staging: `docker-compose.staging.yml` (порты 4010/3010/4110/4210, контейнеры `handyseller-staging-*`, проект `-p handyseller-staging`). **Прод-стэк** (`docker-compose.ci.yml`, 4000/3001) этим job **не** перезапускается.
+  - deploy в environment `staging` на `https://dev.handyseller.ru`; Nginx — `nginx/handyseller-dev-ssl.conf`. Подробно: `docs/DEV-PROD-STACK.md`.
   - после деплоя — `curl` health внутри SSH (без вызовов ТК из CI).
 - `Deploy Production` (`.github/workflows/deploy.yml`)
   - запуск по push в `main` или вручную.
