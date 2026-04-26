@@ -1,0 +1,370 @@
+"use client"
+
+import { useCallback, useEffect, useState } from "react"
+import Link from "next/link"
+import { useParams } from "next/navigation"
+import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Label } from "@handyseller/ui"
+import { ArrowLeft, Ruler } from "lucide-react"
+import { authFetch } from "@/lib/auth-fetch"
+import { AUTH_STORAGE_KEYS } from "@/lib/auth-storage"
+import { formatWmsAcceptError } from "@/lib/wms-ui"
+
+type ReceiptLine = {
+  id: string
+  itemId: string
+  expectedQty: number
+  reservedQty: number
+  receivedQty: number
+  unitPrice?: number | null
+  sku?: string | null
+  lineTitle?: string | null
+}
+
+type ReceiptRecord = {
+  id: string
+  number: string
+  status: string
+  warehouseId: string
+  lines: ReceiptLine[]
+  createdAt?: string
+  updatedAt?: string
+}
+
+type UnitRow = {
+  id: string
+  itemId: string
+  barcode: string
+  status: string
+  receiptLineId: string | null
+  declaredUnitPrice?: number | null
+}
+
+function lineForUnit(lines: ReceiptLine[], u: UnitRow) {
+  return lines.find((l) => l.id === u.receiptLineId) ?? null
+}
+
+function receiptStatusRu(s: string) {
+  switch (s) {
+    case "DRAFT":
+      return "Черновик"
+    case "EXPECTED":
+      return "Ожидает"
+    case "RECEIVING":
+      return "Приёмка"
+    case "RECEIVED":
+      return "Принято"
+    case "CLOSED":
+      return "Закрыта"
+    case "CANCELLED":
+      return "Отмена"
+    default:
+      return s
+  }
+}
+
+export default function WmsReceiptDetailPage() {
+  const params = useParams()
+  const receiptId = typeof params?.receiptId === "string" ? params.receiptId : ""
+  const token = typeof window !== "undefined" ? localStorage.getItem(AUTH_STORAGE_KEYS.accessToken) : null
+
+  const [receipt, setReceipt] = useState<ReceiptRecord | null>(null)
+  const [units, setUnits] = useState<UnitRow[]>([])
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [agx, setAgx] = useState<{ itemId: string; sku: string; title: string } | null>(null)
+  const [agxW, setAgxW] = useState("")
+  const [agxL, setAgxL] = useState("")
+  const [agxWi, setAgxWi] = useState("")
+  const [agxH, setAgxH] = useState("")
+  const [agxBusy, setAgxBusy] = useState(false)
+  const [unitSheet, setUnitSheet] = useState<{
+    open: boolean
+    units: UnitRow[]
+  } | null>(null)
+
+  const load = useCallback(async () => {
+    if (!token || !receiptId) return
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await authFetch(`/api/wms/v1/receipts/${encodeURIComponent(receiptId)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(typeof data?.message === "string" ? data.message : "Накладная не найдена")
+        setReceipt(null)
+        setUnits([])
+        return
+      }
+      const r = data?.receipt as ReceiptRecord | undefined
+      const u = (Array.isArray(data?.units) ? data?.units : []) as UnitRow[]
+      if (r) setReceipt(r)
+      setUnits(
+        u.map((x) => ({
+          id: String(x.id ?? ""),
+          itemId: String(x.itemId ?? ""),
+          barcode: String(x.barcode ?? ""),
+          status: String(x.status ?? ""),
+          receiptLineId: (x.receiptLineId as string | null) ?? null,
+          declaredUnitPrice: (x as { declaredUnitPrice?: number | null }).declaredUnitPrice,
+        })),
+      )
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ошибка загрузки")
+    } finally {
+      setLoading(false)
+    }
+  }, [token, receiptId])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  const saveAgx = async () => {
+    if (!token || !agx) return
+    const wg = Number(agxW)
+    const lCm = Number(agxL)
+    const wiCm = Number(agxWi)
+    const hCm = Number(agxH)
+    if (![wg, lCm, wiCm, hCm].every((n) => Number.isFinite(n) && n > 0)) {
+      setError("Заполните вес (г) и габариты (см) — все поля обязательны.")
+      return
+    }
+    setAgxBusy(true)
+    setError(null)
+    try {
+      const res = await authFetch(`/api/wms/v1/items/${encodeURIComponent(agx.itemId)}`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          weightGrams: Math.round(wg),
+          lengthMm: Math.round(lCm * 10),
+          widthMm: Math.round(wiCm * 10),
+          heightMm: Math.round(hCm * 10),
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(typeof data?.message === "string" ? data.message : "Не удалось сохранить АГХ")
+        return
+      }
+      setAgx(null)
+      await load()
+    } finally {
+      setAgxBusy(false)
+    }
+  }
+
+  const acceptRcpt = async () => {
+    if (!token) return
+    setError(null)
+    const res = await authFetch(`/api/wms/v1/receipts/${encodeURIComponent(receiptId)}/accept`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      setError(formatWmsAcceptError(data))
+      return
+    }
+    await load()
+  }
+
+  if (!receiptId) {
+    return <p className="p-4 text-sm text-muted-foreground">Некорректная ссылка.</p>
+  }
+
+  return (
+    <div className="max-w-5xl mx-auto space-y-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <Button type="button" variant="ghost" className="min-h-10 gap-1 px-0" asChild>
+          <Link href="/dashboard/wms/sklad">
+            <ArrowLeft className="h-4 w-4" />
+            К реестру
+          </Link>
+        </Button>
+      </div>
+
+      {error ? (
+        <Card className="border-amber-200 bg-amber-50">
+          <CardContent className="py-3 text-sm text-amber-950">{error}</CardContent>
+        </Card>
+      ) : null}
+
+      <Card>
+        <CardHeader>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <CardTitle className="text-xl">Накладная {receipt ? receipt.number : "…"}</CardTitle>
+              <CardDescription className="mt-1">
+                {receipt ? (
+                  <>
+                    <span className="font-medium text-foreground">{receiptStatusRu(receipt.status)}</span>
+                    {receipt.warehouseId ? <span className="text-muted-foreground"> · склад: {receipt.warehouseId.slice(0, 8)}…</span> : null}
+                  </>
+                ) : null}
+              </CardDescription>
+            </div>
+            {receipt && receipt.status !== "RECEIVED" && receipt.status !== "CLOSED" ? (
+              <Button type="button" className="min-h-10" onClick={() => void acceptRcpt()}>
+                Принять
+              </Button>
+            ) : null}
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {loading ? (
+            <p className="text-sm text-muted-foreground">Загрузка…</p>
+          ) : !receipt ? null : (
+            <>
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="outline" size="sm" className="min-h-9" onClick={() => setUnitSheet({ open: true, units })}>
+                  Список штрихкодов
+                </Button>
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold mb-2">Позиции (каждая единица — свой штрихкод)</h3>
+                <div className="overflow-x-auto rounded-lg border">
+                  <table className="w-full min-w-[720px] text-left text-sm">
+                    <thead>
+                      <tr className="border-b bg-muted/30 text-xs text-muted-foreground">
+                        <th className="p-2 pr-3">ID товара</th>
+                        <th className="p-2 pr-3">Артикул</th>
+                        <th className="p-2 pr-3">Название</th>
+                        <th className="p-2 pr-3">Штрихкод</th>
+                        <th className="p-2 w-24"> </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {units
+                        .slice()
+                        .sort((a, b) => a.barcode.localeCompare(b.barcode))
+                        .map((u) => {
+                          const ln = lineForUnit(receipt.lines, u)
+                          const title = ln?.lineTitle || "—"
+                          const art = ln?.sku || "—"
+                          return (
+                            <tr key={u.id} className="border-b border-muted/40 last:border-0">
+                              <td className="p-2 pr-3 font-mono text-xs break-all max-w-[140px]">{u.itemId}</td>
+                              <td className="p-2 pr-3">{art}</td>
+                              <td className="p-2 pr-3 max-w-xs">{title}</td>
+                              <td className="p-2 pr-3 font-mono tabular-nums">{u.barcode || "—"}</td>
+                              <td className="p-2 text-right">
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-8"
+                                  onClick={() => {
+                                    setAgxW("")
+                                    setAgxL("")
+                                    setAgxWi("")
+                                    setAgxH("")
+                                    setAgx({
+                                      itemId: u.itemId,
+                                      sku: typeof art === "string" ? art : u.itemId.slice(0, 12),
+                                      title: typeof title === "string" ? title : "",
+                                    })
+                                  }}
+                                >
+                                  <Ruler className="h-3.5 w-3.5 mr-1" />
+                                  АГХ
+                                </Button>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                    </tbody>
+                  </table>
+                  {units.length === 0 ? (
+                    <p className="p-3 text-sm text-muted-foreground">По этой накладной ещё нет зарезервированных единиц.</p>
+                  ) : null}
+                </div>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Строки накладной: {receipt.lines.length}. Если товаров меньше, сначала создайте/зарезервируйте штрихкоды.
+                </p>
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      {agx ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => !agxBusy && setAgx(null)}>
+          <div className="w-full max-w-md rounded-lg border bg-background p-4 shadow-lg" onClick={(e) => e.stopPropagation()}>
+            <h3 className="font-semibold mb-2">
+              АГХ: {agx.sku}
+              {agx.title ? <span className="font-normal text-muted-foreground"> — {agx.title}</span> : null}
+            </h3>
+            <p className="text-xs text-muted-foreground mb-3">Вес в граммах, габариты в сантиметрах (в API уходят как мм).</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Вес, г</Label>
+                <Input type="number" min={1} value={agxW} onChange={(e) => setAgxW(e.target.value)} />
+              </div>
+              <div>
+                <Label>Длина, см</Label>
+                <Input type="number" min={1} value={agxL} onChange={(e) => setAgxL(e.target.value)} />
+              </div>
+              <div>
+                <Label>Ширина, см</Label>
+                <Input type="number" min={1} value={agxWi} onChange={(e) => setAgxWi(e.target.value)} />
+              </div>
+              <div>
+                <Label>Высота, см</Label>
+                <Input type="number" min={1} value={agxH} onChange={(e) => setAgxH(e.target.value)} />
+              </div>
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <Button type="button" variant="outline" onClick={() => setAgx(null)} disabled={agxBusy}>
+                Отмена
+              </Button>
+              <Button type="button" onClick={() => void saveAgx()} disabled={agxBusy}>
+                {agxBusy ? "…" : "Сохранить"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {unitSheet?.open ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setUnitSheet(null)}>
+          <div
+            className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-lg border bg-background p-4 shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-3 flex items-start justify-between gap-2">
+              <div>
+                <h3 className="font-semibold">Штрихкоды по накладной {receipt?.number ?? ""}</h3>
+                <p className="text-xs text-muted-foreground">Каждая физическая единица — уникальный код.</p>
+              </div>
+              <Button type="button" variant="outline" size="sm" onClick={() => setUnitSheet(null)}>
+                Закрыть
+              </Button>
+            </div>
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b text-muted-foreground">
+                  <th className="py-2 pr-2">Штрихкод</th>
+                  <th className="py-2 pr-2">Статус</th>
+                  <th className="py-2 pr-2">Цена ед.</th>
+                </tr>
+              </thead>
+              <tbody>
+                {unitSheet.units.map((u) => (
+                  <tr key={u.id} className="border-b border-muted/40">
+                    <td className="py-2 pr-2 font-mono">{u.barcode}</td>
+                    <td className="py-2 pr-2">{u.status}</td>
+                    <td className="py-2 pr-2">{u.declaredUnitPrice != null ? `${u.declaredUnitPrice} ₽` : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {unitSheet.units.length === 0 ? <p className="mt-2 text-sm text-muted-foreground">Нет единиц.</p> : null}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
+}
