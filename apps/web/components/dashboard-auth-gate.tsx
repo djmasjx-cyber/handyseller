@@ -126,6 +126,7 @@ export function DashboardAuthGate({ children }: { children: ReactNode }) {
   const p = pathname ?? ""
   const isWmsSklad = p === "/dashboard/wms" || p === "/dashboard/wms/sklad" || p.startsWith("/dashboard/wms/sklad/")
   const isWmsOperations = p === "/dashboard/wms/operations" || p.startsWith("/dashboard/wms/operations/")
+  const isWmsSettings = p === "/dashboard/wms/settings" || p.startsWith("/dashboard/wms/settings/")
 
   // Загрузка или авторизован — рендерим layout
   return (
@@ -423,6 +424,14 @@ export function DashboardAuthGate({ children }: { children: ReactNode }) {
                       <span className="w-2 h-2 rounded-full bg-muted-foreground/50 shrink-0" />
                       <span>Операции</span>
                     </Link>
+                    <Link
+                      href="/dashboard/wms/settings"
+                      onClick={() => setMenuOpen(false)}
+                      className={`flex items-center space-x-3 pl-6 pr-3 py-2.5 rounded-md min-h-[40px] touch-manipulation text-sm ${isWmsSettings ? "text-primary bg-primary/10 font-medium" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+                    >
+                      <span className="w-2 h-2 rounded-full bg-muted-foreground/50 shrink-0" />
+                      <span>Настройки WMS</span>
+                    </Link>
                   </>
                 )}
               </div>
@@ -685,6 +694,13 @@ export function DashboardAuthGate({ children }: { children: ReactNode }) {
                       >
                         <span className="w-2 h-2 rounded-full bg-muted-foreground/50 shrink-0" />
                         <span>Операции</span>
+                      </Link>
+                      <Link
+                        href="/dashboard/wms/settings"
+                        className={`flex items-center space-x-3 pl-6 pr-3 py-2 rounded-md text-sm ${isWmsSettings ? "text-primary bg-primary/10 font-medium" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+                      >
+                        <span className="w-2 h-2 rounded-full bg-muted-foreground/50 shrink-0" />
+                        <span>Настройки WMS</span>
                       </Link>
                     </>
                   )}

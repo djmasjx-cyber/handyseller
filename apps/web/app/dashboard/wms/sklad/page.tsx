@@ -308,34 +308,32 @@ export default function WmsSkladPage() {
 
   return (
     <div className="space-y-4 max-w-6xl mx-auto">
-      <div className="mb-2 flex flex-wrap items-end gap-x-4 gap-y-3 justify-between">
-        <div className="flex min-w-0 flex-1 flex-wrap items-end gap-3">
-          <WmsSubnav className="shrink-0" />
-          <div className="flex min-w-0 flex-1 flex-col gap-1 sm:max-w-xs sm:flex-[1_1_14rem]">
-            <Label className="text-xs">Активный склад</Label>
-            <select
-              className="flex h-9 w-full min-w-[10rem] rounded-md border border-input bg-background px-3 text-sm"
-              value={whId}
-              onChange={(e) => {
-                setWhId(e.target.value)
-                setImportHint(null)
-              }}
-            >
-              <option value="">— выберите —</option>
-              {warehouses.map((w) => (
-                <option key={w.id} value={w.id}>
-                  {w.code} — {w.name}
-                </option>
-              ))}
-            </select>
-          </div>
+      <div className="mb-2 flex min-w-0 flex-col gap-2 lg:flex-row lg:items-stretch lg:justify-between lg:gap-3">
+        <div className="grid min-w-0 w-full flex-1 grid-cols-1 gap-2 min-[560px]:grid-cols-2 min-[960px]:grid-cols-4 items-stretch ps-0.5">
+          <WmsSubnav asToolbarGrid />
+          <select
+            aria-label="Выберите склад"
+            className="flex h-10 min-h-10 w-full min-w-0 rounded-lg border border-input bg-background px-3 text-sm"
+            value={whId}
+            onChange={(e) => {
+              setWhId(e.target.value)
+              setImportHint(null)
+            }}
+          >
+            <option value="">— выберите склад —</option>
+            {warehouses.map((w) => (
+              <option key={w.id} value={w.id}>
+                {w.code} — {w.name}
+              </option>
+            ))}
+          </select>
         </div>
-        <div className="flex flex-wrap items-center gap-3 shrink-0">
-          <Button type="button" variant="outline" className="min-h-9" onClick={() => void load()} disabled={loading}>
+        <div className="flex flex-wrap items-center gap-2 shrink-0 lg:justify-end">
+          <Button type="button" variant="outline" className="min-h-10 h-10" onClick={() => void load()} disabled={loading}>
             {loading ? "…" : "Обновить"}
           </Button>
           {me ? (
-            <p className="text-sm text-muted-foreground flex items-center gap-1.5 max-w-[12rem] truncate" title={me.label}>
+            <p className="text-sm text-muted-foreground flex items-center gap-1.5 max-w-[12rem] truncate min-h-10" title={me.label}>
               <UserRound className="h-4 w-4 shrink-0 opacity-70" aria-hidden />
               <span className="font-medium text-foreground truncate">{me.label}</span>
             </p>
