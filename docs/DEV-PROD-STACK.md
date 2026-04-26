@@ -35,7 +35,7 @@
 | Файл | Назначение |
 |------|------------|
 | `docker-compose.ci.yml` | Production (и образец для prod). |
-| `docker-compose.staging.yml` | Только staging. |
+| `docker-compose.staging.yml` | Только staging. На VM **всегда** `docker compose -p handyseller-staging -f …` (см. Deploy Staging), иначе Compose сольёт проект с продом в `/opt/handyseller`. |
 | `nginx/handyseller-app-ssl.conf` | `app` + `api` → 4000/3001. |
 | `nginx/handyseller-dev-ssl.conf` | `dev` → 4010/3010. |
 

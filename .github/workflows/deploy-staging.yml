@@ -193,6 +193,8 @@ jobs:
             STAGING_COMPOSE="docker-compose.staging.yml"
             DC="docker compose"
             command -v docker-compose >/dev/null 2>&1 && DC="docker-compose"
+            # -p обязателен: иначе проект = имя каталога /opt/handyseller и `compose up` staging затирает prod.
+            STAGING_DC="$DC -p handyseller-staging"
             # Staging: отдельный compose/сеть; production (docker-compose.ci.yml) на VM не трогаем.
             free_mb() {
               df --output=avail -Bm / | tail -1 | tr -dc '0-9'
@@ -224,7 +226,7 @@ jobs:
               ensure_disk_headroom 1200
               for i in 1 2 3; do
                 echo "Image pull attempt ${i}/3 service=${svc}"
-                if $DC -f "${STAGING_COMPOSE}" --env-file "${ENV_FILE}" pull "${svc}"; then
+                if $STAGING_DC -f "${STAGING_COMPOSE}" --env-file "${ENV_FILE}" pull "${svc}"; then
                   return 0
                 fi
                 echo "Pull failed for ${svc}; running emergency cleanup and retrying..."
@@ -247,8 +249,8 @@ jobs:
             pull_with_fallback tms-api handyseller-staging-tms-api || exit 1
             pull_with_fallback wms-api handyseller-staging-wms-api || exit 1
             pull_with_fallback web handyseller-staging-web || exit 1
-            $DC -f "${STAGING_COMPOSE}" --env-file "${ENV_FILE}" up -d --no-deps redis
-            $DC -f "${STAGING_COMPOSE}" --env-file "${ENV_FILE}" up -d --no-deps api tms-api wms-api web
+            $STAGING_DC -f "${STAGING_COMPOSE}" --env-file "${ENV_FILE}" up -d --no-deps redis
+            $STAGING_DC -f "${STAGING_COMPOSE}" --env-file "${ENV_FILE}" up -d --no-deps api tms-api wms-api web
             for i in $(seq 1 30); do
               curl -sf --connect-timeout 3 http://127.0.0.1:4010/health >/dev/null && break
               [ "$i" -eq 30 ] && { echo "Staging API health check timeout (4010)"; exit 1; }
