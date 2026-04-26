@@ -15,8 +15,9 @@
     - `wms-quality` (`packages/wms-*` + `apps/wms-api` build)
 - `Deploy Staging` (`.github/workflows/deploy-staging.yml`)
   - автозапуск по push в `dev`, плюс ручной запуск.
-  - deploy в environment `staging` на `https://dev.handyseller.ru`.
-  - после деплоя — только `curl` health внутри SSH к сервисам (без `estimate`/`select`/`confirm` в ТК, без сценариев, создающих заявки).
+  - на VM обновляется **только** стэк staging: `docker-compose.staging.yml` (порты 4010/3010/4110/4210, контейнеры `handyseller-staging-*`, проект `-p handyseller-staging`). **Прод-стэк** (`docker-compose.ci.yml`, 4000/3001) этим job **не** перезапускается.
+  - deploy в environment `staging` на `https://dev.handyseller.ru`; Nginx — `nginx/handyseller-dev-ssl.conf`. Подробно: `docs/DEV-PROD-STACK.md`.
+  - после деплоя — `curl` health внутри SSH (без вызовов ТК из CI).
 - `Deploy Production` (`.github/workflows/deploy.yml`)
   - запуск по push в `main` или вручную.
   - build/deploy + health + SLO read-only check (`tms-slo-alert-check.sh`, GET метрики) + rollback при сбоях. Блокирующих шагов с реальными перевозчиками в GitHub нет.
