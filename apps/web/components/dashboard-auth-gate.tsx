@@ -690,13 +690,6 @@ export function DashboardAuthGate({ children }: { children: ReactNode }) {
                   )}
                 </div>
                 <Link
-                  href="/dashboard/wms"
-                  className={`flex items-center space-x-3 px-3 py-2 rounded-md ${isOnWms ? "text-primary bg-primary/10 font-medium" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
-                >
-                  <Warehouse className="h-5 w-5" />
-                  <span>WMS</span>
-                </Link>
-                <Link
                   href="/dashboard/analytics"
                   className={`flex items-center space-x-3 px-3 py-2 rounded-md ${pathname === "/dashboard/analytics" ? "text-primary bg-primary/10 font-medium" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
                 >
