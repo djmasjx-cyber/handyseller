@@ -222,6 +222,24 @@ export class CreateContainerDto {
   parentContainerId?: string | null;
 }
 
+/** Скан: один API под капотом (товар, очередь RESERVED, PDF 40×27). */
+export class PrintLabelForScanDto {
+  @IsString()
+  @IsNotEmpty()
+  scan!: string;
+
+  @IsOptional()
+  @IsString()
+  receiptId?: string | null;
+}
+
+/** Доп. заводской/внешний штрихкод (в т.ч. UPC) → товар; хранится в wms_barcode_alias. */
+export class AddItemExternalBarcodeDto {
+  @IsString()
+  @IsNotEmpty()
+  barcode!: string;
+}
+
 export class MoveInventoryDto {
   @IsOptional()
   @IsArray()

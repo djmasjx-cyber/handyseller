@@ -1,14 +1,15 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useParams } from "next/navigation"
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Label } from "@handyseller/ui"
-import { ArrowLeft, Ruler } from "lucide-react"
+import { ArrowLeft, Printer, Ruler } from "lucide-react"
 import { authFetch } from "@/lib/auth-fetch"
 import { AUTH_STORAGE_KEYS } from "@/lib/auth-storage"
 import { WmsSubnav } from "@/components/wms/wms-subnav"
 import { formatWmsAcceptError } from "@/lib/wms-ui"
+import { getWmsLocalPrintAgentBase, printWmsLabelFromPdfResponse, printWmsShelfLabelFromPayload } from "@/lib/wms-shelf-label-print"
 
 type ReceiptLine = {
   id: string
@@ -103,6 +104,10 @@ export default function WmsReceiptDetailPage() {
     open: boolean
     units: UnitRow[]
   } | null>(null)
+  const [printBusyId, setPrintBusyId] = useState<string | null>(null)
+  const [printBulkBusy, setPrintBulkBusy] = useState(false)
+
+  const unitsWithBarcodes = useMemo(() => units.filter((u) => Boolean(String(u.barcode ?? "").trim())), [units])
 
   const load = useCallback(async () => {
     if (!token || !receiptId) return
@@ -191,6 +196,63 @@ export default function WmsReceiptDetailPage() {
     }
   }
 
+  const printAllReceiptLabels = async () => {
+    if (!token || !receiptId) return
+    if (unitsWithBarcodes.length === 0) {
+      setError("Нет единиц со штрихкодом — сначала зарезервируйте штрихкоды по накладной.")
+      return
+    }
+    setPrintBulkBusy(true)
+    setError(null)
+    try {
+      const res = await authFetch(`/api/wms/v1/receipts/${encodeURIComponent(receiptId)}/labels`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      await printWmsLabelFromPdfResponse(res)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ошибка печати")
+    } finally {
+      setPrintBulkBusy(false)
+    }
+  }
+
+  const printUnitLabel = async (unitId: string) => {
+    if (printBulkBusy) return
+    if (!receipt) return
+    setPrintBusyId(unitId)
+    setError(null)
+    try {
+      const u = units.find((x) => x.id === unitId)
+      if (!u) {
+        setError("Единица не найдена в списке. Обновите страницу.")
+        return
+      }
+      if (!u.barcode?.trim()) {
+        setError("Нет штрихкода у этой единицы.")
+        return
+      }
+      const ln = lineForUnit(receipt.lines, u)
+      const art = (ln?.sku && String(ln.sku)) || "—"
+      const lineTitle = (ln?.lineTitle && String(ln.lineTitle)) || "—"
+      if (getWmsLocalPrintAgentBase()) {
+        if (!token) {
+          setError("Нет сессии для печати на принтер (PDF).")
+          return
+        }
+        const res = await authFetch(`/api/wms/v1/units/${encodeURIComponent(unitId)}/label`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        await printWmsLabelFromPdfResponse(res)
+        return
+      }
+      await printWmsShelfLabelFromPayload({ article: art, title: lineTitle, barcode: u.barcode })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ошибка печати")
+    } finally {
+      setPrintBusyId(null)
+    }
+  }
+
   const acceptRcpt = async () => {
     if (!token || !receipt) return
     setError(null)
@@ -268,6 +330,18 @@ export default function WmsReceiptDetailPage() {
           ) : !receipt ? null : (
             <>
               <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="default"
+                  size="sm"
+                  className="min-h-9 gap-1.5"
+                  disabled={printBulkBusy || unitsWithBarcodes.length === 0}
+                  title="Сразу открывается печать: многостраничный PDF 40×27 мм в системный диалог (выберите термопринтер)"
+                  onClick={() => void printAllReceiptLabels()}
+                >
+                  <Printer className="h-4 w-4 shrink-0" />
+                  {printBulkBusy ? "Формирование…" : `Печать всех этикеток (${unitsWithBarcodes.length})`}
+                </Button>
                 <Button type="button" variant="outline" size="sm" className="min-h-9" onClick={() => setUnitSheet({ open: true, units })}>
                   Список штрихкодов
                 </Button>
@@ -275,13 +349,14 @@ export default function WmsReceiptDetailPage() {
               <div>
                 <h3 className="text-sm font-semibold mb-2">Позиции (каждая единица — свой штрихкод)</h3>
                 <div className="overflow-x-auto rounded-lg border">
-                  <table className="w-full min-w-[720px] text-left text-sm">
+                  <table className="w-full min-w-[800px] text-left text-sm">
                     <thead>
                       <tr className="border-b bg-muted/30 text-xs text-muted-foreground">
                         <th className="p-2 pr-3">ID товара</th>
                         <th className="p-2 pr-3">Артикул</th>
                         <th className="p-2 pr-3">Название</th>
                         <th className="p-2 pr-3">Штрихкод</th>
+                        <th className="p-2 w-28">Этикетка</th>
                         <th className="p-2 w-24"> </th>
                       </tr>
                     </thead>
@@ -300,12 +375,34 @@ export default function WmsReceiptDetailPage() {
                               <td className="p-2 pr-3 font-mono text-sm tabular-nums text-foreground">{formatDisplayItemNo(rowIdx)}</td>
                               <td className="p-2 pr-3">{art}</td>
                               <td className="p-2 pr-3 max-w-xs">{title}</td>
-                              <td className="p-2 pr-3 font-mono tabular-nums text-xs">
+                              <td className="p-2 pr-3 font-mono tabular-nums text-xs max-w-[11rem]">
                                 {u.barcode ? (
-                                  <span className={/^0\d{11}$/.test(u.barcode) ? undefined : "text-amber-900"}>{u.barcode}</span>
+                                  <button
+                                    type="button"
+                                    className={`font-mono tabular-nums w-full text-left break-all underline decoration-dotted decoration-muted-foreground/50 hover:decoration-foreground ${/^0\d{11}$/.test(u.barcode) ? "text-foreground" : "text-amber-900"}`}
+                                    title="Печать этикетки: сразу открывается печать (40×27 мм)"
+                                    disabled={printBulkBusy}
+                                    onClick={() => void printUnitLabel(u.id)}
+                                  >
+                                    {u.barcode}
+                                  </button>
                                 ) : (
                                   "—"
                                 )}
+                              </td>
+                              <td className="p-2">
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-8 gap-1"
+                                  disabled={!u.barcode || printBulkBusy || printBusyId === u.id}
+                                  title="То же, что клик по штрихкоду: сразу печать в диалог, без скачивания"
+                                  onClick={() => void printUnitLabel(u.id)}
+                                >
+                                  <Printer className="h-3.5 w-3.5 shrink-0 opacity-80" />
+                                  {printBusyId === u.id ? "…" : "Печать"}
+                                </Button>
                               </td>
                               <td className="p-2 text-right">
                                 <Button
@@ -357,7 +454,12 @@ export default function WmsReceiptDetailPage() {
                 </div>
                 <p className="text-xs text-muted-foreground mt-2">
                   Строки накладной: {receipt.lines.length}. Если товаров меньше, сначала создайте/зарезервируйте штрихкоды. В колонке «ID товара» —
-                  порядковый номер строки (000001…). Штрихкод единицы — 12 цифр, сквозной номер вида 000000000001; старые форматы при открытии накладной пересохраняются автоматически.
+                  порядковый номер строки (000001…). Штрихкод единицы — 12 цифр, сквозной номер вида 000000000001; старые форматы при открытии накладной пересохраняются автоматически.{" "}
+                  <span className="whitespace-normal">
+                    Клик по штрихкоду или «Печать в строке» — сразу системный диалог печати 40×27 мм (как в термопринтере, без отдельного скачивания). «Печать
+                    всех этикеток» — один PDF, потом печать всех страниц. Полностью без окна печати браузер не даст: это ограничение веб-стока, для киоска/автостарта
+                    смотрите настройки Chrome или печать через QZ Tray.
+                  </span>
                 </p>
               </div>
             </>
@@ -429,7 +531,20 @@ export default function WmsReceiptDetailPage() {
               <tbody>
                 {unitSheet.units.map((u) => (
                   <tr key={u.id} className="border-b border-muted/40">
-                    <td className="py-2 pr-2 font-mono">{u.barcode}</td>
+                    <td className="py-2 pr-2">
+                      {u.barcode && receipt ? (
+                        <button
+                          type="button"
+                          className="font-mono w-full text-left break-all text-sm underline decoration-dotted decoration-muted-foreground/50 hover:decoration-foreground"
+                          title="Печать этикетки 40×27 мм"
+                          onClick={() => void printUnitLabel(u.id)}
+                        >
+                          {u.barcode}
+                        </button>
+                      ) : (
+                        <span className="font-mono">{u.barcode}</span>
+                      )}
+                    </td>
                     <td className="py-2 pr-2">{u.status}</td>
                     <td className="py-2 pr-2">{u.declaredUnitPrice != null ? `${u.declaredUnitPrice} ₽` : "—"}</td>
                   </tr>

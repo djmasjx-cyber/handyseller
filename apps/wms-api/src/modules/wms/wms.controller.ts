@@ -1,9 +1,10 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, Patch, Post, Query, StreamableFile, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { WmsAccess } from '../auth/wms-access.metadata';
 import { WmsScopeGuard } from '../auth/wms-scope.guard';
 import {
+  AddItemExternalBarcodeDto,
   CreateContainerDto,
   CreateInvoiceReceiptDto,
   CreateItemDto,
@@ -11,15 +12,20 @@ import {
   CreateReceiptDto,
   CreateWarehouseDto,
   MoveInventoryDto,
+  PrintLabelForScanDto,
   ReserveReceiptBarcodesDto,
   UpdateItemDto,
 } from './wms.dto';
+import { WmsLabelingService } from './labeling/wms-labeling.service';
 import { WmsService } from './wms.service';
 
 @Controller('wms')
 @UseGuards(AuthGuard('jwt'), WmsScopeGuard)
 export class WmsController {
-  constructor(private readonly wms: WmsService) {}
+  constructor(
+    private readonly wms: WmsService,
+    private readonly labeling: WmsLabelingService,
+  ) {}
 
   @Get('v1/warehouses')
   @WmsAccess('read')
@@ -67,6 +73,16 @@ export class WmsController {
     return this.wms.updateItem(userId, itemId, input);
   }
 
+  @Post('v1/items/:itemId/external-barcodes')
+  @WmsAccess('write')
+  addItemExternalBarcode(
+    @CurrentUser('userId') userId: string,
+    @Param('itemId') itemId: string,
+    @Body() input: AddItemExternalBarcodeDto,
+  ) {
+    return this.wms.addItemExternalBarcode(userId, itemId, input);
+  }
+
   @Get('v1/receipts')
   @WmsAccess('read')
   listReceipts(@CurrentUser('userId') userId: string) {
@@ -77,6 +93,17 @@ export class WmsController {
   @WmsAccess('read')
   getReceipt(@CurrentUser('userId') userId: string, @Param('receiptId') receiptId: string) {
     return this.wms.getReceiptDetail(userId, receiptId);
+  }
+
+  @Get('v1/receipts/:receiptId/labels')
+  @WmsAccess('read')
+  async receiptLabelsPdf(@CurrentUser('userId') userId: string, @Param('receiptId') receiptId: string) {
+    const buffer = await this.wms.getReceiptLabelsPdf(userId, receiptId);
+    const safeRid = receiptId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64);
+    return new StreamableFile(buffer, {
+      type: 'application/pdf',
+      disposition: `inline; filename="receipt-${safeRid}-labels.pdf"`,
+    });
   }
 
   @Post('v1/receipts/invoice')
@@ -119,10 +146,48 @@ export class WmsController {
     return this.wms.moveInventory(userId, input);
   }
 
+  @Post('v1/labeling/print')
+  @WmsAccess('read')
+  async printLabelForScan(
+    @CurrentUser('userId') userId: string,
+    @Body() body: PrintLabelForScanDto,
+  ) {
+    const { buffer } = await this.labeling.printLabelForScan(userId, body.scan, body.receiptId);
+    return new StreamableFile(buffer, {
+      type: 'application/pdf',
+      disposition: 'inline; filename="wms-label.pdf"',
+    });
+  }
+
+  @Get('v1/labeling/next-reserved-unit')
+  @WmsAccess('read')
+  nextReservedUnit(
+    @CurrentUser('userId') userId: string,
+    @Query('itemId') itemId: string,
+    @Query('receiptId') receiptId?: string,
+  ) {
+    const iid = itemId?.trim();
+    if (!iid) {
+      throw new BadRequestException('itemId is required');
+    }
+    return this.wms.getNextReservedUnitForLabeling(userId, iid, receiptId);
+  }
+
   @Get('v1/barcodes/:barcode')
   @WmsAccess('read')
   lookupBarcode(@CurrentUser('userId') userId: string, @Param('barcode') barcode: string) {
     return this.wms.lookupBarcode(userId, barcode);
+  }
+
+  @Get('v1/units/:unitId/label')
+  @WmsAccess('read')
+  async unitLabelPdf(@CurrentUser('userId') userId: string, @Param('unitId') unitId: string) {
+    const buffer = await this.wms.getUnitLabelPdf(userId, unitId);
+    const safeId = unitId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64);
+    return new StreamableFile(buffer, {
+      type: 'application/pdf',
+      disposition: `inline; filename="unit-${safeId}.pdf"`,
+    });
   }
 
   @Get('v1/events')
