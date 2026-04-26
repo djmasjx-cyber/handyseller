@@ -13,6 +13,7 @@ sudo chown -R $(whoami):$(whoami) /opt/handyseller
 
 echo "==> 2. Копирование конфигов..."
 cp "$ROOT/docker-compose.ci.yml" /opt/handyseller/
+cp "$ROOT/docker-compose.staging.yml" /opt/handyseller/
 cp "$ROOT/docker-compose.prod.yml" /opt/handyseller/
 cp "$ROOT/scripts/vm-watchdog.sh" /opt/handyseller/
 cp "$ROOT/scripts/handyseller-start.sh" /opt/handyseller/
