@@ -71,12 +71,12 @@ export default function WmsReceiptDetailPage() {
   const [units, setUnits] = useState<UnitRow[]>([])
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
-  const [agx, setAgx] = useState<{ itemId: string; sku: string; title: string } | null>(null)
-  const [agxW, setAgxW] = useState("")
-  const [agxL, setAgxL] = useState("")
-  const [agxWi, setAgxWi] = useState("")
-  const [agxH, setAgxH] = useState("")
-  const [agxBusy, setAgxBusy] = useState(false)
+  const [vgh, setVgh] = useState<{ itemId: string; sku: string; title: string } | null>(null)
+  const [vghW, setVghW] = useState("")
+  const [vghL, setVghL] = useState("")
+  const [vghWi, setVghWi] = useState("")
+  const [vghH, setVghH] = useState("")
+  const [vghBusy, setVghBusy] = useState(false)
   const [unitSheet, setUnitSheet] = useState<{
     open: boolean
     units: UnitRow[]
@@ -121,20 +121,20 @@ export default function WmsReceiptDetailPage() {
     void load()
   }, [load])
 
-  const saveAgx = async () => {
-    if (!token || !agx) return
-    const wg = Number(agxW)
-    const lCm = Number(agxL)
-    const wiCm = Number(agxWi)
-    const hCm = Number(agxH)
+  const saveVgh = async () => {
+    if (!token || !vgh) return
+    const wg = Number(vghW)
+    const lCm = Number(vghL)
+    const wiCm = Number(vghWi)
+    const hCm = Number(vghH)
     if (![wg, lCm, wiCm, hCm].every((n) => Number.isFinite(n) && n > 0)) {
       setError("Заполните вес (г) и габариты (см) — все поля обязательны.")
       return
     }
-    setAgxBusy(true)
+    setVghBusy(true)
     setError(null)
     try {
-      const res = await authFetch(`/api/wms/v1/items/${encodeURIComponent(agx.itemId)}`, {
+      const res = await authFetch(`/api/wms/v1/items/${encodeURIComponent(vgh.itemId)}`, {
         method: "PATCH",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -146,13 +146,13 @@ export default function WmsReceiptDetailPage() {
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
-        setError(typeof data?.message === "string" ? data.message : "Не удалось сохранить АГХ")
+        setError(typeof data?.message === "string" ? data.message : "Не удалось сохранить ВГХ")
         return
       }
-      setAgx(null)
+      setVgh(null)
       await load()
     } finally {
-      setAgxBusy(false)
+      setVghBusy(false)
     }
   }
 
@@ -257,11 +257,11 @@ export default function WmsReceiptDetailPage() {
                                   size="sm"
                                   className="h-8"
                                   onClick={() => {
-                                    setAgxW("")
-                                    setAgxL("")
-                                    setAgxWi("")
-                                    setAgxH("")
-                                    setAgx({
+                                    setVghW("")
+                                    setVghL("")
+                                    setVghWi("")
+                                    setVghH("")
+                                    setVgh({
                                       itemId: u.itemId,
                                       sku: typeof art === "string" ? art : u.itemId.slice(0, 12),
                                       title: typeof title === "string" ? title : "",
@@ -269,7 +269,7 @@ export default function WmsReceiptDetailPage() {
                                   }}
                                 >
                                   <Ruler className="h-3.5 w-3.5 mr-1" />
-                                  АГХ
+                                  ВГХ
                                 </Button>
                               </td>
                             </tr>
@@ -290,38 +290,38 @@ export default function WmsReceiptDetailPage() {
         </CardContent>
       </Card>
 
-      {agx ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => !agxBusy && setAgx(null)}>
+      {vgh ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => !vghBusy && setVgh(null)}>
           <div className="w-full max-w-md rounded-lg border bg-background p-4 shadow-lg" onClick={(e) => e.stopPropagation()}>
             <h3 className="font-semibold mb-2">
-              АГХ: {agx.sku}
-              {agx.title ? <span className="font-normal text-muted-foreground"> — {agx.title}</span> : null}
+              ВГХ (весогабаритные): {vgh.sku}
+              {vgh.title ? <span className="font-normal text-muted-foreground"> — {vgh.title}</span> : null}
             </h3>
-            <p className="text-xs text-muted-foreground mb-3">Вес в граммах, габариты в сантиметрах (в API уходят как мм).</p>
+            <p className="text-xs text-muted-foreground mb-3">Вес в граммах, габариты в сантиметрах (в API — миллиметры).</p>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label>Вес, г</Label>
-                <Input type="number" min={1} value={agxW} onChange={(e) => setAgxW(e.target.value)} />
+                <Input type="number" min={1} value={vghW} onChange={(e) => setVghW(e.target.value)} />
               </div>
               <div>
                 <Label>Длина, см</Label>
-                <Input type="number" min={1} value={agxL} onChange={(e) => setAgxL(e.target.value)} />
+                <Input type="number" min={1} value={vghL} onChange={(e) => setVghL(e.target.value)} />
               </div>
               <div>
                 <Label>Ширина, см</Label>
-                <Input type="number" min={1} value={agxWi} onChange={(e) => setAgxWi(e.target.value)} />
+                <Input type="number" min={1} value={vghWi} onChange={(e) => setVghWi(e.target.value)} />
               </div>
               <div>
                 <Label>Высота, см</Label>
-                <Input type="number" min={1} value={agxH} onChange={(e) => setAgxH(e.target.value)} />
+                <Input type="number" min={1} value={vghH} onChange={(e) => setVghH(e.target.value)} />
               </div>
             </div>
             <div className="mt-4 flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => setAgx(null)} disabled={agxBusy}>
+              <Button type="button" variant="outline" onClick={() => setVgh(null)} disabled={vghBusy}>
                 Отмена
               </Button>
-              <Button type="button" onClick={() => void saveAgx()} disabled={agxBusy}>
-                {agxBusy ? "…" : "Сохранить"}
+              <Button type="button" onClick={() => void saveVgh()} disabled={vghBusy}>
+                {vghBusy ? "…" : "Сохранить"}
               </Button>
             </div>
           </div>
