@@ -5,9 +5,26 @@ name: External Carrier E2E (retired)
 
 on:
   workflow_dispatch:
+    inputs:
+      carrier:
+        description: "Carrier to run in manual mode"
+        required: false
+        default: "all"
+        type: choice
+        options:
+          - all
+          - dellin
+          - cdek
+          - major-express
+  workflow_run:
+    workflows: ["Deploy Staging"]
+    types: [completed]
 
 permissions:
   contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   retired:
