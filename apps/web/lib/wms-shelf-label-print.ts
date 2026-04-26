@@ -146,7 +146,6 @@ export function printWmsLabelPdfBlob(blob: Blob): Promise<void> {
       "position:fixed;inset:0;opacity:0;pointer-events:none;border:0;width:1px;height:1px;visibility:hidden;",
     )
     let settled = false
-    let longWait: number | undefined
     const cleanup = () => {
       try {
         URL.revokeObjectURL(url)
@@ -158,18 +157,18 @@ export function printWmsLabelPdfBlob(blob: Blob): Promise<void> {
     const endOk = () => {
       if (settled) return
       settled = true
-      if (longWait !== undefined) window.clearTimeout(longWait)
+      window.clearTimeout(longWait)
       cleanup()
       resolve()
     }
     const endErr = (e: unknown) => {
       if (settled) return
       settled = true
-      if (longWait !== undefined) window.clearTimeout(longWait)
+      window.clearTimeout(longWait)
       cleanup()
       reject(e instanceof Error ? e : new Error("Ошибка печати PDF"))
     }
-    longWait = window.setTimeout(() => endOk(), 120_000)
+    const longWait = window.setTimeout(() => endOk(), 120_000)
 
     const onAfterPrint = () => {
       window.removeEventListener("afterprint", onAfterPrint)
@@ -189,7 +188,7 @@ export function printWmsLabelPdfBlob(blob: Blob): Promise<void> {
       () => {
         const cw = iframe.contentWindow
         if (!cw) {
-          if (longWait !== undefined) window.clearTimeout(longWait)
+          window.clearTimeout(longWait)
           endErr(new Error("Не удалось открыть PDF в кадре печати."))
           return
         }
@@ -200,7 +199,7 @@ export function printWmsLabelPdfBlob(blob: Blob): Promise<void> {
             window.addEventListener("afterprint", onAfterPrint, { once: true })
             cw.print()
           } catch (e) {
-            if (longWait !== undefined) window.clearTimeout(longWait)
+            window.clearTimeout(longWait)
             endErr(e)
           }
         }, 200)
@@ -208,7 +207,7 @@ export function printWmsLabelPdfBlob(blob: Blob): Promise<void> {
       { once: true },
     )
     iframe.addEventListener("error", () => {
-      if (longWait !== undefined) window.clearTimeout(longWait)
+      window.clearTimeout(longWait)
       endErr(new Error("Ошибка загрузки PDF в кадр."))
     }, { once: true })
     document.body.appendChild(iframe)
