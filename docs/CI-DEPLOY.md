@@ -24,7 +24,6 @@
   - governance v1: для ручного запуска требуется `change_class`, `release_owner`, а для high-risk/schema-impact — обязательный `risk_notes`.
   - после каждого prod-выката публикуется artifact `release-evidence-*`.
 - `Release Gate (PR -> main)` (`.github/workflows/release-gate-main-pr.yml`) — `verify-build-and-lint` для PR в `main`.
-- `External Carrier E2E (retired)` (`.github/workflows/dellin-nightly.yml`) — оставлен как заглушка `workflow_dispatch`, не вызывает ТК.
 
 ## Требуемая структура GitHub Environments
 
