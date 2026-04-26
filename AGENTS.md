@@ -20,7 +20,7 @@
 
 ### WMS и поставка (dev → prod)
 
-- **Контур:** правки WMS (web, BFF, `wms-api`, пакеты `wms-*`) вливаем в ветку **`dev`** → GitHub **Deploy Staging** → проверка на **`https://dev.handyseller.ru`**. На **production** (`https://app.handyseller.ru`) — только после вашего **апрува** и merge в **`main`** (workflow **Deploy Production**). Подробности: `docs/CI-DEPLOY.md`.
+- **Контур:** правки WMS (web, BFF, `wms-api`, пакеты `wms-*`) вливаем в ветку **`dev`** → GitHub **Deploy Staging** (обновляется **только** staging-стэк на VM) → проверка на **`https://dev.handyseller.ru`**. **Прод** (`https://app.handyseller.ru`) — только после merge в **`main`** (**Deploy Production**). Схема портов и «dev без выкатки в app»: `docs/DEV-PROD-STACK.md`, пайплайн: `docs/CI-DEPLOY.md`.
 - **Ветки WMS:** ориентир — **`dev`** (`git pull origin dev`). Старые длинные ветки с несмёрженным бэкендом держим как **архив на GitHub** (например `origin/feat/wms-invoice-vgh`); новая задача — **ветка от свежего `dev`**, без раздувания старых `feat/*` без rebase/merge.
 
 - **Ветки WMS (чтобы не путать репозиторий):** единый ориентир для выкатки в staging — **`dev`** (`git checkout dev && git pull origin dev`). Старую длинную ветку с несмёрженным бэкендом **не удаляем с GitHub** — она остаётся **архивом** (например `origin/feat/wms-invoice-vgh`); от неё **не** продолжают разработку без `merge` или `rebase` на актуальный `dev`, иначе снова будут конфликты. Новая задача — **новая ветка от свежего `dev`**, один PR в `dev` (как с UI WMS в PR #46).

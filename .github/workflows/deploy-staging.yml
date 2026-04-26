@@ -146,7 +146,7 @@ jobs:
             "${USER}@${HOST}" \
             "sudo mkdir -p /opt/handyseller && sudo chown \$(whoami):\$(whoami) /opt/handyseller"
           scp -i deploy_key.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -r \
-            docker-compose.ci.yml nginx \
+            docker-compose.staging.yml docker-compose.ci.yml nginx \
             "${USER}@${HOST}:/opt/handyseller/"
 
       - name: Deploy to staging VM
@@ -190,9 +190,10 @@ jobs:
             echo "APP_ENV_FILE=${ENV_FILE}" >> "${ENV_FILE}.tmp"
             mv "${ENV_FILE}.tmp" "${ENV_FILE}"
             export IMAGE_API IMAGE_WEB IMAGE_TMS_API IMAGE_WMS_API APP_ENV_FILE="${ENV_FILE}"
+            STAGING_COMPOSE="docker-compose.staging.yml"
             DC="docker compose"
             command -v docker-compose >/dev/null 2>&1 && DC="docker-compose"
-            docker network create handyseller_handyseller 2>/dev/null || true
+            # Staging: отдельный compose/сеть; production (docker-compose.ci.yml) на VM не трогаем.
             free_mb() {
               df --output=avail -Bm / | tail -1 | tr -dc '0-9'
             }
@@ -223,7 +224,7 @@ jobs:
               ensure_disk_headroom 1200
               for i in 1 2 3; do
                 echo "Image pull attempt ${i}/3 service=${svc}"
-                if $DC -f docker-compose.ci.yml --env-file "${ENV_FILE}" pull "${svc}"; then
+                if $DC -f "${STAGING_COMPOSE}" --env-file "${ENV_FILE}" pull "${svc}"; then
                   return 0
                 fi
                 echo "Pull failed for ${svc}; running emergency cleanup and retrying..."
@@ -242,26 +243,31 @@ jobs:
               done
               return 1
             }
-            pull_with_fallback api handyseller-api || exit 1
-            pull_with_fallback tms-api handyseller-tms-api || exit 1
-            pull_with_fallback wms-api handyseller-wms-api || exit 1
-            pull_with_fallback web handyseller-web || exit 1
-            $DC -f docker-compose.ci.yml --env-file "${ENV_FILE}" up -d --no-deps redis
-            $DC -f docker-compose.ci.yml --env-file "${ENV_FILE}" up -d --no-deps api tms-api wms-api web
+            pull_with_fallback api handyseller-staging-api || exit 1
+            pull_with_fallback tms-api handyseller-staging-tms-api || exit 1
+            pull_with_fallback wms-api handyseller-staging-wms-api || exit 1
+            pull_with_fallback web handyseller-staging-web || exit 1
+            $DC -f "${STAGING_COMPOSE}" --env-file "${ENV_FILE}" up -d --no-deps redis
+            $DC -f "${STAGING_COMPOSE}" --env-file "${ENV_FILE}" up -d --no-deps api tms-api wms-api web
             for i in $(seq 1 30); do
-              curl -sf --connect-timeout 3 http://127.0.0.1:4000/health >/dev/null && break
-              [ "$i" -eq 30 ] && { echo "API health check timeout"; exit 1; }
+              curl -sf --connect-timeout 3 http://127.0.0.1:4010/health >/dev/null && break
+              [ "$i" -eq 30 ] && { echo "Staging API health check timeout (4010)"; exit 1; }
               sleep 3
             done
             for i in $(seq 1 30); do
-              curl -sf --connect-timeout 3 http://127.0.0.1:4100/health >/dev/null && break
-              [ "$i" -eq 30 ] && { echo "TMS API health check timeout"; exit 1; }
+              curl -sf --connect-timeout 3 http://127.0.0.1:4110/health >/dev/null && break
+              [ "$i" -eq 30 ] && { echo "Staging TMS API health check timeout (4110)"; exit 1; }
               sleep 3
             done
             for i in $(seq 1 30); do
-              curl -sf --connect-timeout 3 http://127.0.0.1:4200/health >/dev/null && break
-              [ "$i" -eq 30 ] && { echo "WMS API health check timeout"; docker logs handyseller-wms-api --tail 80 2>&1 || true; exit 1; }
+              curl -sf --connect-timeout 3 http://127.0.0.1:4210/health >/dev/null && break
+              [ "$i" -eq 30 ] && { echo "Staging WMS API health check timeout (4210)"; docker logs handyseller-staging-wms-api --tail 80 2>&1 || true; exit 1; }
               sleep 3
+            done
+            for i in $(seq 1 20); do
+              curl -sf --connect-timeout 3 http://127.0.0.1:3010/ >/dev/null && break
+              [ "$i" -eq 20 ] && { echo "Staging Web check timeout (3010)"; docker logs handyseller-staging-web --tail 50 2>&1 || true; exit 1; }
+              sleep 2
             done
             if sudo test -f /etc/letsencrypt/live/dev.handyseller.ru/fullchain.pem && [ -f nginx/handyseller-dev-ssl.conf ]; then
               sudo cp nginx/handyseller-dev-ssl.conf /etc/nginx/sites-available/handyseller-dev

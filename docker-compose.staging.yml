@@ -1,0 +1,131 @@
+# Staging: отдельные контейнеры и host-порты, параллельно с production (docker-compose.ci.yml).
+# Nginx: dev.handyseller.ru -> 127.0.0.1:4010, 3010, 4110, 4210 (см. nginx/handyseller-dev-ssl.conf).
+# Запуск: docker compose -f docker-compose.staging.yml --env-file .env.staging up -d
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: handyseller-staging-redis
+    restart: unless-stopped
+    command: redis-server --maxmemory 64mb --maxmemory-policy allkeys-lru
+    volumes:
+      - handyseller_staging_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - handyseller_staging
+
+  api:
+    image: ${IMAGE_API}
+    container_name: handyseller-staging-api
+    restart: unless-stopped
+    env_file: ${APP_ENV_FILE:-.env.staging}
+    environment:
+      NODE_ENV: production
+      PORT: "4000"
+      REDIS_HOST: redis
+      NODE_OPTIONS: "--max-old-space-size=384"
+    ports:
+      - "127.0.0.1:4010:4000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:4000/health',(r)=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - handyseller_staging
+
+  web:
+    image: ${IMAGE_WEB}
+    container_name: handyseller-staging-web
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: "3001"
+      HOSTNAME: "0.0.0.0"
+      API_URL: http://api:4000
+      TMS_API_URL: http://tms-api:4100
+      WMS_API_URL: http://wms-api:4200
+      NODE_OPTIONS: "--max-old-space-size=256"
+      DADATA_TOKEN: ${DADATA_TOKEN:-}
+      DADATA_API_KEY: ${DADATA_API_KEY:-}
+      DADATA_SECRET: ${DADATA_SECRET:-}
+      TMS_DEMO_CLIENT_ID: ${TMS_DEMO_CLIENT_ID:-}
+      TMS_DEMO_CLIENT_SECRET: ${TMS_DEMO_CLIENT_SECRET:-}
+      TMS_DEMO_ORIGIN_LABEL: ${TMS_DEMO_ORIGIN_LABEL:-}
+      TMS_DEMO_SHIPPER_NAME: ${TMS_DEMO_SHIPPER_NAME:-}
+      TMS_DEMO_SHIPPER_PHONE: ${TMS_DEMO_SHIPPER_PHONE:-}
+    ports:
+      - "127.0.0.1:3010:3001"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3001/',(r)=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - handyseller_staging
+
+  tms-api:
+    image: ${IMAGE_TMS_API}
+    container_name: handyseller-staging-tms-api
+    restart: unless-stopped
+    env_file: ${APP_ENV_FILE:-.env.staging}
+    environment:
+      NODE_ENV: production
+      PORT: "4100"
+      CORE_API_URL: http://api:4000
+      NODE_OPTIONS: "--max-old-space-size=256"
+    ports:
+      - "127.0.0.1:4110:4100"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:4100/health',(r)=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - handyseller_staging
+
+  wms-api:
+    image: ${IMAGE_WMS_API}
+    container_name: handyseller-staging-wms-api
+    restart: unless-stopped
+    env_file: ${APP_ENV_FILE:-.env.staging}
+    environment:
+      NODE_ENV: production
+      PORT: "4200"
+      CORE_API_URL: http://api:4000
+      TMS_API_URL: http://tms-api:4100
+      NODE_OPTIONS: "--max-old-space-size=256"
+    ports:
+      - "127.0.0.1:4210:4200"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:4200/health',(r)=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - handyseller_staging
+
+networks:
+  handyseller_staging:
+    name: handyseller_staging
+    driver: bridge
+
+volumes:
+  handyseller_staging_redis:

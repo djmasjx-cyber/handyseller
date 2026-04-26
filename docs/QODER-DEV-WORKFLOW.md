@@ -6,7 +6,7 @@
 
 ## Схема работы
 
-Разработка ведётся **на сервере** через Cursor Remote-SSH. Используется **dev** — dev.handyseller.ru (параллельно с prod). Prod и dev работают одновременно: prod на app.handyseller.ru, dev на dev.handyseller.ru. Коммит и пуш только после успешной проверки на dev.
+Разработка ведётся **на сервере** через Cursor Remote-SSH. **Публичный** dev — `https://dev.handyseller.ru`: после merge в `dev` туда катается **отдельный** Docker-стэк (staging, порты 4010/3010, см. `docs/DEV-PROD-STACK.md`). **Prod** остаётся на `app.handyseller.ru` до merge в `main`. PM2 (`dev:parallel`, порты 4001/3002) — вспомогательный **локальный** режим кода, не путать с публичным dev-URL.
 
 **Важно:** метод взаимодействия (dev-parallel, порты 4001/3002, nginx) не менять — схема работает.
 
@@ -100,12 +100,13 @@ tail -f /tmp/handyseller-dev-web.log
 
 ## Порты и окружения
 
-| Окружение | API | Web | URL |
-|-----------|-----|-----|-----|
-| **Prod** | 4000 | 3001 | https://app.handyseller.ru |
-| **Dev** | 4001 | 3002 | http://dev.handyseller.ru |
+| Окружение | API (host) | Web (host) | URL |
+|-----------|------------|------------|-----|
+| **Prod (Docker)** | 4000 | 3001 | https://app.handyseller.ru |
+| **Staging (Docker, публичный dev)** | 4010 | 3010 | https://dev.handyseller.ru |
+| **PM2 dev:parallel (локально)** | 4001 | 3002 | не по умолчанию в Nginx; при необходимости — прямой localhost |
 
-Nginx проксирует dev.handyseller.ru на 4001/3002.
+Nginx для `dev.handyseller.ru` смотрит на **4010/3010** (см. `DEV-PROD-STACK.md`).
 
 ---
 
