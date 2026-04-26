@@ -13,6 +13,7 @@ const nextConfig: NextConfig = {
   // Редиректы со старого /dashboard/admin на /admin
   async redirects() {
     return [
+      { source: "/dashboard/wms", destination: "/dashboard/wms/sklad", permanent: false },
       { source: "/dashboard/admin", destination: "/admin", permanent: true },
       { source: "/dashboard/admin/users", destination: "/admin/users", permanent: true },
       { source: "/dashboard/admin/payments", destination: "/admin/payments", permanent: true },
