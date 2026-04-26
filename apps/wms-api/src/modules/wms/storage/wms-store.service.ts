@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { buildLocationPath, buildLpnBarcode, buildUnitBarcode, isCanonicalUnitBarcode } from '@handyseller/wms-domain';
+import { buildProductScanCandidates, gsinComparableKey } from '../labeling/scan-identity';
 import type {
   CreateContainerInput,
   CreateItemInput,
@@ -52,6 +53,8 @@ export class WmsStoreService implements OnModuleInit {
   private readonly units = new Map<string, WmsInventoryUnitRecord>();
   private readonly containers = new Map<string, WmsContainerRecord>();
   private readonly events: WmsInventoryEventRecord[] = [];
+  /** in-memory: ключ `${userId}\t${barcode}` → itemId (внешние/заводские копии из wms_barcode_alias). */
+  private readonly externalBarcodeToItem = new Map<string, string>();
 
   constructor() {
     const conn = process.env.WMS_DATABASE_URL?.trim() || process.env.DATABASE_URL?.trim() || '';
@@ -334,6 +337,30 @@ export class WmsStoreService implements OnModuleInit {
       return res.rows.map((r) => r.payload);
     }
     return [...this.units.values()].filter((u) => u.userId === userId);
+  }
+
+  async getInventoryUnitById(userId: string, unitId: string): Promise<WmsInventoryUnitRecord | null> {
+    if (this.pool) {
+      const res = await this.pool.query<JsonRow<WmsInventoryUnitRecord>>(
+        'SELECT payload FROM wms_inventory_unit WHERE user_id = $1 AND id = $2',
+        [userId, unitId],
+      );
+      return res.rows[0]?.payload ?? null;
+    }
+    const u = this.units.get(unitId);
+    return u && u.userId === userId ? u : null;
+  }
+
+  async getItemById(userId: string, itemId: string): Promise<WmsItemRecord | null> {
+    if (this.pool) {
+      const res = await this.pool.query<JsonRow<WmsItemRecord>>(
+        'SELECT payload FROM wms_item WHERE user_id = $1 AND id = $2',
+        [userId, itemId],
+      );
+      return res.rows[0]?.payload ?? null;
+    }
+    const it = this.items.get(itemId);
+    return it && it.userId === userId ? it : null;
   }
 
   async getReceiptWithUnits(
@@ -693,7 +720,160 @@ export class WmsStoreService implements OnModuleInit {
     const locations = await this.listLocations(userId);
     const location = locations.find((l) => l.code === barcode || l.path === barcode);
     if (location) return { kind: 'LOCATION', record: location };
+    const item = await this.findItemByScannedProductCode(userId, barcode);
+    if (item) return { kind: 'ITEM', record: item };
     return null;
+  }
+
+  /**
+   * Внешние штрихкоды (EAN, доп. коды поставщика) в БД: уникальность (user_id, barcode).
+   */
+  async addItemExternalBarcode(
+    userId: string,
+    itemId: string,
+    rawBarcode: string,
+  ): Promise<{ id: string; itemId: string; barcode: string }> {
+    const it = await this.getItemById(userId, itemId);
+    if (!it) {
+      throw new Error('Item not found');
+    }
+    const barcode = rawBarcode.trim();
+    if (!barcode) {
+      throw new Error('Barcode is required');
+    }
+    if (this.pool) {
+      const bcaId = id('bca');
+      const ins = await this.pool.query<{ id: string }>(
+        `INSERT INTO wms_barcode_alias (id, user_id, item_id, barcode, kind, payload)
+         VALUES ($1, $2, $3, $4, 'EXTERNAL', $5::jsonb)
+         ON CONFLICT (user_id, barcode)
+         DO UPDATE SET item_id = EXCLUDED.item_id, kind = EXCLUDED.kind, payload = EXCLUDED.payload
+         RETURNING id`,
+        [bcaId, userId, itemId, barcode, JSON.stringify({ itemId, sku: it.sku })],
+      );
+      const rowId = ins.rows[0]?.id ?? bcaId;
+      return { id: rowId, itemId, barcode };
+    }
+    const k = `${userId}\t${barcode}`;
+    for (const [k2, id2] of this.externalBarcodeToItem) {
+      if (k2.endsWith(`\t${barcode}`) && id2 !== itemId) {
+        throw new Error('Barcode is already used for another item in memory state');
+      }
+    }
+    this.externalBarcodeToItem.set(k, itemId);
+    return { id: id('bca'), itemId, barcode };
+  }
+
+  /**
+   * Разрешение: алиас → товар, затем поля item (арт., SKU, GTIN).
+   */
+  async findItemIdByProductScan(userId: string, raw: string): Promise<string | null> {
+    const candidates = buildProductScanCandidates(raw);
+    if (candidates.length === 0) return null;
+    const fromAlias = await this.findItemIdByAliasBarcodes(userId, candidates);
+    if (fromAlias) return fromAlias;
+    return this.findItemIdFromItemList(userId, raw, candidates);
+  }
+
+  private async findItemIdByAliasBarcodes(userId: string, candidates: string[]): Promise<string | null> {
+    const uniq = [...new Set(candidates)].filter(Boolean).slice(0, 30);
+    if (uniq.length === 0) return null;
+    if (this.pool) {
+      const res = await this.pool.query<{ item_id: string }>(
+        `SELECT item_id FROM wms_barcode_alias WHERE user_id = $1 AND barcode = ANY($2::text[]) LIMIT 1`,
+        [userId, uniq],
+      );
+      if (res.rows[0]?.item_id) {
+        return res.rows[0].item_id;
+      }
+    } else {
+      for (const b of uniq) {
+        const v = this.externalBarcodeToItem.get(`${userId}\t${b}`);
+        if (v) return v;
+      }
+    }
+    return null;
+  }
+
+  private async findItemIdFromItemList(userId: string, raw: string, candidates: string[]): Promise<string | null> {
+    const items = await this.listItems(userId);
+    const trim = raw.trim();
+    for (const it of items) {
+      if (it.sku.trim() === trim) return it.id;
+      if (it.article && it.article.trim() === trim) return it.id;
+    }
+    for (const c of candidates) {
+      const ck = gsinComparableKey(c);
+      if (!ck) continue;
+      for (const it of items) {
+        if (!it.gtin) continue;
+        const ik = gsinComparableKey(it.gtin);
+        if (ik && ik === ck) return it.id;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Заводской EAN/UPC/GTIN, алиас, артикул или SKU: для `lookup` и маршрутизации.
+   */
+  async findItemByScannedProductCode(userId: string, raw: string): Promise<WmsItemRecord | null> {
+    const itemId = await this.findItemIdByProductScan(userId, raw);
+    if (!itemId) return null;
+    return this.getItemById(userId, itemId);
+  }
+
+  /**
+   * Первая сопоставившаяся единица по вариантам ввода (внутренний 12-зн. с ведущими нулями и т.д.).
+   */
+  async findFirstInventoryUnitForScanCode(userId: string, raw: string): Promise<WmsInventoryUnitRecord | null> {
+    const seen = new Set<string>();
+    for (const c of buildProductScanCandidates(raw)) {
+      if (seen.has(c)) continue;
+      seen.add(c);
+      const u = await this.findUnitByBarcode(userId, c);
+      if (u) return u;
+    }
+    return null;
+  }
+
+  async findLocationByScannedCode(userId: string, raw: string): Promise<WmsLocationRecord | null> {
+    const locations = await this.listLocations(userId);
+    for (const c of buildProductScanCandidates(raw)) {
+      const hit = locations.find((l) => l.code === c || l.path === c);
+      if (hit) return hit;
+    }
+    return null;
+  }
+
+  async findFirstLpnForScanCode(userId: string, raw: string): Promise<WmsContainerRecord | null> {
+    for (const c of buildProductScanCandidates(raw)) {
+      const x = await this.findContainerByBarcode(userId, c);
+      if (x) return x;
+    }
+    return null;
+  }
+
+  /**
+   * Следующая зарезервированная единица по товару: для маркировки (очередь по createdAt).
+   * receiptId сужает зону до конкретной накладной, если задан.
+   */
+  async getNextReservedUnitForItem(
+    userId: string,
+    itemId: string,
+    receiptId?: string | null,
+  ): Promise<WmsInventoryUnitRecord | null> {
+    const all = await this.listAllUnits(userId);
+    const list = all.filter(
+      (u) =>
+        u.userId === userId &&
+        u.itemId === itemId &&
+        u.status === 'RESERVED' &&
+        (receiptId == null || receiptId === '' || u.receiptId === receiptId),
+    );
+    if (list.length === 0) return null;
+    list.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    return list[0] ?? null;
   }
 
   async listEvents(userId: string, limit = 50): Promise<WmsInventoryEventRecord[]> {
@@ -758,7 +938,7 @@ export class WmsStoreService implements OnModuleInit {
     return container;
   }
 
-  private async findContainerByBarcode(userId: string, barcode: string): Promise<WmsContainerRecord | null> {
+  async findContainerByBarcode(userId: string, barcode: string): Promise<WmsContainerRecord | null> {
     if (this.pool) {
       const res = await this.pool.query<JsonRow<WmsContainerRecord>>(
         'SELECT payload FROM wms_container_lpn WHERE user_id = $1 AND barcode = $2',
@@ -769,7 +949,7 @@ export class WmsStoreService implements OnModuleInit {
     return [...this.containers.values()].find((container) => container.userId === userId && container.barcode === barcode) ?? null;
   }
 
-  private async appendEvent(
+  async appendEvent(
     userId: string,
     input: Pick<WmsInventoryEventRecord, 'type' | 'payload'> &
       Partial<

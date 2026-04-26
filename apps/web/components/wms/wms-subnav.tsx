@@ -8,7 +8,12 @@ const LINKS: { href: string; label: string; match: (p: string) => boolean }[] = 
   {
     href: "/dashboard/wms/sklad",
     label: "Склад",
-    match: (p) => p === "/dashboard/wms/sklad" || p.startsWith("/dashboard/wms/sklad/"),
+    match: (p) => p === "/dashboard/wms/sklad" || (p.startsWith("/dashboard/wms/sklad/") && !p.startsWith("/dashboard/wms/sklad/scan-label")),
+  },
+  {
+    href: "/dashboard/wms/sklad/scan-label",
+    label: "Скан",
+    match: (p) => p === "/dashboard/wms/sklad/scan-label" || p.startsWith("/dashboard/wms/sklad/scan-label/"),
   },
   {
     href: "/dashboard/wms/operations",

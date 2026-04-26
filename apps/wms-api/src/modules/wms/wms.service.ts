@@ -1,6 +1,8 @@
 import { BadRequestException, HttpException, HttpStatus, Injectable, NotFoundException } from '@nestjs/common';
 import { WmsStoreService } from './storage/wms-store.service';
+import { MAX_LABELS_IN_ONE_PDF, renderUnitShelfLabelsPdf } from './unit-label-pdf';
 import {
+  AddItemExternalBarcodeDto,
   CreateContainerDto,
   CreateInvoiceReceiptDto,
   CreateItemDto,
@@ -136,8 +138,74 @@ export class WmsService {
     return result;
   }
 
+  /**
+   * Очередь маркировки: первая RESERVED-единица по товару (опционально — в рамках накладной).
+   */
+  addItemExternalBarcode(userId: string, itemId: string, input: AddItemExternalBarcodeDto) {
+    return this.guardErrors(() => this.store.addItemExternalBarcode(userId, itemId, input.barcode));
+  }
+
+  getNextReservedUnitForLabeling(userId: string, itemId: string, receiptId?: string) {
+    return this.guardErrors(async () => {
+      const unit = await this.store.getNextReservedUnitForItem(userId, itemId, receiptId?.trim() || null);
+      if (!unit) {
+        throw new NotFoundException('Нет зарезервированной единицы по этому товару в выбранной зоне.');
+      }
+      return unit;
+    });
+  }
+
   listEvents(userId: string, limit?: number) {
     return this.store.listEvents(userId, limit);
+  }
+
+  async getUnitLabelPdf(userId: string, unitId: string): Promise<Buffer> {
+    return this.guardErrors(async () => {
+      const unit = await this.store.getInventoryUnitById(userId, unitId);
+      if (!unit) {
+        throw new Error('Inventory unit not found');
+      }
+      const item = await this.store.getItemById(userId, unit.itemId);
+      if (!item) {
+        throw new Error('Item not found');
+      }
+      const article = (item.article && item.article.trim()) || item.sku;
+      return renderUnitShelfLabelsPdf([
+        {
+          article,
+          title: item.title,
+          barcode: unit.barcode,
+        },
+      ]);
+    });
+  }
+
+  /** Все этикетки накладной в одном PDF (по одной странице 40×27 мм на единицу со штрихкодом). */
+  async getReceiptLabelsPdf(userId: string, receiptId: string): Promise<Buffer> {
+    return this.guardErrors(async () => {
+      const { units } = await this.store.getReceiptWithUnits(userId, receiptId);
+      const withBc = units
+        .filter((u) => Boolean(String(u.barcode ?? '').trim()))
+        .sort((a, b) => a.barcode.localeCompare(b.barcode));
+      if (withBc.length === 0) {
+        throw new BadRequestException('Нет единиц со штрихкодом для печати этикеток.');
+      }
+      if (withBc.length > MAX_LABELS_IN_ONE_PDF) {
+        throw new BadRequestException(
+          `Слишком много единиц (${withBc.length}). Максимум ${MAX_LABELS_IN_ONE_PDF} этикеток в одном PDF.`,
+        );
+      }
+      const labelRows: { article: string; title: string; barcode: string }[] = [];
+      for (const u of withBc) {
+        const item = await this.store.getItemById(userId, u.itemId);
+        if (!item) {
+          throw new NotFoundException(`Item not found: ${u.itemId}`);
+        }
+        const article = (item.article && item.article.trim()) || item.sku;
+        labelRows.push({ article, title: item.title, barcode: u.barcode });
+      }
+      return renderUnitShelfLabelsPdf(labelRows);
+    });
   }
 
   private async guardErrors<T>(fn: () => Promise<T>): Promise<T> {

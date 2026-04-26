@@ -52,7 +52,8 @@ export type WmsInventoryEventType =
   | 'PACKED'
   | 'COUNTED'
   | 'ADJUSTED'
-  | 'SHIPPED';
+  | 'SHIPPED'
+  | 'LABEL_PRINTED';
 
 export interface WmsWarehouseRecord {
   id: string;
