@@ -99,6 +99,6 @@ docker compose -f docker-compose.ci.yml --env-file .env.production up -d --no-de
 
 4. Re-run health and product checks on prod as needed.
 
-## External carrier E2E in GitHub (retired)
+## Carrier / TMS debugging
 
-`External Carrier E2E (retired)` (`.github/workflows/dellin-nightly.yml`) is a no-op `workflow_dispatch` only; it does not call carriers. For carrier incidents, use logs, request ids, and manual or production-path reproduction instead of a nightly CI job.
+There is no automated external-carrier E2E in GitHub anymore. For incidents, use service logs, `x-request-id`, and reproduction through the product or manual local scripts (see `docs/TMS-PARTNER-API-QUICKSTART.md`).
