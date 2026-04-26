@@ -15,9 +15,8 @@ on:
           - dellin
           - cdek
           - major-express
-  workflow_run:
-    workflows: ["Deploy Staging"]
-    types: [completed]
+  # Раньше: после каждого успешного Deploy Staging автоматически шли 3× partner E2E (dellin+cdek+major) с confirm в ТК.
+  # Убрано: иначе каждый деплой dev создавал реальные заявки у перевозчиков. Оставлены cron и ручной запуск.
 
 permissions:
   contents: read

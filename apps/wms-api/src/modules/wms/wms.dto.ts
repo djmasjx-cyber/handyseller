@@ -4,6 +4,7 @@ import {
   IsIn,
   IsInt,
   IsNotEmpty,
+  IsNumber,
   IsObject,
   IsOptional,
   IsString,
@@ -153,6 +154,55 @@ export class ReserveReceiptBarcodesDto {
   @IsOptional()
   @IsString()
   receiptLineId?: string;
+}
+
+export class InvoiceLineDto {
+  @IsString()
+  @IsNotEmpty()
+  article!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  title!: string;
+
+  @IsInt()
+  @Min(1)
+  quantity!: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  price?: number;
+}
+
+export class CreateInvoiceReceiptDto {
+  @IsString()
+  @IsNotEmpty()
+  warehouseId!: string;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => InvoiceLineDto)
+  lines!: InvoiceLineDto[];
+}
+
+/** PATCH: вес (г) и габариты (мм). */
+export class UpdateItemDto {
+  @IsInt()
+  @Min(1)
+  weightGrams!: number;
+
+  @IsInt()
+  @Min(1)
+  lengthMm!: number;
+
+  @IsInt()
+  @Min(1)
+  widthMm!: number;
+
+  @IsInt()
+  @Min(1)
+  heightMm!: number;
 }
 
 export class CreateContainerDto {

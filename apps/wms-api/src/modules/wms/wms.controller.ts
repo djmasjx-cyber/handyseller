@@ -1,16 +1,18 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { WmsAccess } from '../auth/wms-access.metadata';
 import { WmsScopeGuard } from '../auth/wms-scope.guard';
 import {
   CreateContainerDto,
+  CreateInvoiceReceiptDto,
   CreateItemDto,
   CreateLocationDto,
   CreateReceiptDto,
   CreateWarehouseDto,
   MoveInventoryDto,
   ReserveReceiptBarcodesDto,
+  UpdateItemDto,
 } from './wms.dto';
 import { WmsService } from './wms.service';
 
@@ -53,6 +55,40 @@ export class WmsController {
   @WmsAccess('write')
   createItem(@CurrentUser('userId') userId: string, @Body() input: CreateItemDto) {
     return this.wms.createItem(userId, input);
+  }
+
+  @Patch('v1/items/:itemId')
+  @WmsAccess('write')
+  patchItem(
+    @CurrentUser('userId') userId: string,
+    @Param('itemId') itemId: string,
+    @Body() input: UpdateItemDto,
+  ) {
+    return this.wms.updateItem(userId, itemId, input);
+  }
+
+  @Get('v1/receipts')
+  @WmsAccess('read')
+  listReceipts(@CurrentUser('userId') userId: string) {
+    return this.wms.listReceipts(userId);
+  }
+
+  @Get('v1/receipts/:receiptId')
+  @WmsAccess('read')
+  getReceipt(@CurrentUser('userId') userId: string, @Param('receiptId') receiptId: string) {
+    return this.wms.getReceiptDetail(userId, receiptId);
+  }
+
+  @Post('v1/receipts/invoice')
+  @WmsAccess('write')
+  createInvoiceReceipt(@CurrentUser('userId') userId: string, @Body() input: CreateInvoiceReceiptDto) {
+    return this.wms.createInvoiceReceipt(userId, input);
+  }
+
+  @Post('v1/receipts/:receiptId/accept')
+  @WmsAccess('write')
+  acceptReceipt(@CurrentUser('userId') userId: string, @Param('receiptId') receiptId: string) {
+    return this.wms.acceptReceipt(userId, receiptId);
   }
 
   @Post('v1/receipts')

@@ -12,6 +12,7 @@ import type {
   WmsInventoryUnitRecord,
   WmsItemRecord,
   WmsLocationRecord,
+  WmsReceiptLineInput,
   WmsReceiptRecord,
   WmsWarehouseRecord,
 } from '@handyseller/wms-sdk';
@@ -311,6 +312,74 @@ export class WmsStoreService implements OnModuleInit {
     return [...this.items.values()].filter((item) => item.userId === userId);
   }
 
+  async listReceipts(userId: string): Promise<WmsReceiptRecord[]> {
+    if (this.pool) {
+      const res = await this.pool.query<JsonRow<WmsReceiptRecord>>(
+        'SELECT payload FROM wms_receipt WHERE user_id = $1 ORDER BY updated_at DESC',
+        [userId],
+      );
+      return res.rows.map((r) => r.payload);
+    }
+    return [...this.receipts.values()]
+      .filter((r) => r.userId === userId)
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+
+  private async listAllUnits(userId: string): Promise<WmsInventoryUnitRecord[]> {
+    if (this.pool) {
+      const res = await this.pool.query<JsonRow<WmsInventoryUnitRecord>>(
+        'SELECT payload FROM wms_inventory_unit WHERE user_id = $1',
+        [userId],
+      );
+      return res.rows.map((r) => r.payload);
+    }
+    return [...this.units.values()].filter((u) => u.userId === userId);
+  }
+
+  async getReceiptWithUnits(
+    userId: string,
+    receiptId: string,
+  ): Promise<{ receipt: WmsReceiptRecord; units: WmsInventoryUnitRecord[] }> {
+    const receipt = await this.getReceipt(userId, receiptId);
+    const all = await this.listAllUnits(userId);
+    return { receipt, units: all.filter((u) => u.receiptId === receiptId) };
+  }
+
+  async createInvoiceReceipt(
+    userId: string,
+    input: { warehouseId: string; lines: Array<{ article: string; title: string; quantity: number; price?: number }> },
+  ): Promise<{ receipt: WmsReceiptRecord; units: WmsInventoryUnitRecord[] }> {
+    if (!input.lines.length) {
+      throw new Error('At least one line is required');
+    }
+    const itemCache = await this.listItems(userId);
+    const lineInputs: WmsReceiptLineInput[] = [];
+    for (const l of input.lines) {
+      const article = l.article.trim();
+      const title = l.title.trim();
+      const qty = Math.max(1, Math.floor(Number(l.quantity)));
+      if (!article || !title) {
+        throw new Error('Each line must have article and title');
+      }
+      let item = itemCache.find((i) => (i.article && i.article === article) || i.sku === article);
+      if (!item) {
+        item = await this.createItem(userId, { sku: article, article, title });
+        itemCache.push(item);
+      }
+      lineInputs.push({ itemId: item.id, expectedQty: qty, unitLabel: null });
+    }
+    const number = `INV-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const receipt = await this.createReceipt(userId, {
+      warehouseId: input.warehouseId,
+      number,
+      source: 'INVOICE',
+      supplierName: null,
+      lines: lineInputs,
+    });
+    const units = await this.reserveReceiptBarcodes(userId, receipt.id, undefined);
+    return { receipt, units };
+  }
+
   async createItem(userId: string, input: CreateItemInput): Promise<WmsItemRecord> {
     const ts = nowIso();
     const item: WmsItemRecord = {
@@ -422,6 +491,87 @@ export class WmsStoreService implements OnModuleInit {
       status: receipt.status,
     });
     return created;
+  }
+
+  private async getItemRecord(userId: string, itemId: string): Promise<WmsItemRecord> {
+    if (this.pool) {
+      const res = await this.pool.query<JsonRow<WmsItemRecord>>(
+        'SELECT payload FROM wms_item WHERE user_id = $1 AND id = $2',
+        [userId, itemId],
+      );
+      const row = res.rows[0]?.payload;
+      if (row) return row;
+    } else {
+      const row = this.items.get(itemId);
+      if (row && row.userId === userId) return row;
+    }
+    throw new Error('Item not found');
+  }
+
+  async updateItem(
+    userId: string,
+    itemId: string,
+    input: { weightGrams: number; lengthMm: number; widthMm: number; heightMm: number },
+  ): Promise<WmsItemRecord> {
+    const item = await this.getItemRecord(userId, itemId);
+    item.dimensions = {
+      ...item.dimensions,
+      weightGrams: input.weightGrams,
+      lengthMm: input.lengthMm,
+      widthMm: input.widthMm,
+      heightMm: input.heightMm,
+    };
+    item.updatedAt = nowIso();
+    this.items.set(item.id, item);
+    await this.upsert('wms_item', item.id, userId, item, {
+      sku: item.sku,
+      core_product_id: item.coreProductId,
+    });
+    await this.appendEvent(userId, {
+      type: 'ITEM_UPDATED',
+      referenceType: 'ITEM',
+      referenceId: item.id,
+      payload: { sku: item.sku, dimensions: item.dimensions },
+    });
+    return item;
+  }
+
+  async acceptReceipt(
+    userId: string,
+    receiptId: string,
+  ): Promise<{ receipt: WmsReceiptRecord; units: WmsInventoryUnitRecord[] }> {
+    const receipt = await this.getReceipt(userId, receiptId);
+    if (receipt.status === 'RECEIVED' || receipt.status === 'CLOSED') {
+      return this.getReceiptWithUnits(userId, receiptId);
+    }
+    for (const line of receipt.lines) {
+      line.receivedQty = line.expectedQty;
+    }
+    const all = await this.listAllUnits(userId);
+    for (const u of all) {
+      if (u.receiptId !== receiptId) continue;
+      if (u.status === 'RESERVED') {
+        u.status = 'RECEIVED';
+        u.updatedAt = nowIso();
+        this.units.set(u.id, u);
+        await this.upsertUnit(u);
+      }
+    }
+    receipt.status = 'RECEIVED';
+    receipt.updatedAt = nowIso();
+    await this.upsert('wms_receipt', receipt.id, userId, receipt, {
+      warehouse_id: receipt.warehouseId,
+      number: receipt.number,
+      status: receipt.status,
+    });
+    await this.appendEvent(userId, {
+      type: 'RECEIPT_ACCEPTED',
+      warehouseId: receipt.warehouseId,
+      referenceType: 'RECEIPT',
+      referenceId: receipt.id,
+      payload: { number: receipt.number },
+    });
+    return this.getReceiptWithUnits(userId, receiptId);
   }
 
   async createContainer(userId: string, input: CreateContainerInput): Promise<WmsContainerRecord> {

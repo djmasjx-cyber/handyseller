@@ -308,7 +308,10 @@ jobs:
           set -euo pipefail
           bash scripts/tms-demo-checkout-smoke.sh
 
+      # По умолчанию ВЫКЛ: шаг вызывает confirm в реальную ТК (ДЛ/СДЭК/Major) и создаёт настоящие заказы.
+      # Включите в GitHub → Settings → Variables: STAGING_TMS_CARRIER_DOC_SMOKE=true только когда нужна ручная проверка этикетки.
       - name: Staging carrier document smoke
+        if: ${{ vars.STAGING_TMS_CARRIER_DOC_SMOKE == 'true' }}
         env:
           CLIENT_ID: ${{ secrets.TMS_CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.TMS_CLIENT_SECRET }}
