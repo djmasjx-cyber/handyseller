@@ -6,7 +6,7 @@
 
 - `CI Checks` (`.github/workflows/ci.yml`)
   - запускается на PR в `dev`/`main` и push в `dev`.
-  - fast-gate: lint + build (`api`, `tms-api`, `wms-api`, `web`) + `tms-fast-smoke` (OAuth + protected read endpoints без вызова перевозчиков).
+  - fast-gate: lint + build (`api`, `tms-api`, `wms-api`, `web`) (без вызовов TMS/ТК и без тестовых заявок).
   - context-aware quality matrix:
     - `core-quality` (api lint/build/unit)
     - `tms-quality` (tms-api build)
@@ -16,16 +16,13 @@
 - `Deploy Staging` (`.github/workflows/deploy-staging.yml`)
   - автозапуск по push в `dev`, плюс ручной запуск.
   - deploy в environment `staging` на `https://dev.handyseller.ru`.
-  - после деплоя запускает health checks, `tms-fast-smoke`, registry smoke, demo checkout smoke и carrier document smoke с оригинальным `LABEL`.
+  - после деплоя — только `curl` health внутри SSH к сервисам (без `estimate`/`select`/`confirm` в ТК, без сценариев, создающих заявки).
 - `Deploy Production` (`.github/workflows/deploy.yml`)
   - запуск по push в `main` или вручную.
-  - release-gate: verify build/lint -> `external-carrier-gate` (реальные перевозчики на dev/staging, включая скачивание оригинальных документов) -> deploy `production` + post-deploy smoke + SLO gate + rollback.
+  - build/deploy + health + SLO read-only check (`tms-slo-alert-check.sh`, GET метрики) + rollback при сбоях. Блокирующих шагов с реальными перевозчиками в GitHub нет.
   - governance v1: для ручного запуска требуется `change_class`, `release_owner`, а для high-risk/schema-impact — обязательный `risk_notes`.
   - после каждого prod-выката публикуется artifact `release-evidence-*`.
-- `External Carrier E2E` (`.github/workflows/dellin-nightly.yml`)
-  - отдельный контур реальных e2e с `dellin/cdek/major-express`.
-  - запускается по расписанию, вручную, и автоматически после успешного staging deploy.
-  - не блокирует быстрый цикл `dev`.
+- `Release Gate (PR -> main)` (`.github/workflows/release-gate-main-pr.yml`) — `verify-build-and-lint` для PR в `main`.
 
 ## Требуемая структура GitHub Environments
 
@@ -76,12 +73,8 @@
 2. Require status checks to pass before merging
 3. Required checks (для `dev`):
    - `build-lint-typecheck`
-   - `quick-partner-smoke`
 4. Required checks (для `main`):
-   - `verify-build-and-lint`
-   - `external-carrier-gate (dellin)`
-   - `external-carrier-gate (cdek)`
-   - `external-carrier-gate (major-express)`
+   - `verify-build-and-lint` (см. `release-gate-main-pr.yml`)
 5. Restrict direct pushes
 6. (для `main`) Require approvals (минимум 1)
 
@@ -91,7 +84,7 @@
 
 1. сохраняет предыдущие image tags из `.env.production`
 2. деплоит новые image SHA
-3. запускает post-deploy smoke + SLO gate
+3. запускает post-deploy health checks + SLO gate
 4. при ошибке возвращает предыдущие образы
 
 ## Release change classes
@@ -103,13 +96,10 @@
 ## Операционные контуры
 
 ### Fast lane (ежедневная разработка)
-1. PR/merge в `dev` -> fast-gate + auto deploy на `https://dev.handyseller.ru`.
-2. Автоматическая проверка сценария в dev/staging: API smoke, registry smoke, demo checkout smoke, document smoke.
-3. Ручная проверка измененного UI/бизнес-сценария на `dev.handyseller.ru`.
-4. Повторяем цикл быстро до готовности.
+1. PR/merge в `dev` -> fast-gate + auto deploy на `https://dev.handyseller.ru` (health на VM, без сценариев ТК).
+2. Ручная проверка измененного UI/бизнес-сценария на `dev.handyseller.ru` и, при необходимости, проверка цепочки «клиент → HandySeller → ТК» в продуктиве.
+3. Повторяем цикл до готовности.
 
 ### Release lane (выкатка в прод)
-1. PR `dev -> main` только после успешной ручной проверки на `dev.handyseller.ru`.
-2. Блокирующий `external-carrier-gate` на dev/staging: реальные перевозчики + `DOWNLOAD_DOC=true`.
-3. Если gate зелёный -> merge в `main` и production deploy.
-4. Post-deploy smoke + SLO + rollback при ошибке.
+1. PR `dev -> main` после успешной ручной проверки на `dev.handyseller.ru` и зелёного `Release Gate` (build/lint) на PR в `main`.
+2. Merge в `main` -> `Deploy Production` (health, SLO read-only, rollback).

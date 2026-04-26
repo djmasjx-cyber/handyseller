@@ -264,7 +264,7 @@ export function verifyHsWebhook(rawBody, signatureHeader, signingSecret) {
 
 ## 10) Готовые материалы для быстрого старта
 
-- E2E smoke script:
+- E2E script для **локального** ручного прогона (в GitHub CI не вызывается):
   - `scripts/tms-partner-e2e.sh`
 - Postman collection:
   - `docs/TMS-Partner-API.postman_collection.json`

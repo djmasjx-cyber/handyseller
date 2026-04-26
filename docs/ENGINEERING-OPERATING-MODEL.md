@@ -13,14 +13,14 @@ Simple, reliable, modern development flow for HandySeller.
 - **Rapid lane (`dev`)**
   - Goal: validate fixes quickly.
   - Trigger: push/PR to `dev`.
-  - Checks: lint, build, fast deterministic smoke (`tms-fast-smoke`, no carrier calls).
-  - Result: auto deploy to `staging`.
-  - Rule: this lane must stay independent from external carrier instability.
+  - Checks: lint, build (context-aware quality matrix; no automated TMS/carrier test orders in CI).
+  - Result: auto deploy to `staging` (VM health only).
+  - Rule: carrier integration is validated via real product usage and production traffic, not GitHub E2E.
 
 - **Release lane (`main`)**
   - Goal: safe production rollout.
   - Trigger: merge `dev -> main`.
-  - Checks: build/lint, blocking `external-carrier-gate` on staging, deploy, post-deploy smoke, SLO gate.
+  - Checks: `Release Gate (PR -> main)`: build/lint; `Deploy Production`: health, SLO read-only gate, automatic rollback.
   - Safety: automatic rollback on failed gates.
 
 ## Non-negotiable rules
@@ -28,8 +28,8 @@ Simple, reliable, modern development flow for HandySeller.
 1. No direct push to `main`.
 2. Every change goes through `dev` first.
 3. Every release uses immutable image tags by git SHA.
-4. Production deployment must pass smoke and SLO checks.
-5. Real carrier E2E is never a blocker for `dev`, but always a blocker for `main`.
+4. Production deployment must pass health checks and the SLO gate.
+5. Automated external-carrier E2E in GitHub is retired; do not reintroduce CI jobs that call carriers or create test bookings.
 
 ## Governance v1
 
@@ -54,14 +54,13 @@ Simple, reliable, modern development flow for HandySeller.
 ## When fast lane is allowed
 
 Use `dev` fast lane for:
-- UI/API/business-logic changes that can be validated without real carrier booking.
+- UI/API/business-logic changes and rapid iteration.
 - Bugfix iterations that require high speed and frequent redeploys.
-- Any integration task where carrier behavior is not the acceptance criterion.
+- Scenarios you can verify on `dev` plus manual or production-adjacent checks as needed.
 
-Use only release lane (`main` + external gate) for:
-- Changes affecting booking/confirm flow with real carriers.
-- Changes in carrier adapters/mappings/contracts.
-- Production releases of any customer-facing functionality.
+Promote to `main` (release lane) for:
+- Any change you are ready to run in production, including booking/confirm with real carriers, adapter/contract work, and customer-facing releases.
+- Migrations and high-risk changes per governance.
 
 ## Core/TMS boundary rules (v1)
 

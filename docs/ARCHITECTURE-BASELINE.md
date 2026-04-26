@@ -15,8 +15,8 @@ This document fixes the current architecture baseline and the target service-fir
 
 ### Delivery Topology
 
-- Fast lane: `dev` checks and staging deploy with deterministic smoke.
-- Release lane: `main` with external-carrier gate and production deploy/rollback.
+- Fast lane: `dev` checks and staging deploy (lint/build; no automated carrier E2E in CI).
+- Release lane: `main` with `Release Gate` (build/lint) and production deploy/rollback; health and SLO checks in deploy.
 
 ## Known Architectural Risks
 

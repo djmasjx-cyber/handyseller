@@ -6,19 +6,14 @@
 2. PR -> `dev`.
 3. Wait for required CI checks:
    - `build-lint-typecheck`
-   - `quick-partner-smoke`
-4. Merge -> auto `Deploy Staging` to `https://dev.handyseller.ru`.
+4. Merge -> auto `Deploy Staging` to `https://dev.handyseller.ru` (VM health; no automated TMS/carrier test orders in CI).
 5. Validate dev/staging before any production promotion:
-   - core health endpoints
-   - partner smoke flow
-   - registry list/detail smoke
-   - demo checkout smoke without real booking
-   - carrier document smoke with original `LABEL` download
-   - manual UI check for the changed scenario
+   - core health endpoints (and manual UI check for the changed scenario)
+   - for carrier-related releases: spot-check waybills/labels in UI and, if needed, a real client or internal path to the carrier (CI no longer runs carrier E2E)
 6. PR `dev -> main`.
-7. Wait for `Release Gate (PR -> main)`: build/lint and carrier e2e with original document downloads.
+7. Wait for `Release Gate (PR -> main)`: `verify-build-and-lint` (build + lint on full tree).
 8. Merge -> `Deploy Production`.
-9. Verify post-deploy smoke and SLO gate.
+9. Verify post-deploy health and SLO gate; optional manual checks on app endpoints.
 
 ## Production release checklist
 
@@ -42,7 +37,7 @@ Use this checklist after every `dev` deploy and before opening/merging `dev -> m
    - shipments and documents are present
    - waybill opens from the backend document endpoint
    - label opens as the original carrier label from the carrier document endpoint
-5. If the release touches carriers, run or wait for carrier e2e with `DOWNLOAD_DOC=true`.
+5. If the release touches carriers, do extra manual or production validation of booking and documents; GitHub no longer runs automated carrier E2E.
 6. If any dev check fails, fix in `dev`; do not promote to `main`.
 
 ## Environment contract
@@ -55,10 +50,10 @@ Use this checklist after every `dev` deploy and before opening/merging `dev -> m
 
 ## Required gates before production
 
-- PR to `dev`: fast CI and quick partner smoke.
-- Push to `dev`: staging deploy plus registry, demo checkout, and carrier document smoke.
-- PR `dev -> main`: release gate with all critical carriers and `DOWNLOAD_DOC=true`.
-- Push to `main`: production deploy, post-deploy partner smoke with document download, SLO check, and rollback guard.
+- PR to `dev`: `CI Checks` (lint/build per scope).
+- Push to `dev`: `Deploy Staging` (health on VM; no automated TMS/ТК smokes).
+- PR `dev -> main`: `Release Gate (PR -> main)` — `verify-build-and-lint` only.
+- Push to `main`: `Deploy Production` — health checks, SLO read-only check, and rollback guard.
 
 ## Incident triage
 
@@ -102,13 +97,8 @@ docker compose -f docker-compose.ci.yml --env-file .env.production pull api web 
 docker compose -f docker-compose.ci.yml --env-file .env.production up -d --no-deps api tms-api web
 ```
 
-4. Re-run smoke checks.
+4. Re-run health and product checks on prod as needed.
 
-## Dellin-specific operational loop
+## Carrier / TMS debugging
 
-1. Nightly job monitors Dellin scenario on staging.
-2. If failed:
-   - download workflow artifact `dellin-nightly-<run_id>`
-   - inspect request/response diagnostics
-3. Implement targeted fix in `dev`.
-4. Verify in staging before promoting to prod.
+There is no automated external-carrier E2E in GitHub anymore. For incidents, use service logs, `x-request-id`, and reproduction through the product or manual local scripts (see `docs/TMS-PARTNER-API-QUICKSTART.md`).
