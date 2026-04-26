@@ -1,8 +1,13 @@
+# Внешние перевозчики (ДЛ / СДЭК / Major): полный E2E с confirm в ТК.
+# По умолчанию ничего не запускается — не создаём заявки у ТК из CI.
+#
+# Включить осознанный прогон (редко, вручную):
+#   GitHub → Settings → Variables: ENABLE_EXTERNAL_CARRIER_E2E = true
+#   Actions → External Carrier E2E → Run workflow
+
 name: External Carrier E2E
 
 on:
-  schedule:
-    - cron: "15 2 * * *"
   workflow_dispatch:
     inputs:
       carrier:
@@ -15,8 +20,6 @@ on:
           - dellin
           - cdek
           - major-express
-  # Раньше: после каждого успешного Deploy Staging автоматически шли 3× partner E2E (dellin+cdek+major) с confirm в ТК.
-  # Убрано: иначе каждый деплой dev создавал реальные заявки у перевозчиков. Оставлены cron и ручной запуск.
 
 permissions:
   contents: read
@@ -26,7 +29,7 @@ env:
 
 jobs:
   external-carrier-e2e:
-    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ vars.ENABLE_EXTERNAL_CARRIER_E2E == 'true' }}
     runs-on: ubuntu-latest
     environment: staging
     strategy:
@@ -69,3 +72,12 @@ jobs:
             external-${{ matrix.carrier }}.log
             /tmp/tms-smoke-doc.bin
           if-no-files-found: ignore
+
+  external-carrier-e2e-disabled:
+    if: ${{ vars.ENABLE_EXTERNAL_CARRIER_E2E != 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Explain
+        run: |
+          echo "External Carrier E2E отключён (не вызываем ТК из CI)."
+          echo "Для ручного прогона: задайте org variable ENABLE_EXTERNAL_CARRIER_E2E=true и запустите workflow вручную."
