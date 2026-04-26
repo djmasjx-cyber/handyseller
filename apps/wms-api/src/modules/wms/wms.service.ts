@@ -49,7 +49,11 @@ export class WmsService {
         const it = byId.get(ln.itemId);
         return { ...ln, sku: it?.sku ?? null, lineTitle: it?.title ?? null };
       });
-      return { receipt: { ...receipt, lines }, units };
+      const lineItemIds = new Set(receipt.lines.map((ln) => ln.itemId));
+      const itemsForReceipt = items
+        .filter((it) => lineItemIds.has(it.id))
+        .map((it) => ({ id: it.id, dimensions: it.dimensions ?? {} }));
+      return { receipt: { ...receipt, lines }, units, items: itemsForReceipt };
     });
   }
 

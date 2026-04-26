@@ -14,6 +14,7 @@ import {
   Label,
 } from "@handyseller/ui"
 import { ChevronRight, PackagePlus, ScanLine, UserRound, Warehouse } from "lucide-react"
+import { WmsSubnav } from "@/components/wms/wms-subnav"
 import { authFetch } from "@/lib/auth-fetch"
 import { AUTH_STORAGE_KEYS, getStoredUser } from "@/lib/auth-storage"
 
@@ -604,6 +605,7 @@ export default function WmsDashboardPage() {
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto">
+      <WmsSubnav />
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div>
           <div className="flex flex-wrap items-center gap-2">
