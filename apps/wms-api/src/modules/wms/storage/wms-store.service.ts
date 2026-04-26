@@ -342,7 +342,41 @@ export class WmsStoreService implements OnModuleInit {
   ): Promise<{ receipt: WmsReceiptRecord; units: WmsInventoryUnitRecord[] }> {
     const receipt = await this.getReceipt(userId, receiptId);
     const all = await this.listAllUnits(userId);
-    return { receipt, units: all.filter((u) => u.receiptId === receiptId) };
+    const units = all.filter((u) => u.receiptId === receiptId);
+    await this.migrateLegacyUnitBarcodesToNumeric(userId, units, receipt);
+    const allAfter = await this.listAllUnits(userId);
+    return { receipt, units: allAfter.filter((u) => u.receiptId === receiptId) };
+  }
+
+  /** Легаси-штрихкоды (HU… и др.) заменяем на цифровой формат при открытии накладной. */
+  private async migrateLegacyUnitBarcodesToNumeric(
+    userId: string,
+    units: WmsInventoryUnitRecord[],
+    receipt: WmsReceiptRecord,
+  ): Promise<void> {
+    const legacy = units.filter((u) => Boolean(u.barcode) && !/^\d+$/.test(u.barcode));
+    if (!legacy.length) return;
+
+    let seq = (await this.nextSerial('wms_inventory_unit', userId)) + 10_000_000;
+    const ts = nowIso();
+    for (const u of legacy) {
+      let nextBc: string;
+      let guard = 0;
+      do {
+        nextBc = buildUnitBarcode(userId, seq);
+        seq += 1;
+        guard += 1;
+        if (guard > 500) throw new Error('barcode_migration_uniqueness');
+      } while (await this.findUnitByBarcode(userId, nextBc));
+
+      u.barcode = nextBc;
+      u.updatedAt = ts;
+      if (!this.pool) {
+        this.units.set(u.id, u);
+      }
+      await this.upsertUnit(u);
+    }
+    this.logger.log(`Migrated ${legacy.length} unit barcode(s) to numeric-only for receipt ${receipt.number}`);
   }
 
   async createInvoiceReceipt(
