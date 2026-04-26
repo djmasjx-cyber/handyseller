@@ -7,6 +7,7 @@ import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Inpu
 import { ArrowLeft, Ruler } from "lucide-react"
 import { authFetch } from "@/lib/auth-fetch"
 import { AUTH_STORAGE_KEYS } from "@/lib/auth-storage"
+import { WmsSubnav } from "@/components/wms/wms-subnav"
 import { formatWmsAcceptError } from "@/lib/wms-ui"
 
 type ReceiptLine = {
@@ -177,6 +178,7 @@ export default function WmsReceiptDetailPage() {
 
   return (
     <div className="max-w-5xl mx-auto space-y-4">
+      <WmsSubnav />
       <div className="flex flex-wrap items-center gap-3">
         <Button type="button" variant="ghost" className="min-h-10 gap-1 px-0" asChild>
           <Link href="/dashboard/wms/sklad">

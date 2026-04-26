@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useId, useState, type DragEventHandler } from "react"
 import Link from "next/link"
-import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Label } from "@handyseller/ui"
-import { FileUp, UserRound, Warehouse } from "lucide-react"
+import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Label } from "@handyseller/ui"
+import { FileUp, UserRound } from "lucide-react"
+import { WmsSubnav } from "@/components/wms/wms-subnav"
 import { authFetch } from "@/lib/auth-fetch"
 import { AUTH_STORAGE_KEYS, getStoredUser } from "@/lib/auth-storage"
 
@@ -36,7 +37,7 @@ type ReceiptRecord = {
   updatedAt?: string
 }
 
-type InvRow = { article: string; title: string; quantity: number; price: number }
+type InvRow = { article: string; title: string; quantity: number; price: string }
 
 type MeProfile = { id: string; label: string }
 
@@ -133,9 +134,9 @@ function parseInvoiceCsv(text: string): InvRow[] {
     const qtyStr = (row[colQ] ?? "1").replace(/^"|"$/g, "").replace(/\s/g, "").replace(",", ".")
     const priceStr = (row[colP] ?? "0").replace(/^"|"$/g, "").replace(/\s/g, "").replace(",", ".")
     const quantity = Math.max(1, Math.floor(Number(qtyStr) || 1))
-    const price = Math.max(0, Number(priceStr) || 0)
+    const priceNum = Math.max(0, Number(priceStr) || 0)
     if (!article || !title) continue
-    out.push({ article, title, quantity, price })
+    out.push({ article, title, quantity, price: priceNum > 0 ? String(priceNum) : "" })
   }
   return out
 }
@@ -165,7 +166,7 @@ export default function WmsSkladPage() {
   const [warehouses, setWarehouses] = useState<WarehouseRecord[]>([])
   const [receipts, setReceipts] = useState<ReceiptRecord[]>([])
   const [whId, setWhId] = useState("")
-  const [invRows, setInvRows] = useState<InvRow[]>([{ article: "", title: "", quantity: 1, price: 0 }])
+  const [invRows, setInvRows] = useState<InvRow[]>([{ article: "", title: "", quantity: 1, price: "" }])
   const [invBusy, setInvBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
@@ -226,7 +227,7 @@ export default function WmsSkladPage() {
         article: r.article.trim(),
         title: r.title.trim(),
         quantity: Math.max(1, Math.floor(r.quantity)),
-        price: Math.max(0, r.price),
+        price: Math.max(0, parseFloat(String(r.price).replace(",", ".").trim()) || 0),
       }))
       .filter((r) => r.article && r.title)
     if (!lines.length) {
@@ -247,7 +248,7 @@ export default function WmsSkladPage() {
         setError(typeof data?.message === "string" ? data.message : "Ошибка создания накладной")
         return
       }
-      setInvRows([{ article: "", title: "", quantity: 1, price: 0 }])
+      setInvRows([{ article: "", title: "", quantity: 1, price: "" }])
       setSuccessMessage("Накладная создана, штрихкоды зарезервированы.")
       await load()
     } finally {
@@ -302,28 +303,46 @@ export default function WmsSkladPage() {
 
   const filteredReceipts = whId ? receipts.filter((r) => r.warehouseId === whId) : receipts
   const activeWh = warehouses.find((w) => w.id === whId)
+  const canSubmit =
+    Boolean(whId) && invRows.some((r) => r.article.trim().length > 0 && r.title.trim().length > 0)
 
   return (
     <div className="space-y-4 max-w-6xl mx-auto">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <Warehouse className="h-6 w-6 text-primary shrink-0" />
-          <h1 className="text-xl font-semibold tracking-tight">Склад</h1>
-          <Badge variant="secondary" className="font-normal text-xs">
-            накладные
-          </Badge>
+      <div className="mb-2 flex flex-wrap items-end gap-x-4 gap-y-3 justify-between">
+        <div className="flex min-w-0 flex-1 flex-wrap items-end gap-3">
+          <WmsSubnav className="shrink-0" />
+          <div className="flex min-w-0 flex-1 flex-col gap-1 sm:max-w-xs sm:flex-[1_1_14rem]">
+            <Label className="text-xs">Активный склад</Label>
+            <select
+              className="flex h-9 w-full min-w-[10rem] rounded-md border border-input bg-background px-3 text-sm"
+              value={whId}
+              onChange={(e) => {
+                setWhId(e.target.value)
+                setImportHint(null)
+              }}
+            >
+              <option value="">— выберите —</option>
+              {warehouses.map((w) => (
+                <option key={w.id} value={w.id}>
+                  {w.code} — {w.name}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
-        <Button type="button" variant="outline" className="min-h-9" onClick={() => void load()} disabled={loading}>
-          {loading ? "…" : "Обновить"}
-        </Button>
+        <div className="flex flex-wrap items-center gap-3 shrink-0">
+          <Button type="button" variant="outline" className="min-h-9" onClick={() => void load()} disabled={loading}>
+            {loading ? "…" : "Обновить"}
+          </Button>
+          {me ? (
+            <p className="text-sm text-muted-foreground flex items-center gap-1.5 max-w-[12rem] truncate" title={me.label}>
+              <UserRound className="h-4 w-4 shrink-0 opacity-70" aria-hidden />
+              <span className="font-medium text-foreground truncate">{me.label}</span>
+            </p>
+          ) : null}
+        </div>
       </div>
-
-      {me ? (
-        <p className="text-xs text-muted-foreground">
-          <UserRound className="inline h-3.5 w-3.5 opacity-70 mr-1" aria-hidden />
-          <span className="font-medium text-foreground">{me.label}</span>
-        </p>
-      ) : null}
+      {activeWh ? <p className="text-xs text-muted-foreground truncate -mt-1">{activeWh.name}</p> : null}
 
       {successMessage && !error ? (
         <p className="text-sm font-medium text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-md px-3 py-2">{successMessage}</p>
@@ -335,26 +354,6 @@ export default function WmsSkladPage() {
         </p>
       ) : null}
 
-      <div className="grid gap-2 sm:max-w-md">
-        <Label>Активный склад</Label>
-        <select
-          className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-          value={whId}
-          onChange={(e) => {
-            setWhId(e.target.value)
-            setImportHint(null)
-          }}
-        >
-          <option value="">— выберите —</option>
-          {warehouses.map((w) => (
-            <option key={w.id} value={w.id}>
-              {w.code} — {w.name}
-            </option>
-          ))}
-        </select>
-        {activeWh ? <p className="text-xs text-muted-foreground truncate">{activeWh.name}</p> : null}
-      </div>
-
       <div className="grid gap-3 md:grid-cols-2">
         <Card>
           <CardHeader className="px-4 py-3">
@@ -363,8 +362,11 @@ export default function WmsSkladPage() {
           </CardHeader>
           <CardContent className="space-y-2 px-4 pt-0 pb-3">
             {invRows.map((row, i) => (
-              <div key={i} className="grid gap-1.5 sm:grid-cols-12 sm:items-end text-sm">
-                <div className="sm:col-span-3">
+              <div
+                key={i}
+                className="flex flex-col gap-2 rounded-md border border-transparent sm:flex-row sm:flex-wrap sm:items-end sm:gap-x-2 sm:gap-y-1.5 text-sm"
+              >
+                <div className="min-w-0 sm:flex-[2] sm:min-w-[6rem]">
                   <Label className="text-xs">Артикул</Label>
                   <Input
                     value={row.article}
@@ -372,7 +374,7 @@ export default function WmsSkladPage() {
                     className="h-8"
                   />
                 </div>
-                <div className="sm:col-span-4">
+                <div className="min-w-0 sm:flex-[2] sm:min-w-[7rem]">
                   <Label className="text-xs">Название</Label>
                   <Input
                     value={row.title}
@@ -380,38 +382,42 @@ export default function WmsSkladPage() {
                     className="h-8"
                   />
                 </div>
-                <div className="sm:col-span-2">
+                <div className="w-full sm:w-[5.25rem] shrink-0">
                   <Label className="text-xs">Кол-во</Label>
                   <Input
                     type="number"
                     min={1}
-                    className="h-8"
+                    className="h-8 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                     value={row.quantity}
                     onChange={(e) =>
                       setInvRows((p) => p.map((x, j) => (j === i ? { ...x, quantity: Math.max(1, Number(e.target.value) || 1) } : x)))
                     }
                   />
                 </div>
-                <div className="sm:col-span-2">
+                <div className="w-full sm:w-[6.5rem] shrink-0">
                   <Label className="text-xs">Цена</Label>
                   <Input
-                    type="number"
-                    min={0}
-                    step="0.01"
+                    type="text"
+                    inputMode="decimal"
+                    autoComplete="off"
+                    placeholder=""
                     className="h-8"
                     value={row.price}
-                    onChange={(e) =>
-                      setInvRows((p) => p.map((x, j) => (j === i ? { ...x, price: Math.max(0, Number(e.target.value) || 0) } : x)))
-                    }
+                    onChange={(e) => {
+                      const v = e.target.value
+                      if (v === "" || /^[0-9]*[.,]?[0-9]*$/.test(v)) {
+                        setInvRows((p) => p.map((x, j) => (j === i ? { ...x, price: v } : x)))
+                      }
+                    }}
                   />
                 </div>
-                <div className="sm:col-span-1 flex gap-0.5">
+                <div className="flex shrink-0 gap-1 pb-0.5 sm:ml-auto">
                   <Button
                     type="button"
                     variant="outline"
                     size="icon"
                     className="h-8 w-8 shrink-0"
-                    onClick={() => setInvRows((p) => [...p, { article: "", title: "", quantity: 1, price: 0 }])}
+                    onClick={() => setInvRows((p) => [...p, { article: "", title: "", quantity: 1, price: "" }])}
                   >
                     +
                   </Button>
@@ -429,7 +435,7 @@ export default function WmsSkladPage() {
               </div>
             ))}
             <div className="pt-1">
-              <Button type="button" className="h-9 w-full sm:w-auto" onClick={() => void postInvoice()} disabled={invBusy || !whId}>
+              <Button type="button" className="h-9 w-full sm:w-auto" onClick={() => void postInvoice()} disabled={invBusy || !canSubmit}>
                 {invBusy ? "Создаём…" : "Создать накладную"}
               </Button>
             </div>
