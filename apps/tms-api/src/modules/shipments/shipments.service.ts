@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, Logger, NotFoundException, OnModuleIni
 import { rankQuotes } from '@handyseller/tms-domain';
 import type {
   CarrierDescriptor,
+  CarrierPickupPoint,
   CarrierQuote,
   ClientOrderRecord,
   ClientOrderWithTmsStatusRecord,
@@ -160,6 +161,62 @@ export class ShipmentsService implements OnModuleInit {
 
   listCarriers(): CarrierDescriptor[] {
     return this.adapters.map((adapter) => adapter.descriptor);
+  }
+
+  async listPickupPoints(
+    userId: string,
+    filter?: {
+      carrierId?: string;
+      city?: string;
+      address?: string;
+      lat?: number;
+      lon?: number;
+      limit?: number;
+    },
+    authToken?: string | null,
+  ): Promise<CarrierPickupPoint[]> {
+    const limit = Math.max(1, Math.min(200, filter?.limit ?? 100));
+    const adapters = this.adapters.filter((adapter) =>
+      filter?.carrierId ? adapter.descriptor.id === filter.carrierId : true,
+    );
+    const dedup = new Map<string, CarrierPickupPoint>();
+    for (const adapter of adapters) {
+      if (!adapter.listPickupPoints) continue;
+      try {
+        const points = await adapter.listPickupPoints(
+          {
+            city: filter?.city,
+            address: filter?.address,
+            lat: filter?.lat,
+            lon: filter?.lon,
+            limit,
+          },
+          { userId, authToken },
+        );
+        for (const point of points) {
+          if (!point?.id || !point?.carrierId) continue;
+          const key = `${point.carrierId}:${point.id}`;
+          if (!dedup.has(key)) dedup.set(key, point);
+          if (dedup.size >= limit) break;
+        }
+      } catch (error) {
+        this.logger.warn(
+          `[pickup-points] adapter=${adapter.descriptor.id} failed reason=${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+      if (dedup.size >= limit) break;
+    }
+    return [...dedup.values()]
+      .sort((a, b) => {
+        const byCarrier = a.carrierName.localeCompare(b.carrierName);
+        if (byCarrier !== 0) return byCarrier;
+        const byCity = (a.city ?? '').localeCompare(b.city ?? '');
+        if (byCity !== 0) return byCity;
+        return a.name.localeCompare(b.name);
+      })
+      .slice(0, limit);
   }
 
   private static buildCarrierAdapters(): CarrierAdapter[] {
