@@ -165,6 +165,31 @@ info:
     - estimate -> shipments/{id}/pickup-points -> shipments/{id}/select-and-confirm
     - это самый простой сценарий для сайтов, которым нужно быстро запустить checkout с картой ПВЗ.
 
+    Шпаргалка интегратора (реальный production path):
+    0) В кабинете TMS -> Настройки:
+       - создайте API-клиента и сохраните client_id + client_secret (секрет показывается один раз).
+       - скачайте OpenAPI/Postman для команды разработки.
+    1) POST /tms/oauth/token
+       - получите access_token (client_credentials), храните client_secret только на backend.
+    2) POST /tms/v1/shipments/estimate
+       - передайте заказ/корзину, адреса, вес/габариты, контакты.
+       - сохраните shipmentRequestId, покажите options покупателю.
+    3) (опционально) GET /tms/v1/shipments/{shipmentRequestId}/pickup-points
+       - получите ПВЗ/терминалы для карты по текущему расчету.
+    4) POST /tms/v1/shipments/{shipmentRequestId}/select-and-confirm
+       - передайте quoteId выбранного варианта, используйте Idempotency-Key.
+       - в ответе сохраните shipmentId, trackingNumber, carrierOrderReference.
+    5) GET /tms/v1/shipments/{shipmentId} и /events
+       - подтягивайте статусы и события доставки в карточку заказа.
+
+    Что хранить у себя обязательно:
+    - client_id (и client_secret в защищенном vault/secret-store),
+    - shipmentRequestId,
+    - quoteId выбранного способа,
+    - shipmentId,
+    - trackingNumber,
+    - carrierOrderReference.
+
     Главное правило для разработчика:
     - shipmentRequestId храните у себя вместе с заказом.
     - quoteId храните после выбора покупателем доставки.

@@ -56,6 +56,7 @@ export default function TmsSettingsPage() {
   const [m2mSecretOnce, setM2mSecretOnce] = useState<string | null>(null)
   const [copiedTokenCurl, setCopiedTokenCurl] = useState(false)
   const [copiedV1FlowCurl, setCopiedV1FlowCurl] = useState(false)
+  const [copiedChecklist, setCopiedChecklist] = useState(false)
   const [credentialsFormVersion, setCredentialsFormVersion] = useState(0)
   const [checkingAll, setCheckingAll] = useState(false)
   const [checkingById, setCheckingById] = useState<Record<string, boolean>>({})
@@ -280,6 +281,46 @@ curl -X POST "${window.location.origin}/api/tms/v1/shipments/<REQUEST_ID>/confir
     }
   }
 
+  const copyIntegrationChecklist = async () => {
+    const checklist = `Интеграция HandySeller TMS — чек-лист для партнера
+
+1) В кабинете TMS -> Настройки создайте API-клиента.
+   Сохраните client_id и client_secret (секрет показывается один раз).
+
+2) На backend получите access_token:
+   POST /api/tms/oauth/token
+   body: {"grant_type":"client_credentials","client_id":"...","client_secret":"..."}
+
+3) В checkout вызовите:
+   POST /api/tms/v1/shipments/estimate
+   Сохраните shipmentRequestId и покажите options покупателю.
+
+4) Для карты ПВЗ:
+   GET /api/tms/v1/shipments/{shipmentRequestId}/pickup-points
+
+5) После выбора способа доставки:
+   POST /api/tms/v1/shipments/{shipmentRequestId}/select-and-confirm
+   body: {"quoteId":"..."}
+   Обязательно передавайте Idempotency-Key.
+
+6) Сохраните в заказе:
+   shipmentId, trackingNumber, carrierOrderReference.
+
+7) Обновляйте статусы:
+   GET /api/tms/v1/shipments/{shipmentId}
+   GET /api/tms/v1/shipments/{shipmentId}/events
+
+Рекомендуемая последовательность:
+estimate -> pickup-points -> select-and-confirm`
+    try {
+      await navigator.clipboard.writeText(checklist)
+      setCopiedChecklist(true)
+      setTimeout(() => setCopiedChecklist(false), 2000)
+    } catch {
+      setError("Не удалось скопировать чек-лист интеграции")
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-16">
@@ -453,9 +494,50 @@ curl -X POST "${window.location.origin}/api/tms/v1/shipments/<REQUEST_ID>/confir
               <Button type="button" variant="outline" size="sm" onClick={copyV1FlowCurl}>
                 {copiedV1FlowCurl ? "Скопировано" : "Скопировать curl v1 flow"}
               </Button>
+              <Button type="button" variant="outline" size="sm" onClick={copyIntegrationChecklist}>
+                {copiedChecklist ? "Скопировано" : "Скопировать чек-лист интеграции"}
+              </Button>
             </div>
             <p className="text-xs text-muted-foreground">
               Для надежности всегда передавайте заголовок `Idempotency-Key` в write-запросах.
+            </p>
+          </div>
+          <div className="rounded-lg border bg-muted/10 p-4 space-y-3 text-sm">
+            <p className="font-medium">Интеграция за 10 минут (шпаргалка)</p>
+            <ol className="list-decimal space-y-1 pl-5 text-muted-foreground">
+              <li>
+                Создайте API-клиента ниже и сразу сохраните <span className="font-mono">client_id</span> +{" "}
+                <span className="font-mono">client_secret</span> (секрет показывается один раз).
+              </li>
+              <li>
+                На своем backend вызовите <span className="font-mono">POST /api/tms/oauth/token</span> и получите{" "}
+                <span className="font-mono">access_token</span>.
+              </li>
+              <li>
+                В checkout вызовите <span className="font-mono">POST /api/tms/v1/shipments/estimate</span>, сохраните{" "}
+                <span className="font-mono">shipmentRequestId</span> и покажите покупателю варианты доставки.
+              </li>
+              <li>
+                Для карты ПВЗ вызовите{" "}
+                <span className="font-mono">GET /api/tms/v1/shipments/{`{shipmentRequestId}`}/pickup-points</span>.
+              </li>
+              <li>
+                После выбора доставки вызовите{" "}
+                <span className="font-mono">
+                  POST /api/tms/v1/shipments/{`{shipmentRequestId}`}/select-and-confirm
+                </span>{" "}
+                с <span className="font-mono">quoteId</span> и <span className="font-mono">Idempotency-Key</span>.
+              </li>
+              <li>
+                Сохраните в заказе <span className="font-mono">shipmentId</span>,{" "}
+                <span className="font-mono">trackingNumber</span>,{" "}
+                <span className="font-mono">carrierOrderReference</span>, а статусы получайте через{" "}
+                <span className="font-mono">GET /api/tms/v1/shipments/{`{shipmentId}`}</span> и{" "}
+                <span className="font-mono">/events</span>.
+              </li>
+            </ol>
+            <p className="text-xs text-muted-foreground">
+              Рекомендуемая последовательность: <span className="font-mono">estimate -&gt; pickup-points -&gt; select-and-confirm</span>.
             </p>
           </div>
           {m2mSecretOnce ? (
