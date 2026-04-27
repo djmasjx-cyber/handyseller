@@ -62,9 +62,22 @@
 - env-файл:
   - `/opt/handyseller/.env.staging` для staging
   - `/opt/handyseller/.env.production` для prod
-- `docker-compose.ci.yml`
-- nginx (для prod) и корректный DNS/SSL
+- `docker-compose.ci.yml` — **production** (порты на хосте 4000 / 3001 / 4100 / 4200, контейнеры `handyseller-*`)
+- `docker-compose.staging.yml` — **staging** для `dev.handyseller.ru` (проект Docker `handyseller-staging`, порты **4010 / 3010 / 4110 / 4210**)
+- nginx (prod: `app`/`api`; dev: `handyseller-dev-ssl.conf` → staging-порты)
 - `wms-api` деплоится отдельным контейнером. Для отдельной WMS базы задайте `WMS_DATABASE_URL`; если переменная не задана, MVP использует текущий `DATABASE_URL`.
+
+### Два стека на одной VM (prod + staging)
+
+| Контур | Compose | Проект `-p` | Web (хост) | Core API (хост) | TMS | WMS |
+|--------|---------|------------|------------|-----------------|-----|-----|
+| **Production** | `docker-compose.ci.yml` | по умолчанию из каталога | 3001 | 4000 | 4100 | 4200 |
+| **Staging** | `docker-compose.staging.yml` | `handyseller-staging` | 3010 | 4010 | 4110 | 4210 |
+
+- Push в **`main`** → Deploy Production обновляет **только** prod-контейнеры (`handyseller-web` и т.д.); staging-стек не трогает.
+- Push в **`dev`** → Deploy Staging обновляет **только** `handyseller-staging-*`; prod на 3001/4000 **не перезаписывается**.
+
+После первого выката этого разделения на уже настроенной VM: один раз убедитесь, что prod-деплой с `main` прошёл (контейнеры `handyseller-api` / `handyseller-web` на стандартных портах), затем пуш в `dev` поднимет staging на 3010/4010.
 
 ## Branch protection (обязательно)
 
@@ -97,7 +110,7 @@
 ## Операционные контуры
 
 ### Fast lane (ежедневная разработка)
-1. PR/merge в `dev` -> fast-gate + auto deploy на `https://dev.handyseller.ru` (health на VM, без сценариев ТК).
+1. PR/merge в `dev` -> fast-gate + auto deploy **изолированного staging-стека** на `https://dev.handyseller.ru` (health на VM в Deploy Staging; **prod-контейнеры не трогаются**).
 2. Ручная проверка измененного UI/бизнес-сценария на `dev.handyseller.ru` и, при необходимости, проверка цепочки «клиент → HandySeller → ТК» в продуктиве.
 3. Повторяем цикл до готовности.
 

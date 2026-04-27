@@ -46,7 +46,7 @@ Use this checklist after every `dev` deploy and before opening/merging `dev -> m
 - `production` GitHub environment must use `API_BASE_URL=https://api.handyseller.ru/api`.
 - `Deploy Staging` uses `/opt/handyseller/.env.staging`.
 - `Deploy Production` uses `/opt/handyseller/.env.production`.
-- `docker-compose.ci.yml` reads the active env file from `APP_ENV_FILE`; never rely on staging containers reading production env by accident.
+- Production: `docker-compose.ci.yml` + `.env.production`. Staging: `docker-compose.staging.yml` + проект `handyseller-staging` + `.env.staging` — отдельные контейнеры и порты; prod-стек при деплое в `dev` не перезаписывается.
 
 ## Required gates before production
 
