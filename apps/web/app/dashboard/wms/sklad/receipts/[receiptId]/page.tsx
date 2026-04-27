@@ -393,7 +393,7 @@ export default function WmsReceiptDetailPage() {
                               <td className="p-2">
                                 <Button
                                   type="button"
-                                  variant="outline"
+                                  variant={hasVgh ? "ghost" : "outline"}
                                   size="sm"
                                   className="h-8 gap-1"
                                   disabled={!u.barcode || printBulkBusy || printBusyId === u.id}
