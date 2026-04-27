@@ -63,6 +63,7 @@ export async function createTmsShipmentRequestFromOrder(
         serviceFlags,
         pickupDate: snapshot.pickupDatePreferred ?? undefined,
       },
+      integration: { fulfillmentMode: "OPERATOR_QUEUE" as const },
     }),
   })
 

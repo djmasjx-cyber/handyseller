@@ -157,7 +157,7 @@ export default function TmsDashboardPage() {
         authFetch("/api/tms/overview", { headers }),
         authFetch("/api/tms/carriers", { headers }),
         authFetch("/api/tms/client-orders", { headers }),
-        authFetch("/api/tms/shipment-requests", { headers }),
+        authFetch("/api/tms/shipment-requests?view=operator", { headers }),
         authFetch("/api/tms/shipments", { headers }),
       ])
 
@@ -250,6 +250,7 @@ export default function TmsDashboardPage() {
             destinationLabel: destinationResolved,
             serviceFlags: flags,
           },
+          integration: { fulfillmentMode: "OPERATOR_QUEUE" as const },
         }),
       })
       if (!res.ok) {
