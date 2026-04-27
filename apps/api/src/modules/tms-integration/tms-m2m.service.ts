@@ -129,9 +129,17 @@ export class TmsM2mService {
     };
   }
 
-  /** Документация OpenAPI (без секретов). */
+  /**
+   * Короткая спецификация для витрины (Lonmadi и аналоги): estimate → select → confirm.
+   * Расширенный набор путей (1С, webhooks) — `getOpenApiExtendedYaml()`.
+   */
   getOpenApiYaml(): string {
     return TMS_LONMADI_OPENAPI_YAML;
+  }
+
+  /** Расширенная OpenAPI: витрина + 1С/оператор + webhooks + вспомогательные пути. */
+  getOpenApiExtendedYaml(): string {
+    return TMS_EXTERNAL_OPENAPI_YAML;
   }
 
   private jwtExpirySeconds(expiresIn: string): number {
@@ -146,12 +154,20 @@ export class TmsM2mService {
 
 const TMS_LONMADI_OPENAPI_YAML = String.raw`openapi: 3.0.3
 info:
-  title: HandySeller TMS Partner API
+  title: HandySeller TMS — витрина (Lonmadi)
   version: 1.0.0
   description: |
-    Это документация для сайта, интернет-магазина или 1С, которые хотят подключиться к HandySeller как к агрегатору доставки.
+    **Назначение:** минимальный партнёрский сценарий, когда покупатель на **вашем сайте** выбирает способ доставки
+    (в т.ч. сайт Лонмади). Здесь только пути «корзина → расчёт → выбор → подтверждение → трек».
 
-    Если сказать совсем просто:
+    **Два типа интеграции (не смешивайте в одном флоу):**
+    1) **Витрина (этот файл).** Методы в тегах **1. Auth**, **2. Витрина**, **3. Статусы и трек**.
+       Поле integration.fulfillmentMode **передавать не обязательно** — для …/estimate сервер выставит PARTNER_SELF_SERVE.
+    2) **1С / оператор** (логист в HandySeller выбирает ТК, вам нужен трек и документы обратно в учётку) —
+       другой набор шагов и путей. Смотрите **расширенную** спецификацию: GET /api/tms/openapi-extended.yaml
+       (там же webhooks и вспомогательные маршруты). Для витрины **достаточно текущего файла**.
+
+    Если сказать совсем просто (витрина):
     1. Вы получаете client_id и client_secret в HandySeller.
     2. Меняете их на access_token через OAuth.
     3. Передаете нам корзину и адрес покупателя.
@@ -211,11 +227,13 @@ servers:
 
 tags:
   - name: 1. Auth
-    description: Получение токена доступа.
-  - name: 2. Checkout
-    description: Методы для корзины сайта: рассчитать, выбрать, подтвердить.
-  - name: 3. Status
-    description: Получение созданной отгрузки, трека и событий.
+    description: Получение токена доступа (нужен всем интеграциям).
+  - name: 2. Витрина
+    description: |
+      Корзина и доставка на сайте: рассчитать тарифы (estimate), при необходимости ПВЗ, select, confirm.
+      Не используйте эту цепочку, если заявка должна попасть в ручную работу логиста 1С — смотрите openapi-extended.yaml.
+  - name: 3. Статусы и трек
+    description: Отгрузка после confirm, трек, события, поиск по externalOrderId.
 
 paths:
   /tms/oauth/token:
@@ -259,7 +277,7 @@ paths:
 
   /tms/v1/shipments/estimate:
     post:
-      tags: [2. Checkout]
+      tags: [2. Витрина]
       summary: 2. Рассчитать варианты доставки для корзины
       description: |
         Вызывайте этот метод, когда покупатель открыл корзину или ввел адрес доставки.
@@ -369,7 +387,7 @@ paths:
 
   /tms/v1/shipments/{shipmentRequestId}/select:
     post:
-      tags: [2. Checkout]
+      tags: [2. Витрина]
       summary: 3. Сохранить вариант доставки, выбранный покупателем
       description: |
         Вызывайте этот метод после того, как покупатель выбрал способ доставки в корзине.
@@ -411,7 +429,7 @@ paths:
 
   /tms/v1/shipments/{shipmentRequestId}/confirm:
     post:
-      tags: [2. Checkout]
+      tags: [2. Витрина]
       summary: 4. Подтвердить заказ и создать реальную заявку у перевозчика
       description: |
         Вызывайте этот метод только после того, как:
@@ -461,7 +479,7 @@ paths:
 
   /tms/v1/shipments/{shipmentRequestId}/select-and-confirm:
     post:
-      tags: [2. Checkout]
+      tags: [2. Витрина]
       summary: 4a. Быстрый метод: выбрать тариф и сразу подтвердить
       description: |
         Упрощенный метод для быстрой интеграции (как в CDEK-потоке):
@@ -497,7 +515,7 @@ paths:
 
   /tms/v1/shipments/{shipmentRequestId}/pickup-points:
     get:
-      tags: [2. Checkout]
+      tags: [2. Витрина]
       summary: 3a. Получить ПВЗ/терминалы для конкретного расчета
       description: |
         Возвращает точки самовывоза, привязанные к текущему shipmentRequestId.
@@ -555,7 +573,7 @@ paths:
 
   /tms/v1/pickup-points:
     get:
-      tags: [2. Checkout]
+      tags: [2. Витрина]
       summary: Справочник ПВЗ/терминалов (агрегировано по перевозчикам)
       description: |
         Универсальный метод для карты ПВЗ, когда shipmentRequestId еще нет или нужен общий поиск.
@@ -606,7 +624,7 @@ paths:
 
   /tms/v1/shipments/{shipmentId}:
     get:
-      tags: [3. Status]
+      tags: [3. Статусы и трек]
       summary: Получить созданную отгрузку
       description: |
         Используйте после confirm, если нужно повторно получить trackingNumber, carrierOrderReference или текущий статус.
@@ -624,7 +642,7 @@ paths:
 
   /tms/v1/shipments/{shipmentId}/events:
     get:
-      tags: [3. Status]
+      tags: [3. Статусы и трек]
       summary: Получить историю tracking-событий
       description: |
         Используйте для отображения истории доставки. Если событий еще нет, вернется пустой массив.
@@ -642,7 +660,7 @@ paths:
 
   /tms/v1/shipments/by-external/{externalOrderId}:
     get:
-      tags: [3. Status]
+      tags: [3. Статусы и трек]
       summary: Найти отгрузку по номеру заказа клиента
       description: |
         Удобно для 1С или сайта: если вы знаете свой externalOrderId, можно найти связанную отгрузку в HandySeller.
@@ -927,6 +945,13 @@ components:
           enum: [CLIENT_ORDER, INTERNAL_TRANSFER, SUPPLIER_PICKUP]
           description: Для сайта и обычных заказов покупателя используйте CLIENT_ORDER.
           example: CLIENT_ORDER
+        fulfillmentMode:
+          type: string
+          enum: [PARTNER_SELF_SERVE, OPERATOR_QUEUE]
+          description: |
+            Режим исполнения. Для POST /tms/v1/shipments/estimate (витрина) можно не указывать — по умолчанию PARTNER_SELF_SERVE: выбор ТК на сайте, заявка не попадает в экран «Сравнение тарифов» в HandySeller.
+            Для интеграции с 1С, если заказ обрабатывает логист в HandySeller и результат нужно подтвердить в кабинете, используйте POST /tms/v1/shipments (не estimate) с fulfillmentMode=OPERATOR_QUEUE.
+          example: PARTNER_SELF_SERVE
 
     DeliveryOption:
       type: object
@@ -999,6 +1024,12 @@ components:
           type: string
           nullable: true
           example: CLIENT_ORDER
+        fulfillmentMode:
+          type: string
+          nullable: true
+          enum: [PARTNER_SELF_SERVE, OPERATOR_QUEUE]
+          description: Сохранённый режим (для витрины — PARTNER_SELF_SERVE).
+          example: PARTNER_SELF_SERVE
         options:
           type: array
           description: Варианты доставки для показа покупателю.
@@ -1185,23 +1216,38 @@ components:
 
 const TMS_EXTERNAL_OPENAPI_YAML = String.raw`openapi: 3.0.3
 info:
-  title: HandySeller TMS External API
+  title: HandySeller TMS — полная спецификация
   version: 1.0.0
   description: |
-    Единый API для сайта и 1С через OAuth2 **client_credentials**.
-    Базовый URL совпадает с вашим API HandySeller (префикс \`/api\`).
+    **Расширенный** OpenAPI: витрина + 1С/оператор + webhooks + вспомогательные пути.
+    **Витрине (Lonmadi)** чаще достаточно **короткого** файла: \`GET /api/tms/openapi.yaml\` — без лишних маршрутов.
 
-    Поток:
-    1. В личном кабинете создайте интеграцию (получите \`client_id\` и \`client_secret\` один раз).
-    2. \`POST /api/tms/oauth/token\` — обмен на короткоживущий JWT.
-    3. Используйте \`/api/tms/v1/...\` для интеграции партнера (оценка/создание/подтверждение/статусы).
-    4. Для write-операций передавайте \`Idempotency-Key\`.
+    Как ориентироваться:
+    - **Витрина (checkout):** \`POST /tms/v1/shipments/estimate\` — доставка в корзине на сайте; \`fulfillmentMode\` не обязателен (сервер поставит PARTNER_SELF_SERVE).
+    - **1С / оператор:** \`POST /tms/v1/shipments\` — **не** путать с \`/estimate\`: заявка в работу логисту; в \`integration\` укажите \`externalOrderId\`, при необходимости \`fulfillmentMode: OPERATOR_QUEUE\`; плюс списки, \`…/confirm\`, поиск by-external, webhooks.
+    - **Справочно / кабинет:** \`/tms/shipment-requests\`, \`/tms/client-orders\`, \`/tms/overview\` — нередко из UI; для чистой выгрузки 1С могут не требоваться.
+
+    База: \`/api\`, OAuth2 \`client_credentials\`; на запись — \`Idempotency-Key\` где сказано.
+
+    **Поставка в prod:** сначала проверка на dev; на production — пакетами, без частых мелких релизов (по вашему процессу в GH).
 
 servers:
   - url: https://api.handyseller.ru/api
     description: Production
   - url: http://localhost:4000/api
     description: Local API
+
+tags:
+  - name: OAuth2
+    description: Получение access_token (нужен всем сценариям).
+  - name: Витрина (checkout)
+    description: Расчёт доставки в корзине. Не используйте как замену POST /tms/v1/shipments для очереди оператора.
+  - name: 1С и оператор
+    description: Создание и ведение заявок, когда логист работает в HandySeller; списки, confirm, by-external.
+  - name: Webhooks
+    description: Подписка партнёра на события (статусы, документы). Удобно для 1С, чтобы не поллить.
+  - name: Справочно и кабинет
+    description: overview, заказы, заявки shipment-requests, перевозчики — чаще для веб-кабинета.
 
 paths:
   /tms/oauth/token:
@@ -1242,7 +1288,7 @@ paths:
   /tms/overview:
     get:
       summary: Сводка TMS
-      tags: [TMS]
+      tags: [Справочно и кабинет]
       security: [bearerAuth]
       responses:
         '200':
@@ -1252,9 +1298,9 @@ paths:
     post:
       summary: Рассчитать варианты доставки
       description: |
-        Используйте этот метод для блока "Способ доставки" в корзине.
-        В ответе вернется shipmentRequestId и массив options для показа пользователю.
-      tags: [TMS v1]
+        **Витрина / checkout.** Блок «Способ доставки» в корзине; в ответе — shipmentRequestId и options.
+        Не путайте с POST /tms/v1/shipments (без /estimate) — это сценарий **1С/оператора**.
+      tags: [Витрина (checkout)]
       security: [bearerAuth]
       parameters:
         - in: header
@@ -1319,6 +1365,7 @@ paths:
                   summary: Успешный ответ для отрисовки способов доставки
                   value:
                     shipmentRequestId: req_01JABCXYZ
+                    fulfillmentMode: PARTNER_SELF_SERVE
                     options:
                       - quoteId: q_01JABCXYZ_dellin
                         carrierId: dellin
@@ -1343,7 +1390,7 @@ paths:
   /tms/v1/shipments:
     get:
       summary: Список отгрузок партнера (батч синхронизация)
-      tags: [TMS v1]
+      tags: [1С и оператор]
       security: [bearerAuth]
       parameters:
         - in: query
@@ -1368,7 +1415,7 @@ paths:
           description: Пагинированный список
     post:
       summary: Создать shipment-request партнера
-      tags: [TMS v1]
+      tags: [1С и оператор]
       security: [bearerAuth]
       parameters:
         - in: header
@@ -1419,6 +1466,7 @@ paths:
                   integration:
                     externalOrderId: 1C-ORDER-1001
                     orderType: CLIENT_ORDER
+                    fulfillmentMode: OPERATOR_QUEUE
       responses:
         '200':
           description: Заявка создана
@@ -1426,7 +1474,7 @@ paths:
   /tms/v1/shipments/{id}:
     get:
       summary: Получить shipment по внутреннему id
-      tags: [TMS v1]
+      tags: [1С и оператор]
       security: [bearerAuth]
       parameters:
         - in: path
@@ -1443,7 +1491,7 @@ paths:
       description: |
         Вызывается после того, как пользователь выбрал вариант доставки.
         Успешный ответ содержит trackingNumber, который нужно сохранить в заказе клиента.
-      tags: [TMS v1]
+      tags: [1С и оператор]
       security: [bearerAuth]
       parameters:
         - in: path
@@ -1484,7 +1532,7 @@ paths:
       description: |
         Передайте quoteId, выбранный пользователем в корзине.
         После этого вариант доставки закрепляется за shipmentRequestId.
-      tags: [TMS v1]
+      tags: [1С и оператор]
       security: [bearerAuth]
       parameters:
         - in: path
@@ -1517,7 +1565,7 @@ paths:
   /tms/v1/shipments/{id}/events:
     get:
       summary: Нормализованные tracking-события
-      tags: [TMS v1]
+      tags: [1С и оператор]
       security: [bearerAuth]
       parameters:
         - in: path
@@ -1531,7 +1579,7 @@ paths:
   /tms/v1/shipments/by-external/{externalOrderId}:
     get:
       summary: Найти shipment по внешнему номеру заказа партнера
-      tags: [TMS v1]
+      tags: [1С и оператор]
       security: [bearerAuth]
       parameters:
         - in: path
@@ -1550,14 +1598,14 @@ paths:
   /tms/v1/webhooks/subscriptions:
     get:
       summary: Список webhook-подписок партнера
-      tags: [TMS v1]
+      tags: [Webhooks]
       security: [bearerAuth]
       responses:
         '200':
           description: Список подписок
     post:
       summary: Создать webhook-подписку партнера
-      tags: [TMS v1]
+      tags: [Webhooks]
       security: [bearerAuth]
       requestBody:
         required: true
@@ -1577,7 +1625,7 @@ paths:
   /tms/v1/webhooks/subscriptions/{id}:
     delete:
       summary: Удалить webhook-подписку
-      tags: [TMS v1]
+      tags: [Webhooks]
       security: [bearerAuth]
       parameters:
         - in: path
@@ -1591,7 +1639,7 @@ paths:
   /tms/v1/webhooks/subscriptions/{id}/rotate-secret:
     post:
       summary: Ротация webhook signing secret
-      tags: [TMS v1]
+      tags: [Webhooks]
       security: [bearerAuth]
       parameters:
         - in: path
@@ -1605,7 +1653,7 @@ paths:
   /tms/v1/webhooks/subscriptions/{id}/replay/{eventId}:
     post:
       summary: Переотправить webhook-событие из delivery log
-      tags: [TMS v1]
+      tags: [Webhooks]
       security: [bearerAuth]
       parameters:
         - in: path
@@ -1623,65 +1671,65 @@ paths:
   /tms/client-orders:
     get:
       summary: Заказы клиентов (TMS)
-      tags: [TMS]
+      tags: [Справочно и кабинет]
       security: [bearerAuth]
 
   /tms/shipment-requests:
     get:
       summary: Список заявок на перевозку
-      tags: [TMS]
+      tags: [Справочно и кабинет]
       security: [bearerAuth]
     post:
       summary: Создать заявку из заказа (scope tms:write)
-      tags: [TMS]
+      tags: [Справочно и кабинет]
       security: [bearerAuth]
 
   /tms/shipment-requests/{id}/quotes:
     get:
       summary: Котировки по заявке
-      tags: [TMS]
+      tags: [Справочно и кабинет]
       security: [bearerAuth]
 
   /tms/shipment-requests/{id}/quotes/refresh:
     post:
       summary: Обновить котировки (scope tms:write)
-      tags: [TMS]
+      tags: [Справочно и кабинет]
       security: [bearerAuth]
 
   /tms/shipment-requests/{id}/select-quote:
     post:
       summary: Выбрать котировку (scope tms:write)
-      tags: [TMS]
+      tags: [Справочно и кабинет]
       security: [bearerAuth]
 
   /tms/shipments:
     get:
       summary: Список перевозок
-      tags: [TMS]
+      tags: [Справочно и кабинет]
       security: [bearerAuth]
 
   /tms/shipments/{id}/tracking:
     get:
       summary: Трекинг перевозки
-      tags: [TMS]
+      tags: [Справочно и кабинет]
       security: [bearerAuth]
 
   /tms/shipments/{id}/documents:
     get:
       summary: Документы перевозки
-      tags: [TMS]
+      tags: [Справочно и кабинет]
       security: [bearerAuth]
 
   /tms/carriers:
     get:
       summary: Справочник перевозчиков
-      tags: [TMS]
+      tags: [Справочно и кабинет]
       security: [bearerAuth]
 
   /tms/routing-policies:
     get:
       summary: Политики маршрутизации
-      tags: [TMS]
+      tags: [Справочно и кабинет]
       security: [bearerAuth]
 
 components:
@@ -1959,4 +2007,10 @@ components:
           enum: [CLIENT_ORDER, INTERNAL_TRANSFER, SUPPLIER_PICKUP]
           description: Тип заказа в системе клиента
           example: CLIENT_ORDER
+        fulfillmentMode:
+          type: string
+          enum: [PARTNER_SELF_SERVE, OPERATOR_QUEUE]
+          description: |
+            PARTNER_SELF_SERVE — витрина, выбор ТК на стороне клиента (estimate). OPERATOR_QUEUE — ручной выбор в HandySeller, создавайте через POST v1/shipments, не estimate.
+          example: OPERATOR_QUEUE
 `;
