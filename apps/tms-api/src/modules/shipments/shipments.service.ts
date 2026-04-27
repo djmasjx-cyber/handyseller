@@ -219,6 +219,49 @@ export class ShipmentsService implements OnModuleInit {
       .slice(0, limit);
   }
 
+  async listPickupPointsForRequest(
+    userId: string,
+    requestId: string,
+    filter?: {
+      carrierId?: string;
+      city?: string;
+      address?: string;
+      lat?: number;
+      lon?: number;
+      limit?: number;
+    },
+    authToken?: string | null,
+  ): Promise<{
+    requestId: string;
+    destinationLabel: string | null;
+    points: CarrierPickupPoint[];
+  }> {
+    const request = this.getRequestOrThrow(userId, requestId);
+    const destinationLabel = request.draft.destinationLabel || request.snapshot.destinationLabel || null;
+    const quoteCarrierIds = new Set((this.quotes.get(requestId) ?? []).map((quote) => quote.carrierId));
+    const points = await this.listPickupPoints(
+      userId,
+      {
+        carrierId: filter?.carrierId,
+        city: filter?.city,
+        address: filter?.address ?? destinationLabel ?? undefined,
+        lat: filter?.lat,
+        lon: filter?.lon,
+        limit: filter?.limit,
+      },
+      authToken,
+    );
+    const filteredPoints =
+      quoteCarrierIds.size > 0 && !filter?.carrierId
+        ? points.filter((point) => quoteCarrierIds.has(point.carrierId))
+        : points;
+    return {
+      requestId,
+      destinationLabel,
+      points: filteredPoints,
+    };
+  }
+
   private static buildCarrierAdapters(): CarrierAdapter[] {
     const real: CarrierAdapter[] = [new MajorExpressAdapter(), new DellinAdapter(), new CdekAdapter()];
     const includeMocks =
@@ -1383,6 +1426,24 @@ export class ShipmentsService implements OnModuleInit {
     const scopeKey = this.buildIdempotencyScopeKey(userId, `confirm:${requestId}`, idempotencyKey);
     if (!scopeKey) return this.confirmSelectedQuote(userId, requestId, authToken, requestTraceId);
     return this.withIdempotency(scopeKey, () => this.confirmSelectedQuote(userId, requestId, authToken, requestTraceId));
+  }
+
+  async selectAndConfirmQuoteIdempotent(
+    userId: string,
+    requestId: string,
+    quoteId: string,
+    idempotencyKey?: string | null,
+    authToken?: string | null,
+    requestTraceId?: string | null,
+  ): Promise<ShipmentRecord> {
+    this.selectQuote(userId, requestId, quoteId);
+    return this.confirmSelectedQuoteIdempotent(
+      userId,
+      requestId,
+      idempotencyKey,
+      authToken,
+      requestTraceId,
+    );
   }
 
   getTracking(userId: string, shipmentId: string): TrackingEventRecord[] {

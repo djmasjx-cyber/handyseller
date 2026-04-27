@@ -161,6 +161,10 @@ info:
     7. После подтверждения заказа вы вызываете confirm.
     8. Мы создаем реальную заявку у выбранного перевозчика и возвращаем trackingNumber.
 
+    Быстрый путь (минимум шагов):
+    - estimate -> shipments/{id}/pickup-points -> shipments/{id}/select-and-confirm
+    - это самый простой сценарий для сайтов, которым нужно быстро запустить checkout с картой ПВЗ.
+
     Главное правило для разработчика:
     - shipmentRequestId храните у себя вместе с заказом.
     - quoteId храните после выбора покупателем доставки.
@@ -429,6 +433,151 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+
+  /tms/v1/shipments/{shipmentRequestId}/select-and-confirm:
+    post:
+      tags: [2. Checkout]
+      summary: 4a. Быстрый метод: выбрать тариф и сразу подтвердить
+      description: |
+        Упрощенный метод для быстрой интеграции (как в CDEK-потоке):
+        одним запросом фиксирует quoteId и сразу создает реальную заявку у перевозчика.
+
+        Используйте, если вам не нужен отдельный шаг select.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ShipmentRequestId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SelectQuoteRequest'
+            example:
+              quoteId: req_1777066854894_wfovj3:dellin:door-door
+      responses:
+        '200':
+          description: Заявка создана у перевозчика (аналог confirm).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfirmResponse'
+        '400':
+          description: Ошибка выбора тарифа или бронирования.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /tms/v1/shipments/{shipmentRequestId}/pickup-points:
+    get:
+      tags: [2. Checkout]
+      summary: 3a. Получить ПВЗ/терминалы для конкретного расчета
+      description: |
+        Возвращает точки самовывоза, привязанные к текущему shipmentRequestId.
+        Если по заявке уже рассчитаны тарифы, ответ ограничивается перевозчиками из этих тарифов.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ShipmentRequestId'
+        - in: query
+          name: carrierId
+          required: false
+          schema:
+            type: string
+          description: Фильтр по коду перевозчика (например cdek, dellin).
+        - in: query
+          name: city
+          required: false
+          schema:
+            type: string
+        - in: query
+          name: address
+          required: false
+          schema:
+            type: string
+        - in: query
+          name: lat
+          required: false
+          schema:
+            type: number
+        - in: query
+          name: lon
+          required: false
+          schema:
+            type: number
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+      responses:
+        '200':
+          description: Список точек самовывоза/терминалов для карты.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PickupPointsForRequestResponse'
+        '404':
+          description: Shipment request не найден.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /tms/v1/pickup-points:
+    get:
+      tags: [2. Checkout]
+      summary: Справочник ПВЗ/терминалов (агрегировано по перевозчикам)
+      description: |
+        Универсальный метод для карты ПВЗ, когда shipmentRequestId еще нет или нужен общий поиск.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: carrierId
+          required: false
+          schema:
+            type: string
+        - in: query
+          name: city
+          required: false
+          schema:
+            type: string
+        - in: query
+          name: address
+          required: false
+          schema:
+            type: string
+        - in: query
+          name: lat
+          required: false
+          schema:
+            type: number
+        - in: query
+          name: lon
+          required: false
+          schema:
+            type: number
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+      responses:
+        '200':
+          description: Массив точек самовывоза/терминалов.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PickupPoint'
 
   /tms/v1/shipments/{shipmentId}:
     get:
@@ -925,6 +1074,74 @@ components:
           type: object
           nullable: true
           additionalProperties: true
+
+    PickupPoint:
+      type: object
+      required: [id, carrierId, carrierName, type, name, address]
+      properties:
+        id:
+          type: string
+          example: cdek_987654
+        carrierId:
+          type: string
+          example: cdek
+        carrierName:
+          type: string
+          example: CDEK
+        type:
+          type: string
+          enum: [PVZ, TERMINAL, LOCKER, OFFICE]
+          example: PVZ
+        code:
+          type: string
+          nullable: true
+          example: SPB12
+        name:
+          type: string
+          example: ПВЗ Невский
+        address:
+          type: string
+          example: Санкт-Петербург, Невский пр., 10
+        city:
+          type: string
+          nullable: true
+          example: Санкт-Петербург
+        lat:
+          type: number
+          nullable: true
+          example: 59.93428
+        lon:
+          type: number
+          nullable: true
+          example: 30.3351
+        workTime:
+          type: string
+          nullable: true
+          example: Пн-Вс 10:00-21:00
+        phone:
+          type: string
+          nullable: true
+          example: +7 800 000-00-00
+        codAllowed:
+          type: boolean
+          nullable: true
+          example: true
+
+    PickupPointsForRequestResponse:
+      type: object
+      required: [requestId, points]
+      properties:
+        requestId:
+          type: string
+          example: req_1777066854894_wfovj3
+        destinationLabel:
+          type: string
+          nullable: true
+          example: Казань, ул. Пример 1
+        points:
+          type: array
+          items:
+            $ref: '#/components/schemas/PickupPoint'
 
     ErrorResponse:
       type: object

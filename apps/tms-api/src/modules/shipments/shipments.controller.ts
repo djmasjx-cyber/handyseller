@@ -233,6 +233,38 @@ export class ShipmentsController {
     );
   }
 
+  @Get('v1/shipments/:id/pickup-points')
+  @TmsAccess('read')
+  v1ListPickupPointsForRequest(
+    @CurrentUser('userId') userId: string,
+    @Param('id') requestId: string,
+    @Headers('authorization') authorization?: string,
+    @Query('carrierId') carrierId?: string,
+    @Query('city') city?: string,
+    @Query('address') address?: string,
+    @Query('lat') lat?: string,
+    @Query('lon') lon?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const authToken = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
+    const parsedLat = lat ? Number.parseFloat(lat) : undefined;
+    const parsedLon = lon ? Number.parseFloat(lon) : undefined;
+    const parsedLimit = limit ? Number.parseInt(limit, 10) : undefined;
+    return this.shipmentsService.listPickupPointsForRequest(
+      userId,
+      requestId,
+      {
+        carrierId,
+        city,
+        address,
+        lat: Number.isFinite(parsedLat) ? parsedLat : undefined,
+        lon: Number.isFinite(parsedLon) ? parsedLon : undefined,
+        limit: Number.isFinite(parsedLimit) ? parsedLimit : undefined,
+      },
+      authToken,
+    );
+  }
+
   @Post('v1/shipments')
   @TmsAccess('write')
   async v1CreateShipment(
@@ -287,6 +319,27 @@ export class ShipmentsController {
     @Body('quoteId') quoteId: string,
   ) {
     return this.shipmentsService.selectQuote(userId, requestId, quoteId);
+  }
+
+  @Post('v1/shipments/:id/select-and-confirm')
+  @TmsAccess('write')
+  v1SelectAndConfirmShipment(
+    @CurrentUser('userId') userId: string,
+    @Param('id') requestId: string,
+    @Body('quoteId') quoteId: string,
+    @Headers('authorization') authorization?: string,
+    @Headers('idempotency-key') idempotencyKey?: string,
+    @Headers('x-request-id') inboundRequestId?: string,
+  ) {
+    const authToken = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
+    return this.shipmentsService.selectAndConfirmQuoteIdempotent(
+      userId,
+      requestId,
+      quoteId,
+      idempotencyKey,
+      authToken,
+      this.resolveRequestId(inboundRequestId),
+    );
   }
 
   @Get('v1/shipments/:id')
