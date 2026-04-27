@@ -27,6 +27,7 @@ import { createHmac, randomBytes } from 'crypto';
 type RegistryOrderType = 'CLIENT_ORDER' | 'INTERNAL_TRANSFER' | 'SUPPLIER_PICKUP';
 
 type OrderRegistryFilter = {
+  authToken?: string | null;
   q?: string;
   status?: string;
   carrierId?: string;
@@ -70,6 +71,7 @@ type OrderRegistryItem = {
   updatedAt: string;
   hasShipment: boolean;
   hasArchivedShipments: boolean;
+  hasRequest: boolean;
 };
 
 @Injectable()
@@ -182,17 +184,28 @@ export class ShipmentsService implements OnModuleInit {
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
-  listOrderRegistry(
+  async listOrderRegistry(
     userId: string,
     filter?: OrderRegistryFilter,
-  ): { items: OrderRegistryItem[]; nextCursor: string | null } {
+  ): Promise<{ items: OrderRegistryItem[]; nextCursor: string | null }> {
     const safeLimit = Math.max(1, Math.min(100, filter?.limit ?? 25));
     const cursor = filter?.cursor?.trim();
-    const all = [...this.requests.values()]
+    const requestItems = [...this.requests.values()]
       .filter((request) => request.userId === userId)
       .map((request) => this.buildOrderRegistryItem(request))
+      .map((item) => ({ ...item, sortKey: `${item.updatedAt}|${item.requestId}` }));
+    const requestOrderIds = new Set(
+      requestItems
+        .map((item) => item.coreOrderId)
+        .filter((value): value is string => Boolean(value)),
+    );
+    const coreOrders = await this.fetchCoreOrders(userId, filter?.authToken);
+    const coreOnlyItems = coreOrders
+      .filter((order) => !requestOrderIds.has(order.id))
+      .map((order) => this.buildOrderRegistryItemFromCore(order))
+      .map((item) => ({ ...item, sortKey: `${item.updatedAt}|${item.requestId}` }));
+    const all = [...requestItems, ...coreOnlyItems]
       .filter((item) => this.matchesOrderRegistryFilter(item, filter))
-      .map((item) => ({ ...item, sortKey: `${item.updatedAt}|${item.requestId}` }))
       .sort((a, b) => b.sortKey.localeCompare(a.sortKey));
 
     const startIndex = cursor ? all.findIndex((item) => item.sortKey === cursor) + 1 : 0;
@@ -1498,6 +1511,43 @@ export class ShipmentsService implements OnModuleInit {
       updatedAt,
       hasShipment: shipments.length > 0,
       hasArchivedShipments: shipments.some((shipment) => this.isArchivedShipment(shipment)),
+      hasRequest: true,
+    };
+  }
+
+  private buildOrderRegistryItemFromCore(order: ClientOrderRecord): OrderRegistryItem {
+    return {
+      requestId: `core:${order.id}`,
+      shipmentId: null,
+      shipmentIds: [],
+      internalOrderNumber: order.externalId || order.id,
+      coreOrderId: order.id,
+      status: 'NO_REQUEST',
+      requestStatus: 'NO_REQUEST',
+      shipmentStatus: null,
+      externalOrderId: order.externalId ?? null,
+      orderType: order.logisticsScenario === 'MARKETPLACE_RC' ? 'INTERNAL_TRANSFER' : 'CLIENT_ORDER',
+      sourceSystem: order.marketplace || 'CORE',
+      coreOrderNumber: order.externalId || order.id,
+      customerName: null,
+      customerPhone: null,
+      originLabel: order.warehouseName ?? null,
+      destinationLabel: order.deliveryAddressLabel ?? null,
+      carrierId: null,
+      carrierName: null,
+      trackingNumber: null,
+      carrierOrderNumber: null,
+      carrierOrderReference: null,
+      priceRub: null,
+      etaDays: null,
+      documentsCount: 0,
+      trackingEventsCount: 0,
+      lastEventAt: null,
+      createdAt: order.createdAt,
+      updatedAt: order.createdAt,
+      hasShipment: false,
+      hasArchivedShipments: false,
+      hasRequest: false,
     };
   }
 
