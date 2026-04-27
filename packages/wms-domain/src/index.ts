@@ -1,25 +1,30 @@
 import type { WmsLocationRecord } from '@handyseller/wms-sdk';
 
-const UNIT_PREFIX = 'HU';
-const LPN_PREFIX = 'HL';
+/** 11 цифр счётчика (0 … 99_999_999_999). */
+const MOD_11 = 100_000_000_000;
 
-function padSerial(value: number): string {
-  return Math.max(value, 0).toString(36).toUpperCase().padStart(8, '0');
+/**
+ * Единица хранения: ровно **12 цифр**, сквозной номер `000000000001`, `000000000002`, …
+ * Первая цифра `0` — тип «единица», чтобы не пересекаться с тарой (LPN).
+ *
+ * `tenantSeed` оставлен в сигнатуре для совместимости вызовов; не используется.
+ */
+export function buildUnitBarcode(_tenantSeed: string, serial: number): string {
+  const n = Math.max(0, Math.floor(serial)) % MOD_11;
+  return `0${String(n).padStart(11, '0')}`;
 }
 
-function checksum(value: string): string {
-  const sum = Array.from(value).reduce((acc, ch, idx) => acc + ch.charCodeAt(0) * (idx + 1), 0);
-  return (sum % 97).toString().padStart(2, '0');
+/**
+ * Тара (LPN): ровно **12 цифр**, первая цифра `8` — отличие от единиц (`0…`).
+ */
+export function buildLpnBarcode(_tenantSeed: string, serial: number): string {
+  const n = Math.max(0, Math.floor(serial)) % MOD_11;
+  return `8${String(n).padStart(11, '0')}`;
 }
 
-export function buildUnitBarcode(tenantSeed: string, serial: number): string {
-  const core = `${UNIT_PREFIX}${tenantSeed.slice(0, 4).toUpperCase()}${padSerial(serial)}`;
-  return `${core}${checksum(core)}`;
-}
-
-export function buildLpnBarcode(tenantSeed: string, serial: number): string {
-  const core = `${LPN_PREFIX}${tenantSeed.slice(0, 4).toUpperCase()}${padSerial(serial)}`;
-  return `${core}${checksum(core)}`;
+/** Штрихкод единицы в каноническом 12-значном виде. */
+export function isCanonicalUnitBarcode(barcode: string): boolean {
+  return /^0\d{11}$/.test(barcode);
 }
 
 export function buildLocationPath(parentPath: string | null | undefined, code: string): string {

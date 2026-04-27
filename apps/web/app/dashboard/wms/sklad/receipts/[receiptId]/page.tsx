@@ -7,6 +7,7 @@ import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Inpu
 import { ArrowLeft, Ruler } from "lucide-react"
 import { authFetch } from "@/lib/auth-fetch"
 import { AUTH_STORAGE_KEYS } from "@/lib/auth-storage"
+import { WmsSubnav } from "@/components/wms/wms-subnav"
 import { formatWmsAcceptError } from "@/lib/wms-ui"
 
 type ReceiptLine = {
@@ -39,8 +40,28 @@ type UnitRow = {
   declaredUnitPrice?: number | null
 }
 
+type ItemSnapshot = {
+  id: string
+  dimensions: {
+    weightGrams?: number | null
+    lengthMm?: number | null
+    widthMm?: number | null
+    heightMm?: number | null
+  }
+}
+
 function lineForUnit(lines: ReceiptLine[], u: UnitRow) {
   return lines.find((l) => l.id === u.receiptLineId) ?? null
+}
+
+function dimensionsComplete(dim: ItemSnapshot["dimensions"] | undefined | null): boolean {
+  if (!dim || typeof dim !== "object") return false
+  const ok = (v: unknown) => typeof v === "number" && Number.isFinite(v) && v >= 1
+  return ok(dim.weightGrams) && ok(dim.lengthMm) && ok(dim.widthMm) && ok(dim.heightMm)
+}
+
+function formatDisplayItemNo(index: number): string {
+  return String(index + 1).padStart(6, "0")
 }
 
 function receiptStatusRu(s: string) {
@@ -69,6 +90,7 @@ export default function WmsReceiptDetailPage() {
 
   const [receipt, setReceipt] = useState<ReceiptRecord | null>(null)
   const [units, setUnits] = useState<UnitRow[]>([])
+  const [items, setItems] = useState<ItemSnapshot[]>([])
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [vgh, setVgh] = useState<{ itemId: string; sku: string; title: string } | null>(null)
@@ -99,6 +121,19 @@ export default function WmsReceiptDetailPage() {
       }
       const r = data?.receipt as ReceiptRecord | undefined
       const u = (Array.isArray(data?.units) ? data?.units : []) as UnitRow[]
+      const rawItems = data?.items
+      if (Array.isArray(rawItems)) {
+        setItems(
+          rawItems.map((x) => {
+            const o = x as Record<string, unknown>
+            const id = typeof o.id === "string" ? o.id : ""
+            const dim = (o.dimensions && typeof o.dimensions === "object" ? o.dimensions : {}) as ItemSnapshot["dimensions"]
+            return { id, dimensions: dim }
+          }),
+        )
+      } else {
+        setItems([])
+      }
       if (r) setReceipt(r)
       setUnits(
         u.map((x) => ({
@@ -157,8 +192,21 @@ export default function WmsReceiptDetailPage() {
   }
 
   const acceptRcpt = async () => {
-    if (!token) return
+    if (!token || !receipt) return
     setError(null)
+    if (items.length > 0) {
+      const uniqueItemIds = [...new Set(receipt.lines.map((ln) => ln.itemId))]
+      const missingVgh = uniqueItemIds.filter((itemId) => {
+        const snap = items.find((it) => it.id === itemId)
+        return !dimensionsComplete(snap?.dimensions)
+      })
+      if (missingVgh.length > 0) {
+        setError(
+          "Не у всех товаров заполнены ВГХ (вес и габариты). Откройте «ВГХ» по каждой позиции, сохраните данные, затем примите накладную.",
+        )
+        return
+      }
+    }
     const res = await authFetch(`/api/wms/v1/receipts/${encodeURIComponent(receiptId)}/accept`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}` },
@@ -176,7 +224,8 @@ export default function WmsReceiptDetailPage() {
   }
 
   return (
-    <div className="max-w-5xl mx-auto space-y-4">
+    <div className="max-w-5xl mx-auto space-y-4 ps-0.5">
+      <WmsSubnav />
       <div className="flex flex-wrap items-center gap-3">
         <Button type="button" variant="ghost" className="min-h-10 gap-1 px-0" asChild>
           <Link href="/dashboard/wms/sklad">
@@ -240,27 +289,52 @@ export default function WmsReceiptDetailPage() {
                       {units
                         .slice()
                         .sort((a, b) => a.barcode.localeCompare(b.barcode))
-                        .map((u) => {
+                        .map((u, rowIdx) => {
                           const ln = lineForUnit(receipt.lines, u)
                           const title = ln?.lineTitle || "—"
                           const art = ln?.sku || "—"
+                          const snap = items.find((it) => it.id === u.itemId)
+                          const hasVgh = dimensionsComplete(snap?.dimensions)
                           return (
                             <tr key={u.id} className="border-b border-muted/40 last:border-0">
-                              <td className="p-2 pr-3 font-mono text-xs break-all max-w-[140px]">{u.itemId}</td>
+                              <td className="p-2 pr-3 font-mono text-sm tabular-nums text-foreground">{formatDisplayItemNo(rowIdx)}</td>
                               <td className="p-2 pr-3">{art}</td>
                               <td className="p-2 pr-3 max-w-xs">{title}</td>
-                              <td className="p-2 pr-3 font-mono tabular-nums">{u.barcode || "—"}</td>
+                              <td className="p-2 pr-3 font-mono tabular-nums text-xs">
+                                {u.barcode ? (
+                                  <span className={/^0\d{11}$/.test(u.barcode) ? undefined : "text-amber-900"}>{u.barcode}</span>
+                                ) : (
+                                  "—"
+                                )}
+                              </td>
                               <td className="p-2 text-right">
                                 <Button
                                   type="button"
-                                  variant="outline"
+                                  variant={hasVgh ? "ghost" : "outline"}
                                   size="sm"
-                                  className="h-8"
+                                  className={
+                                    hasVgh
+                                      ? "h-8 text-muted-foreground/75 hover:text-muted-foreground"
+                                      : "h-8"
+                                  }
+                                  title={
+                                    hasVgh
+                                      ? "ВГХ уже указаны — можно открыть и исправить при необходимости"
+                                      : "Указать вес и габариты"
+                                  }
                                   onClick={() => {
-                                    setVghW("")
-                                    setVghL("")
-                                    setVghWi("")
-                                    setVghH("")
+                                    const d = snap?.dimensions
+                                    if (d && dimensionsComplete(d)) {
+                                      setVghW(String(d.weightGrams))
+                                      setVghL(String((d.lengthMm ?? 0) / 10))
+                                      setVghWi(String((d.widthMm ?? 0) / 10))
+                                      setVghH(String((d.heightMm ?? 0) / 10))
+                                    } else {
+                                      setVghW("")
+                                      setVghL("")
+                                      setVghWi("")
+                                      setVghH("")
+                                    }
                                     setVgh({
                                       itemId: u.itemId,
                                       sku: typeof art === "string" ? art : u.itemId.slice(0, 12),
@@ -268,7 +342,7 @@ export default function WmsReceiptDetailPage() {
                                     })
                                   }}
                                 >
-                                  <Ruler className="h-3.5 w-3.5 mr-1" />
+                                  <Ruler className="h-3.5 w-3.5 mr-1 shrink-0 opacity-80" />
                                   ВГХ
                                 </Button>
                               </td>
@@ -282,7 +356,8 @@ export default function WmsReceiptDetailPage() {
                   ) : null}
                 </div>
                 <p className="text-xs text-muted-foreground mt-2">
-                  Строки накладной: {receipt.lines.length}. Если товаров меньше, сначала создайте/зарезервируйте штрихкоды.
+                  Строки накладной: {receipt.lines.length}. Если товаров меньше, сначала создайте/зарезервируйте штрихкоды. В колонке «ID товара» —
+                  порядковый номер строки (000001…). Штрихкод единицы — 12 цифр, сквозной номер вида 000000000001; старые форматы при открытии накладной пересохраняются автоматически.
                 </p>
               </div>
             </>
