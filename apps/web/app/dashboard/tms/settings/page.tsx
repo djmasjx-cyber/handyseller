@@ -54,8 +54,6 @@ export default function TmsSettingsPage() {
   const [m2mItems, setM2mItems] = useState<TmsIntegrationClient[]>([])
   const [m2mLabel, setM2mLabel] = useState("")
   const [m2mSecretOnce, setM2mSecretOnce] = useState<string | null>(null)
-  const [copiedTokenCurl, setCopiedTokenCurl] = useState(false)
-  const [copiedV1FlowCurl, setCopiedV1FlowCurl] = useState(false)
   const [copiedChecklist, setCopiedChecklist] = useState(false)
   const [credentialsFormVersion, setCredentialsFormVersion] = useState(0)
   const [checkingAll, setCheckingAll] = useState(false)
@@ -234,50 +232,6 @@ export default function TmsSettingsPage() {
       setError(err instanceof Error ? err.message : "Не удалось проверить подключения")
     } finally {
       setCheckingAll(false)
-    }
-  }
-
-  const copyTokenCurl = async () => {
-    const cmd = `curl -X POST "${window.location.origin}/api/tms/oauth/token" \\
-  -H "Content-Type: application/json" \\
-  -d '{"grant_type":"client_credentials","client_id":"<CLIENT_ID>","client_secret":"<CLIENT_SECRET>"}'`
-    try {
-      await navigator.clipboard.writeText(cmd)
-      setCopiedTokenCurl(true)
-      setTimeout(() => setCopiedTokenCurl(false), 2000)
-    } catch {
-      setError("Не удалось скопировать curl-команду")
-    }
-  }
-
-  const copyV1FlowCurl = async () => {
-    const cmd = `# 1) Estimate (save shipmentRequestId + quoteId from response)
-curl -X POST "${window.location.origin}/api/tms/v1/shipments/estimate" \\
-  -H "Authorization: Bearer <ACCESS_TOKEN>" \\
-  -H "Idempotency-Key: estimate-<EXTERNAL_ORDER_ID>" \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "snapshot": { "sourceSystem": "HANDYSELLER_CORE", "userId": "<USER_ID>", "coreOrderId": "ord_<EXTERNAL_ORDER_ID>", "coreOrderNumber": "<EXTERNAL_ORDER_ID>", "marketplace": "OWN_SITE", "createdAt": "2026-01-01T10:00:00.000Z", "originLabel": "Москва, Склад 1", "destinationLabel": "Казань, ул. Пример 1", "cargo": { "weightGrams": 1500, "widthMm": 200, "lengthMm": 300, "heightMm": 150, "places": 1, "declaredValueRub": 10000 }, "itemSummary": [{ "productId": "p1", "title": "Товар", "quantity": 1, "weightGrams": 1500 }] },
-    "draft": { "originLabel": "Москва, Склад 1", "destinationLabel": "Казань, ул. Пример 1", "serviceFlags": ["EXPRESS"] },
-    "integration": { "externalOrderId": "<EXTERNAL_ORDER_ID>", "orderType": "CLIENT_ORDER" }
-  }'
-
-# 2) Select quote
-curl -X POST "${window.location.origin}/api/tms/v1/shipments/<REQUEST_ID>/select" \\
-  -H "Authorization: Bearer <ACCESS_TOKEN>" \\
-  -H "Content-Type: application/json" \\
-  -d '{"quoteId":"<QUOTE_ID>"}'
-
-# 3) Confirm
-curl -X POST "${window.location.origin}/api/tms/v1/shipments/<REQUEST_ID>/confirm" \\
-  -H "Authorization: Bearer <ACCESS_TOKEN>" \\
-  -H "Idempotency-Key: confirm-<EXTERNAL_ORDER_ID>"`
-    try {
-      await navigator.clipboard.writeText(cmd)
-      setCopiedV1FlowCurl(true)
-      setTimeout(() => setCopiedV1FlowCurl(false), 2000)
-    } catch {
-      setError("Не удалось скопировать v1 flow")
     }
   }
 
@@ -478,22 +432,8 @@ estimate -> pickup-points -> select-and-confirm`
                 target="_blank"
                 rel="noreferrer"
               >
-                Открыть OpenAPI
+                Скачать OpenAPI (YAML)
               </a>
-              <a
-                className="inline-flex items-center rounded-md border px-3 py-2 text-xs font-medium hover:bg-muted"
-                href="/tms/TMS-Partner-API.postman_collection.json"
-                target="_blank"
-                rel="noreferrer"
-              >
-                Скачать Postman коллекцию
-              </a>
-              <Button type="button" variant="outline" size="sm" onClick={copyTokenCurl}>
-                {copiedTokenCurl ? "Скопировано" : "Скопировать curl для токена"}
-              </Button>
-              <Button type="button" variant="outline" size="sm" onClick={copyV1FlowCurl}>
-                {copiedV1FlowCurl ? "Скопировано" : "Скопировать curl v1 flow"}
-              </Button>
               <Button type="button" variant="outline" size="sm" onClick={copyIntegrationChecklist}>
                 {copiedChecklist ? "Скопировано" : "Скопировать чек-лист интеграции"}
               </Button>
@@ -534,6 +474,9 @@ estimate -> pickup-points -> select-and-confirm`
                 <span className="font-mono">carrierOrderReference</span>, а статусы получайте через{" "}
                 <span className="font-mono">GET /api/tms/v1/shipments/{`{shipmentId}`}</span> и{" "}
                 <span className="font-mono">/events</span>.
+              </li>
+              <li>
+                Для уведомлений в реальном времени добавьте webhook-подписку в вашей системе, чтобы не делать частый polling.
               </li>
             </ol>
             <p className="text-xs text-muted-foreground">
