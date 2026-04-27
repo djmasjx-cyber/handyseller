@@ -259,7 +259,7 @@ jobs:
           for i in 1 2 3 4 5; do
             echo "SCP attempt ${i}/5"
             if scp -i deploy_key.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
-              docker-compose.ci.yml scripts/vm-watchdog.sh scripts/handyseller-start.sh scripts/vm-diagnose.sh \
+              docker-compose.ci.yml docker-compose.staging.yml scripts/vm-watchdog.sh scripts/handyseller-start.sh scripts/vm-diagnose.sh \
               "${USER}@${HOST}:/opt/handyseller/"; then
               exit 0
             fi

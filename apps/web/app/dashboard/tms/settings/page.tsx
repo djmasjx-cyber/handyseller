@@ -54,8 +54,7 @@ export default function TmsSettingsPage() {
   const [m2mItems, setM2mItems] = useState<TmsIntegrationClient[]>([])
   const [m2mLabel, setM2mLabel] = useState("")
   const [m2mSecretOnce, setM2mSecretOnce] = useState<string | null>(null)
-  const [copiedTokenCurl, setCopiedTokenCurl] = useState(false)
-  const [copiedV1FlowCurl, setCopiedV1FlowCurl] = useState(false)
+  const [copiedChecklist, setCopiedChecklist] = useState(false)
   const [credentialsFormVersion, setCredentialsFormVersion] = useState(0)
   const [checkingAll, setCheckingAll] = useState(false)
   const [checkingById, setCheckingById] = useState<Record<string, boolean>>({})
@@ -236,47 +235,43 @@ export default function TmsSettingsPage() {
     }
   }
 
-  const copyTokenCurl = async () => {
-    const cmd = `curl -X POST "${window.location.origin}/api/tms/oauth/token" \\
-  -H "Content-Type: application/json" \\
-  -d '{"grant_type":"client_credentials","client_id":"<CLIENT_ID>","client_secret":"<CLIENT_SECRET>"}'`
+  const copyIntegrationChecklist = async () => {
+    const checklist = `Интеграция HandySeller TMS — чек-лист для партнера
+
+1) В кабинете TMS -> Настройки создайте API-клиента.
+   Сохраните client_id и client_secret (секрет показывается один раз).
+
+2) На backend получите access_token:
+   POST /api/tms/oauth/token
+   body: {"grant_type":"client_credentials","client_id":"...","client_secret":"..."}
+
+3) В checkout вызовите:
+   POST /api/tms/v1/shipments/estimate
+   Сохраните shipmentRequestId и покажите options покупателю.
+
+4) Для карты ПВЗ:
+   GET /api/tms/v1/shipments/{shipmentRequestId}/pickup-points
+
+5) После выбора способа доставки:
+   POST /api/tms/v1/shipments/{shipmentRequestId}/select-and-confirm
+   body: {"quoteId":"..."}
+   Обязательно передавайте Idempotency-Key.
+
+6) Сохраните в заказе:
+   shipmentId, trackingNumber, carrierOrderReference.
+
+7) Обновляйте статусы:
+   GET /api/tms/v1/shipments/{shipmentId}
+   GET /api/tms/v1/shipments/{shipmentId}/events
+
+Рекомендуемая последовательность:
+estimate -> pickup-points -> select-and-confirm`
     try {
-      await navigator.clipboard.writeText(cmd)
-      setCopiedTokenCurl(true)
-      setTimeout(() => setCopiedTokenCurl(false), 2000)
+      await navigator.clipboard.writeText(checklist)
+      setCopiedChecklist(true)
+      setTimeout(() => setCopiedChecklist(false), 2000)
     } catch {
-      setError("Не удалось скопировать curl-команду")
-    }
-  }
-
-  const copyV1FlowCurl = async () => {
-    const cmd = `# 1) Estimate (save shipmentRequestId + quoteId from response)
-curl -X POST "${window.location.origin}/api/tms/v1/shipments/estimate" \\
-  -H "Authorization: Bearer <ACCESS_TOKEN>" \\
-  -H "Idempotency-Key: estimate-<EXTERNAL_ORDER_ID>" \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "snapshot": { "sourceSystem": "HANDYSELLER_CORE", "userId": "<USER_ID>", "coreOrderId": "ord_<EXTERNAL_ORDER_ID>", "coreOrderNumber": "<EXTERNAL_ORDER_ID>", "marketplace": "OWN_SITE", "createdAt": "2026-01-01T10:00:00.000Z", "originLabel": "Москва, Склад 1", "destinationLabel": "Казань, ул. Пример 1", "cargo": { "weightGrams": 1500, "widthMm": 200, "lengthMm": 300, "heightMm": 150, "places": 1, "declaredValueRub": 10000 }, "itemSummary": [{ "productId": "p1", "title": "Товар", "quantity": 1, "weightGrams": 1500 }] },
-    "draft": { "originLabel": "Москва, Склад 1", "destinationLabel": "Казань, ул. Пример 1", "serviceFlags": ["EXPRESS"] },
-    "integration": { "externalOrderId": "<EXTERNAL_ORDER_ID>", "orderType": "CLIENT_ORDER" }
-  }'
-
-# 2) Select quote
-curl -X POST "${window.location.origin}/api/tms/v1/shipments/<REQUEST_ID>/select" \\
-  -H "Authorization: Bearer <ACCESS_TOKEN>" \\
-  -H "Content-Type: application/json" \\
-  -d '{"quoteId":"<QUOTE_ID>"}'
-
-# 3) Confirm
-curl -X POST "${window.location.origin}/api/tms/v1/shipments/<REQUEST_ID>/confirm" \\
-  -H "Authorization: Bearer <ACCESS_TOKEN>" \\
-  -H "Idempotency-Key: confirm-<EXTERNAL_ORDER_ID>"`
-    try {
-      await navigator.clipboard.writeText(cmd)
-      setCopiedV1FlowCurl(true)
-      setTimeout(() => setCopiedV1FlowCurl(false), 2000)
-    } catch {
-      setError("Не удалось скопировать v1 flow")
+      setError("Не удалось скопировать чек-лист интеграции")
     }
   }
 
@@ -437,25 +432,55 @@ curl -X POST "${window.location.origin}/api/tms/v1/shipments/<REQUEST_ID>/confir
                 target="_blank"
                 rel="noreferrer"
               >
-                Открыть OpenAPI
+                Скачать OpenAPI (YAML)
               </a>
-              <a
-                className="inline-flex items-center rounded-md border px-3 py-2 text-xs font-medium hover:bg-muted"
-                href="/tms/TMS-Partner-API.postman_collection.json"
-                target="_blank"
-                rel="noreferrer"
-              >
-                Скачать Postman коллекцию
-              </a>
-              <Button type="button" variant="outline" size="sm" onClick={copyTokenCurl}>
-                {copiedTokenCurl ? "Скопировано" : "Скопировать curl для токена"}
-              </Button>
-              <Button type="button" variant="outline" size="sm" onClick={copyV1FlowCurl}>
-                {copiedV1FlowCurl ? "Скопировано" : "Скопировать curl v1 flow"}
+              <Button type="button" variant="outline" size="sm" onClick={copyIntegrationChecklist}>
+                {copiedChecklist ? "Скопировано" : "Скопировать чек-лист интеграции"}
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
               Для надежности всегда передавайте заголовок `Idempotency-Key` в write-запросах.
+            </p>
+          </div>
+          <div className="rounded-lg border bg-muted/10 p-4 space-y-3 text-sm">
+            <p className="font-medium">Интеграция за 10 минут (шпаргалка)</p>
+            <ol className="list-decimal space-y-1 pl-5 text-muted-foreground">
+              <li>
+                Создайте API-клиента ниже и сразу сохраните <span className="font-mono">client_id</span> +{" "}
+                <span className="font-mono">client_secret</span> (секрет показывается один раз).
+              </li>
+              <li>
+                На своем backend вызовите <span className="font-mono">POST /api/tms/oauth/token</span> и получите{" "}
+                <span className="font-mono">access_token</span>.
+              </li>
+              <li>
+                В checkout вызовите <span className="font-mono">POST /api/tms/v1/shipments/estimate</span>, сохраните{" "}
+                <span className="font-mono">shipmentRequestId</span> и покажите покупателю варианты доставки.
+              </li>
+              <li>
+                Для карты ПВЗ вызовите{" "}
+                <span className="font-mono">GET /api/tms/v1/shipments/{`{shipmentRequestId}`}/pickup-points</span>.
+              </li>
+              <li>
+                После выбора доставки вызовите{" "}
+                <span className="font-mono">
+                  POST /api/tms/v1/shipments/{`{shipmentRequestId}`}/select-and-confirm
+                </span>{" "}
+                с <span className="font-mono">quoteId</span> и <span className="font-mono">Idempotency-Key</span>.
+              </li>
+              <li>
+                Сохраните в заказе <span className="font-mono">shipmentId</span>,{" "}
+                <span className="font-mono">trackingNumber</span>,{" "}
+                <span className="font-mono">carrierOrderReference</span>, а статусы получайте через{" "}
+                <span className="font-mono">GET /api/tms/v1/shipments/{`{shipmentId}`}</span> и{" "}
+                <span className="font-mono">/events</span>.
+              </li>
+              <li>
+                Для уведомлений в реальном времени добавьте webhook-подписку в вашей системе, чтобы не делать частый polling.
+              </li>
+            </ol>
+            <p className="text-xs text-muted-foreground">
+              Рекомендуемая последовательность: <span className="font-mono">estimate -&gt; pickup-points -&gt; select-and-confirm</span>.
             </p>
           </div>
           {m2mSecretOnce ? (

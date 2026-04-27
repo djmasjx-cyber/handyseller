@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, Logger, NotFoundException, OnModuleIni
 import { rankQuotes } from '@handyseller/tms-domain';
 import type {
   CarrierDescriptor,
+  CarrierPickupPoint,
   CarrierQuote,
   ClientOrderRecord,
   ClientOrderWithTmsStatusRecord,
@@ -25,8 +26,10 @@ import { ObjectStorageService } from './storage/object-storage.service';
 import { createHmac, randomBytes } from 'crypto';
 
 type RegistryOrderType = 'CLIENT_ORDER' | 'INTERNAL_TRANSFER' | 'SUPPLIER_PICKUP';
+const MP_MARKETPLACES = new Set(['WILDBERRIES', 'OZON', 'YANDEX']);
 
 type OrderRegistryFilter = {
+  authToken?: string | null;
   q?: string;
   status?: string;
   carrierId?: string;
@@ -70,6 +73,7 @@ type OrderRegistryItem = {
   updatedAt: string;
   hasShipment: boolean;
   hasArchivedShipments: boolean;
+  hasRequest: boolean;
 };
 
 @Injectable()
@@ -159,6 +163,105 @@ export class ShipmentsService implements OnModuleInit {
     return this.adapters.map((adapter) => adapter.descriptor);
   }
 
+  async listPickupPoints(
+    userId: string,
+    filter?: {
+      carrierId?: string;
+      city?: string;
+      address?: string;
+      lat?: number;
+      lon?: number;
+      limit?: number;
+    },
+    authToken?: string | null,
+  ): Promise<CarrierPickupPoint[]> {
+    const limit = Math.max(1, Math.min(200, filter?.limit ?? 100));
+    const adapters = this.adapters.filter((adapter) =>
+      filter?.carrierId ? adapter.descriptor.id === filter.carrierId : true,
+    );
+    const dedup = new Map<string, CarrierPickupPoint>();
+    for (const adapter of adapters) {
+      if (!adapter.listPickupPoints) continue;
+      try {
+        const points = await adapter.listPickupPoints(
+          {
+            city: filter?.city,
+            address: filter?.address,
+            lat: filter?.lat,
+            lon: filter?.lon,
+            limit,
+          },
+          { userId, authToken },
+        );
+        for (const point of points) {
+          if (!point?.id || !point?.carrierId) continue;
+          const key = `${point.carrierId}:${point.id}`;
+          if (!dedup.has(key)) dedup.set(key, point);
+          if (dedup.size >= limit) break;
+        }
+      } catch (error) {
+        this.logger.warn(
+          `[pickup-points] adapter=${adapter.descriptor.id} failed reason=${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+      if (dedup.size >= limit) break;
+    }
+    return [...dedup.values()]
+      .sort((a, b) => {
+        const byCarrier = a.carrierName.localeCompare(b.carrierName);
+        if (byCarrier !== 0) return byCarrier;
+        const byCity = (a.city ?? '').localeCompare(b.city ?? '');
+        if (byCity !== 0) return byCity;
+        return a.name.localeCompare(b.name);
+      })
+      .slice(0, limit);
+  }
+
+  async listPickupPointsForRequest(
+    userId: string,
+    requestId: string,
+    filter?: {
+      carrierId?: string;
+      city?: string;
+      address?: string;
+      lat?: number;
+      lon?: number;
+      limit?: number;
+    },
+    authToken?: string | null,
+  ): Promise<{
+    requestId: string;
+    destinationLabel: string | null;
+    points: CarrierPickupPoint[];
+  }> {
+    const request = this.getRequestOrThrow(userId, requestId);
+    const destinationLabel = request.draft.destinationLabel || request.snapshot.destinationLabel || null;
+    const quoteCarrierIds = new Set((this.quotes.get(requestId) ?? []).map((quote) => quote.carrierId));
+    const points = await this.listPickupPoints(
+      userId,
+      {
+        carrierId: filter?.carrierId,
+        city: filter?.city,
+        address: filter?.address ?? destinationLabel ?? undefined,
+        lat: filter?.lat,
+        lon: filter?.lon,
+        limit: filter?.limit,
+      },
+      authToken,
+    );
+    const filteredPoints =
+      quoteCarrierIds.size > 0 && !filter?.carrierId
+        ? points.filter((point) => quoteCarrierIds.has(point.carrierId))
+        : points;
+    return {
+      requestId,
+      destinationLabel,
+      points: filteredPoints,
+    };
+  }
+
   private static buildCarrierAdapters(): CarrierAdapter[] {
     const real: CarrierAdapter[] = [new MajorExpressAdapter(), new DellinAdapter(), new CdekAdapter()];
     const includeMocks =
@@ -182,17 +285,30 @@ export class ShipmentsService implements OnModuleInit {
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
-  listOrderRegistry(
+  async listOrderRegistry(
     userId: string,
     filter?: OrderRegistryFilter,
-  ): { items: OrderRegistryItem[]; nextCursor: string | null } {
+  ): Promise<{ items: OrderRegistryItem[]; nextCursor: string | null }> {
     const safeLimit = Math.max(1, Math.min(100, filter?.limit ?? 25));
     const cursor = filter?.cursor?.trim();
-    const all = [...this.requests.values()]
+    const requestItems = [...this.requests.values()]
       .filter((request) => request.userId === userId)
+      .filter((request) => !this.isMarketplaceOrder(request.snapshot.marketplace))
       .map((request) => this.buildOrderRegistryItem(request))
+      .map((item) => ({ ...item, sortKey: `${item.updatedAt}|${item.requestId}` }));
+    const requestOrderIds = new Set(
+      requestItems
+        .map((item) => item.coreOrderId)
+        .filter((value): value is string => Boolean(value)),
+    );
+    const coreOrders = await this.fetchCoreOrders(userId, filter?.authToken);
+    const coreOnlyItems = coreOrders
+      .filter((order) => !this.isMarketplaceOrder(order.marketplace))
+      .filter((order) => !requestOrderIds.has(order.id))
+      .map((order) => this.buildOrderRegistryItemFromCore(order))
+      .map((item) => ({ ...item, sortKey: `${item.updatedAt}|${item.requestId}` }));
+    const all = [...requestItems, ...coreOnlyItems]
       .filter((item) => this.matchesOrderRegistryFilter(item, filter))
-      .map((item) => ({ ...item, sortKey: `${item.updatedAt}|${item.requestId}` }))
       .sort((a, b) => b.sortKey.localeCompare(a.sortKey));
 
     const startIndex = cursor ? all.findIndex((item) => item.sortKey === cursor) + 1 : 0;
@@ -1312,6 +1428,24 @@ export class ShipmentsService implements OnModuleInit {
     return this.withIdempotency(scopeKey, () => this.confirmSelectedQuote(userId, requestId, authToken, requestTraceId));
   }
 
+  async selectAndConfirmQuoteIdempotent(
+    userId: string,
+    requestId: string,
+    quoteId: string,
+    idempotencyKey?: string | null,
+    authToken?: string | null,
+    requestTraceId?: string | null,
+  ): Promise<ShipmentRecord> {
+    this.selectQuote(userId, requestId, quoteId);
+    return this.confirmSelectedQuoteIdempotent(
+      userId,
+      requestId,
+      idempotencyKey,
+      authToken,
+      requestTraceId,
+    );
+  }
+
   getTracking(userId: string, shipmentId: string): TrackingEventRecord[] {
     const shipment = this.shipments.get(shipmentId);
     if (!shipment || shipment.userId !== userId) {
@@ -1498,7 +1632,49 @@ export class ShipmentsService implements OnModuleInit {
       updatedAt,
       hasShipment: shipments.length > 0,
       hasArchivedShipments: shipments.some((shipment) => this.isArchivedShipment(shipment)),
+      hasRequest: true,
     };
+  }
+
+  private buildOrderRegistryItemFromCore(order: ClientOrderRecord): OrderRegistryItem {
+    return {
+      requestId: `core:${order.id}`,
+      shipmentId: null,
+      shipmentIds: [],
+      internalOrderNumber: order.externalId || order.id,
+      coreOrderId: order.id,
+      status: 'NO_REQUEST',
+      requestStatus: 'NO_REQUEST',
+      shipmentStatus: null,
+      externalOrderId: order.externalId ?? null,
+      orderType: order.logisticsScenario === 'MARKETPLACE_RC' ? 'INTERNAL_TRANSFER' : 'CLIENT_ORDER',
+      sourceSystem: order.marketplace || 'CORE',
+      coreOrderNumber: order.externalId || order.id,
+      customerName: null,
+      customerPhone: null,
+      originLabel: order.warehouseName ?? null,
+      destinationLabel: order.deliveryAddressLabel ?? null,
+      carrierId: null,
+      carrierName: null,
+      trackingNumber: null,
+      carrierOrderNumber: null,
+      carrierOrderReference: null,
+      priceRub: null,
+      etaDays: null,
+      documentsCount: 0,
+      trackingEventsCount: 0,
+      lastEventAt: null,
+      createdAt: order.createdAt,
+      updatedAt: order.createdAt,
+      hasShipment: false,
+      hasArchivedShipments: false,
+      hasRequest: false,
+    };
+  }
+
+  private isMarketplaceOrder(marketplace: string | null | undefined): boolean {
+    const normalized = (marketplace ?? '').trim().toUpperCase();
+    return MP_MARKETPLACES.has(normalized);
   }
 
   private listShipmentsForRequest(userId: string, requestId: string): ShipmentRecord[] {

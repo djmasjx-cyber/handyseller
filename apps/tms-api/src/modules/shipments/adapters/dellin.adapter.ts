@@ -1,6 +1,7 @@
 import { Logger } from '@nestjs/common';
 import type {
   CarrierDescriptor,
+  CarrierPickupPoint,
   CarrierQuote,
   CreateShipmentRequestInput,
   InternalCarrierCredentials,
@@ -12,6 +13,7 @@ import type {
   CarrierAdapter,
   CarrierBookInput,
   CarrierDocumentDownloadInput,
+  CarrierPickupPointSearchInput,
   CarrierQuoteContext,
 } from './base-carrier.adapter';
 
@@ -151,6 +153,55 @@ function parsePublicCalculator(
   }
 
   return { priceRub, etaDays, insuranceRub: insuranceRub && insuranceRub > 0 ? insuranceRub : null };
+}
+
+function parseDellinTerminalPoints(payload: unknown): CarrierPickupPoint[] {
+  const out: CarrierPickupPoint[] = [];
+  const seen = new Set<string>();
+  const queue: unknown[] = [payload];
+  const toNum = (v: unknown): number | null => {
+    const n = asNumber(v);
+    return n != null ? n : null;
+  };
+  const asStr = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
+  while (queue.length) {
+    const node = queue.shift();
+    if (!node) continue;
+    if (Array.isArray(node)) {
+      queue.push(...node);
+      continue;
+    }
+    if (typeof node !== 'object') continue;
+    const obj = node as Record<string, unknown>;
+    for (const value of Object.values(obj)) queue.push(value);
+    const id = asStr(obj.terminalID ?? obj.terminalId ?? obj.id ?? obj.uid ?? obj.code);
+    const address = asStr(obj.address ?? obj.terminalAddress ?? obj.fullAddress ?? obj.addressString);
+    if (!id || !address) continue;
+    const carrierId = 'dellin';
+    const key = `${carrierId}:${id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const lat = toNum(obj.latitude ?? obj.lat ?? asObject(obj.geo)?.lat);
+    const lon = toNum(obj.longitude ?? obj.lon ?? obj.lng ?? asObject(obj.geo)?.lon ?? asObject(obj.geo)?.lng);
+    const city =
+      asStr(obj.cityName ?? obj.city ?? asObject(obj.cityObj)?.name ?? asObject(obj.cityObj)?.cityName) || null;
+    out.push({
+      id,
+      code: id,
+      carrierId,
+      carrierName: 'Деловые Линии',
+      type: 'TERMINAL',
+      name: asStr(obj.name ?? obj.terminalName ?? obj.title) || `Деловые Линии ${id}`,
+      address,
+      city,
+      lat,
+      lon,
+      workTime: asStr(obj.workTime ?? obj.schedule ?? obj.worktime) || null,
+      phone: asStr(obj.phone ?? obj.phones ?? obj.phoneNumber) || null,
+      codAllowed: null,
+    });
+  }
+  return out;
 }
 
 function asObject(value: unknown): Record<string, unknown> | null {
@@ -694,6 +745,33 @@ export class DellinAdapter implements CarrierAdapter {
     supportsBooking: process.env.DELLIN_ENABLE_BOOKING !== 'false',
     requiresCredentials: true,
   };
+
+  async listPickupPoints(
+    input: CarrierPickupPointSearchInput,
+    context: CarrierQuoteContext,
+  ): Promise<CarrierPickupPoint[]> {
+    const credentials = await this.loadCredentials(context, context.requestId ?? 'pickup-points');
+    if (!credentials) return [];
+    const appKey = (credentials.appKey ?? '').trim() || process.env.DELLIN_APP_KEY?.trim();
+    if (!appKey) return [];
+    const base = (process.env.DELLIN_API_BASE ?? 'https://api.dellin.ru').replace(/\/+$/, '');
+    const url = new URL(dellinJsonUrl(base, '/v1/public/request_terminals'));
+    url.searchParams.set('appkey', appKey);
+    const query = input.city?.trim() || input.address?.trim();
+    if (query) url.searchParams.set('q', query);
+    const res = await fetch(url.toString(), {
+      method: 'GET',
+      headers: withRequestIdHeaders({ Accept: 'application/json' }, context.requestId),
+      cache: 'no-store',
+    }).catch(() => null);
+    if (!res?.ok) {
+      this.logger.warn(`Dellin terminals HTTP failed: status=${res?.status ?? 'n/a'}`);
+      return [];
+    }
+    const data = await res.json().catch(() => null);
+    const limit = Math.max(1, Math.min(200, input.limit ?? 100));
+    return parseDellinTerminalPoints(data).slice(0, limit);
+  }
 
   async quote(
     input: CreateShipmentRequestInput,

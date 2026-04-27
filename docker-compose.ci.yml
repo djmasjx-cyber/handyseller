@@ -1,6 +1,6 @@
-# Для CI: образы из ghcr.io. IMAGE_API, IMAGE_WEB, IMAGE_TMS_API задаются при деплое.
-# Сеть external — создаётся один раз, переиспользуется (деплой + watchdog без конфликтов).
-# Использование: IMAGE_API=... IMAGE_WEB=... APP_ENV_FILE=.env.staging docker compose -f docker-compose.ci.yml up -d
+# Production stack на VM: образы из ghcr.io, порты 4000/3001/4100/4200.
+# Сеть external — создаётся один раз (деплой prod + vm-watchdog).
+# Staging (dev.handyseller.ru) — отдельный файл docker-compose.staging.yml и проект handyseller-staging.
 
 services:
   redis:

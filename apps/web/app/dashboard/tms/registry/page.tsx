@@ -36,6 +36,7 @@ type RegistryOrder = {
   updatedAt: string
   hasShipment: boolean
   hasArchivedShipments: boolean
+  hasRequest: boolean
 }
 
 type RegistryResponse = {
@@ -83,6 +84,8 @@ function statusLabel(value: string): string {
       return "Доставлено"
     case "SUPERSEDED":
       return "Заменено"
+    case "NO_REQUEST":
+      return "Новый, без расчета"
     default:
       return value
   }
@@ -191,6 +194,7 @@ export default function TmsRegistryPage() {
               <option value="IN_TRANSIT">В пути</option>
               <option value="DELIVERED">Доставлено</option>
               <option value="SUPERSEDED">Заменено</option>
+              <option value="NO_REQUEST">Новый, без расчета</option>
             </select>
             <select value={carrierId} onChange={(e) => setCarrierId(e.target.value)} className="h-9 rounded-md border bg-background px-3 text-sm">
               <option value="">Все перевозчики</option>
@@ -238,13 +242,20 @@ export default function TmsRegistryPage() {
                     <tr key={item.requestId} className="border-t align-top">
                       <td className="px-3 py-3 whitespace-nowrap">{formatDateTime(item.createdAt)}</td>
                       <td className="px-3 py-3">
-                        <Link
-                          href={`/dashboard/tms/registry/${encodeURIComponent(item.requestId)}`}
-                          className="font-medium text-primary underline-offset-2 hover:underline"
-                        >
-                          {item.internalOrderNumber || item.coreOrderNumber || item.requestId}
-                        </Link>
-                        <p className="text-xs text-muted-foreground">ID: {item.coreOrderId || item.requestId}</p>
+                        {item.hasRequest ? (
+                          <Link
+                            href={`/dashboard/tms/registry/${encodeURIComponent(item.requestId)}`}
+                            className="font-medium text-primary underline-offset-2 hover:underline"
+                          >
+                            {item.internalOrderNumber || item.coreOrderNumber || item.requestId}
+                          </Link>
+                        ) : (
+                          <p className="font-medium">{item.internalOrderNumber || item.coreOrderNumber || item.requestId}</p>
+                        )}
+                        <p className="text-xs text-muted-foreground">
+                          ID: {item.coreOrderId || item.requestId}
+                          {!item.hasRequest ? " · расчет доставки еще не запускался" : ""}
+                        </p>
                         {item.hasArchivedShipments ? <Badge variant="secondary">Есть история замен</Badge> : null}
                       </td>
                       <td className="px-3 py-3">

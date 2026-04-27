@@ -21,12 +21,16 @@ async function proxy(req: NextRequest, path: string[]) {
     return NextResponse.json({ error: "Не авторизован" }, { status: 401 })
   }
 
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${token}`,
+  }
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    headers["Content-Type"] = req.headers.get("content-type") ?? "application/json"
+  }
+
   const init: RequestInit = {
     method: req.method,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": req.headers.get("content-type") ?? "application/json",
-    },
+    headers,
     cache: "no-store",
   }
 
@@ -36,6 +40,21 @@ async function proxy(req: NextRequest, path: string[]) {
 
   try {
     const res = await fetch(resolveTarget(req, path), init)
+    const contentType = (res.headers.get("content-type") ?? "").toLowerCase()
+    const passthroughBinary =
+      contentType.includes("application/pdf") ||
+      contentType.includes("application/octet-stream") ||
+      contentType.startsWith("image/")
+
+    if (passthroughBinary) {
+      const body = await res.arrayBuffer()
+      const out = new Headers()
+      out.set("Content-Type", res.headers.get("content-type") ?? "application/octet-stream")
+      const cd = res.headers.get("content-disposition")
+      if (cd) out.set("Content-Disposition", cd)
+      return new NextResponse(body, { status: res.status, headers: out })
+    }
+
     const text = await res.text()
     return new NextResponse(text, {
       status: res.status,
