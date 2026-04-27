@@ -25,6 +25,7 @@ import { ObjectStorageService } from './storage/object-storage.service';
 import { createHmac, randomBytes } from 'crypto';
 
 type RegistryOrderType = 'CLIENT_ORDER' | 'INTERNAL_TRANSFER' | 'SUPPLIER_PICKUP';
+const MP_MARKETPLACES = new Set(['WILDBERRIES', 'OZON', 'YANDEX']);
 
 type OrderRegistryFilter = {
   authToken?: string | null;
@@ -192,6 +193,7 @@ export class ShipmentsService implements OnModuleInit {
     const cursor = filter?.cursor?.trim();
     const requestItems = [...this.requests.values()]
       .filter((request) => request.userId === userId)
+      .filter((request) => !this.isMarketplaceOrder(request.snapshot.marketplace))
       .map((request) => this.buildOrderRegistryItem(request))
       .map((item) => ({ ...item, sortKey: `${item.updatedAt}|${item.requestId}` }));
     const requestOrderIds = new Set(
@@ -201,6 +203,7 @@ export class ShipmentsService implements OnModuleInit {
     );
     const coreOrders = await this.fetchCoreOrders(userId, filter?.authToken);
     const coreOnlyItems = coreOrders
+      .filter((order) => !this.isMarketplaceOrder(order.marketplace))
       .filter((order) => !requestOrderIds.has(order.id))
       .map((order) => this.buildOrderRegistryItemFromCore(order))
       .map((item) => ({ ...item, sortKey: `${item.updatedAt}|${item.requestId}` }));
@@ -1549,6 +1552,11 @@ export class ShipmentsService implements OnModuleInit {
       hasArchivedShipments: false,
       hasRequest: false,
     };
+  }
+
+  private isMarketplaceOrder(marketplace: string | null | undefined): boolean {
+    const normalized = (marketplace ?? '').trim().toUpperCase();
+    return MP_MARKETPLACES.has(normalized);
   }
 
   private listShipmentsForRequest(userId: string, requestId: string): ShipmentRecord[] {
