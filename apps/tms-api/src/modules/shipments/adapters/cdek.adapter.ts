@@ -1,6 +1,7 @@
 import { Logger } from '@nestjs/common';
 import type {
   CarrierDescriptor,
+  CarrierPickupPoint,
   CarrierQuote,
   CreateShipmentRequestInput,
   InternalCarrierCredentials,
@@ -11,6 +12,7 @@ import type {
   CarrierAdapter,
   CarrierBookInput,
   CarrierDocumentDownloadInput,
+  CarrierPickupPointSearchInput,
   CarrierQuoteContext,
   CarrierShipmentRefreshInput,
 } from './base-carrier.adapter';
@@ -28,6 +30,24 @@ type CdekTariff = {
 };
 
 type CdekCity = { code?: number; city?: string };
+type CdekDeliveryPoint = {
+  code?: string;
+  name?: string;
+  type?: string;
+  owner_code?: string;
+  address?: string;
+  location?: {
+    city?: string;
+    address?: string;
+    latitude?: number | string;
+    longitude?: number | string;
+  };
+  work_time?: string;
+  phones?: Array<{ number?: string }>;
+  have_cashless?: boolean;
+  have_cash?: boolean;
+  is_dressing_room?: boolean;
+};
 
 type CdekOrderResponse = {
   entity?: {
@@ -422,6 +442,72 @@ export class CdekAdapter implements CarrierAdapter {
       if (row && typeof row.code === 'number' && Number.isFinite(row.code)) return row.code;
     }
     return null;
+  }
+
+  async listPickupPoints(
+    input: CarrierPickupPointSearchInput,
+    context: CarrierQuoteContext,
+  ): Promise<CarrierPickupPoint[]> {
+    const credentials = await this.loadCredentials(context, context.requestId ?? 'pickup-points');
+    if (!credentials) return [];
+    const token = await this.getAccessToken(credentials, context.requestId ?? 'pickup-points');
+    if (!token) return [];
+    const base = (process.env.CDEK_API_BASE ?? 'https://api.cdek.ru').replace(/\/+$/, '');
+    const cityLabel = input.city?.trim() || input.address?.trim() || '';
+    const cityCode = cityLabel
+      ? await this.resolveCityCode(base, token, cityLabel, context.requestId, this.quoteTimeoutMs())
+      : null;
+    const limit = Math.max(1, Math.min(200, input.limit ?? 100));
+    const url = new URL('/v2/deliverypoints', base);
+    url.searchParams.set('size', String(limit));
+    if (cityCode) url.searchParams.set('city_code', String(cityCode));
+    const res = await this.fetchWithTimeout(
+      url.toString(),
+      {
+        headers: withRequestIdHeaders(
+          {
+            Authorization: `Bearer ${token}`,
+            Accept: 'application/json',
+          },
+          context.requestId,
+        ),
+        cache: 'no-store',
+      },
+      this.quoteTimeoutMs(),
+    );
+    if (!res?.ok) return [];
+    const data = (await res.json().catch(() => [])) as unknown;
+    const rows = Array.isArray(data) ? (data as CdekDeliveryPoint[]) : [];
+    return rows
+      .map((row): CarrierPickupPoint | null => {
+        const id = (row.code ?? '').trim();
+        if (!id) return null;
+        const typeRaw = (row.type ?? '').toUpperCase();
+        const type: CarrierPickupPoint['type'] =
+          typeRaw === 'POSTAMAT' ? 'LOCKER' : typeRaw === 'PVZ' ? 'PVZ' : 'OFFICE';
+        const lat = asNum(row.location?.latitude);
+        const lon = asNum(row.location?.longitude);
+        const city = row.location?.city?.trim() || null;
+        const address = row.location?.address?.trim() || row.address?.trim() || '';
+        if (!address) return null;
+        return {
+          id,
+          code: id,
+          carrierId: this.descriptor.id,
+          carrierName: this.descriptor.name,
+          type,
+          name: row.name?.trim() || `${this.descriptor.name} ${id}`,
+          address,
+          city,
+          lat,
+          lon,
+          workTime: row.work_time?.trim() || null,
+          phone: row.phones?.map((p) => p.number?.trim()).filter((v): v is string => Boolean(v)).join(', ') || null,
+          codAllowed: row.have_cash === true || row.have_cashless === true,
+        };
+      })
+      .filter((item): item is CarrierPickupPoint => Boolean(item))
+      .slice(0, limit);
   }
 
   async book({ quote, input, context }: CarrierBookInput): Promise<{

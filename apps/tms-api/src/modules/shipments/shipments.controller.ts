@@ -203,6 +203,36 @@ export class ShipmentsController {
     return this.shipmentsService.getOrderRegistryDetail(userId, requestId);
   }
 
+  @Get('v1/pickup-points')
+  @TmsAccess('read')
+  v1ListPickupPoints(
+    @CurrentUser('userId') userId: string,
+    @Headers('authorization') authorization?: string,
+    @Query('carrierId') carrierId?: string,
+    @Query('city') city?: string,
+    @Query('address') address?: string,
+    @Query('lat') lat?: string,
+    @Query('lon') lon?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const authToken = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
+    const parsedLat = lat ? Number.parseFloat(lat) : undefined;
+    const parsedLon = lon ? Number.parseFloat(lon) : undefined;
+    const parsedLimit = limit ? Number.parseInt(limit, 10) : undefined;
+    return this.shipmentsService.listPickupPoints(
+      userId,
+      {
+        carrierId,
+        city,
+        address,
+        lat: Number.isFinite(parsedLat) ? parsedLat : undefined,
+        lon: Number.isFinite(parsedLon) ? parsedLon : undefined,
+        limit: Number.isFinite(parsedLimit) ? parsedLimit : undefined,
+      },
+      authToken,
+    );
+  }
+
   @Post('v1/shipments')
   @TmsAccess('write')
   async v1CreateShipment(

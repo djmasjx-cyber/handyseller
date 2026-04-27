@@ -141,6 +141,24 @@ export interface CarrierQuote {
   score: number;
 }
 
+export interface CarrierPickupPoint {
+  id: string;
+  carrierId: string;
+  carrierName: string;
+  /** Нормализованный тип точки самовывоза/терминала. */
+  type: 'PVZ' | 'TERMINAL' | 'LOCKER' | 'OFFICE';
+  code?: string;
+  name: string;
+  address: string;
+  city?: string | null;
+  lat?: number | null;
+  lon?: number | null;
+  workTime?: string | null;
+  phone?: string | null;
+  /** Способ оплаты в точке (если перевозчик отдает флаг). */
+  codAllowed?: boolean | null;
+}
+
 export interface ShipmentRequestRecord {
   id: string;
   userId: string;

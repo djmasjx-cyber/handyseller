@@ -1,5 +1,6 @@
 import type {
   CarrierDescriptor,
+  CarrierPickupPoint,
   CarrierQuote,
   CreateShipmentRequestInput,
   ShipmentDocumentRecord,
@@ -30,6 +31,14 @@ export interface CarrierShipmentRefreshInput {
   context: CarrierQuoteContext;
 }
 
+export interface CarrierPickupPointSearchInput {
+  city?: string;
+  address?: string;
+  lat?: number;
+  lon?: number;
+  limit?: number;
+}
+
 export interface CarrierAdapter {
   readonly descriptor: CarrierDescriptor;
   quote(
@@ -54,4 +63,8 @@ export interface CarrierAdapter {
     tracking?: Array<Omit<TrackingEventRecord, 'id'>>;
     documents?: Array<Pick<ShipmentDocumentRecord, 'type' | 'title' | 'content'>>;
   }>;
+  listPickupPoints?(
+    input: CarrierPickupPointSearchInput,
+    context: CarrierQuoteContext,
+  ): Promise<CarrierPickupPoint[]>;
 }
