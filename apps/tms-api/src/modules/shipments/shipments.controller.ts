@@ -166,6 +166,7 @@ export class ShipmentsController {
   @TmsAccess('read')
   v1ListOrderRegistry(
     @CurrentUser('userId') userId: string,
+    @Headers('authorization') authorization?: string,
     @Query('q') q?: string,
     @Query('status') status?: string,
     @Query('carrierId') carrierId?: string,
@@ -177,10 +178,12 @@ export class ShipmentsController {
     @Query('limit') limit?: string,
     @Query('cursor') cursor?: string,
   ) {
+    const authToken = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
     const parsedLimit = limit ? Number.parseInt(limit, 10) : undefined;
     const parsedHasShipment =
       hasShipment === 'true' ? true : hasShipment === 'false' ? false : undefined;
     return this.shipmentsService.listOrderRegistry(userId, {
+      authToken,
       q,
       status,
       carrierId,
