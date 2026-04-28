@@ -82,6 +82,8 @@ export interface ShipmentRequestDraft {
   originLabel: string;
   destinationLabel: string;
   serviceFlags: ServiceFlag[];
+  /** Код ПВЗ/терминала для сценариев доставки до склада/ПВЗ (например CDEK delivery_point). */
+  pickupPointId?: string;
   /** Дата забора/подачи машины в логистических сутках (YYYY-MM-DD). */
   pickupDate?: string;
   /** Желаемое окно времени забора HH:mm. */
@@ -176,6 +178,7 @@ export interface ShipmentRequestRecord {
   createdAt: string;
   updatedAt: string;
   selectedQuoteId?: string;
+  selectedPickupPointId?: string;
   integration?: {
     externalOrderId?: string;
     orderType?: PartnerOrderType;
