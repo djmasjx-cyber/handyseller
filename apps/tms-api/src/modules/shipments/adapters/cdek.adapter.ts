@@ -37,6 +37,7 @@ type CdekDeliveryPoint = {
   owner_code?: string;
   address?: string;
   location?: {
+    city_code?: number;
     city?: string;
     address?: string;
     latitude?: number | string;
@@ -525,6 +526,37 @@ export class CdekAdapter implements CarrierAdapter {
       .slice(0, limit);
   }
 
+  private async getDeliveryPointByCode(
+    base: string,
+    token: string,
+    pointCode: string,
+    requestId?: string | null,
+  ): Promise<CdekDeliveryPoint | null> {
+    const code = pointCode.trim();
+    if (!code) return null;
+    const url = new URL('/v2/deliverypoints', base);
+    url.searchParams.set('code', code);
+    url.searchParams.set('size', '1');
+    const res = await this.fetchWithTimeout(
+      url.toString(),
+      {
+        headers: withRequestIdHeaders(
+          {
+            Authorization: `Bearer ${token}`,
+            Accept: 'application/json',
+          },
+          requestId,
+        ),
+        cache: 'no-store',
+      },
+      this.quoteTimeoutMs(),
+    );
+    if (!res?.ok) return null;
+    const data = (await res.json().catch(() => [])) as unknown;
+    if (!Array.isArray(data) || data.length < 1) return null;
+    return (data[0] as CdekDeliveryPoint) ?? null;
+  }
+
   async book({ quote, input, context }: CarrierBookInput): Promise<{
     shipment: Omit<ShipmentRecord, 'id' | 'userId' | 'createdAt'>;
     tracking: Array<Omit<TrackingEventRecord, 'id'>>;
@@ -639,9 +671,24 @@ export class CdekAdapter implements CarrierAdapter {
         phones: [{ number: recipientPhone }],
       },
       from_location: { code: fromCode, address: fromAddress },
-      to_location: requiresPickupPoint ? { code: pickupPointId } : { code: toCode, address: toAddress },
+      to_location: { code: toCode, address: toAddress },
       packages: packagesPayload,
     };
+    if (requiresPickupPoint) {
+      const point = await this.getDeliveryPointByCode(base, token, pickupPointId, traceId);
+      if (!point?.code) {
+        throw new Error(`CDEK booking failed: pickupPointId "${pickupPointId}" not found`);
+      }
+      const pointAddress = (point.location?.address ?? point.address ?? '').trim();
+      const pointCityCode = typeof point.location?.city_code === 'number' ? point.location.city_code : null;
+      if (pointCityCode != null && pointCityCode !== toCode) {
+        throw new Error(
+          `CDEK booking failed: pickupPointId "${pickupPointId}" belongs to city ${pointCityCode}, destination city is ${toCode}`,
+        );
+      }
+      payload.to_location = { code: toCode, address: pointAddress || toAddress };
+      payload.delivery_point = pickupPointId;
+    }
     this.logger.log(
       `[cdek-booking] base=${base} type=${orderType} request send requestId=${quote.requestId} number=${orderNumber} tariff=${tariffCode} packageWeightG=${packageWeightGrams}`,
     );
