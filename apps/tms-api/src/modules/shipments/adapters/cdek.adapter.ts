@@ -639,12 +639,9 @@ export class CdekAdapter implements CarrierAdapter {
         phones: [{ number: recipientPhone }],
       },
       from_location: { code: fromCode, address: fromAddress },
-      to_location: requiresPickupPoint ? { code: toCode } : { code: toCode, address: toAddress },
+      to_location: requiresPickupPoint ? { code: pickupPointId } : { code: toCode, address: toAddress },
       packages: packagesPayload,
     };
-    if (requiresPickupPoint) {
-      payload.delivery_point = pickupPointId;
-    }
     this.logger.log(
       `[cdek-booking] base=${base} type=${orderType} request send requestId=${quote.requestId} number=${orderNumber} tariff=${tariffCode} packageWeightG=${packageWeightGrams}`,
     );
