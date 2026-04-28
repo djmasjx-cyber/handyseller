@@ -685,7 +685,8 @@ export class CdekAdapter implements CarrierAdapter {
           `CDEK booking failed: pickupPointId "${pickupPointId}" belongs to city ${pointCityCode}, destination city is ${toCode}`,
         );
       }
-      payload.to_location = { code: toCode };
+      // CDEK contract: delivery_point cannot be combined with to_location.
+      delete payload.to_location;
       payload.delivery_point = pickupPointId;
     }
     this.logger.log(
