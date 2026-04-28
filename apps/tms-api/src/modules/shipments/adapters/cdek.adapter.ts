@@ -617,6 +617,13 @@ export class CdekAdapter implements CarrierAdapter {
       },
     ];
 
+    const deliveryMode = extractDeliveryModeFromQuoteId(quote.id);
+    const pickupPointId = (input.draft.pickupPointId ?? '').trim();
+    const requiresPickupPoint = deliveryMode != null && (deliveryMode === 2 || deliveryMode === 4);
+    if (requiresPickupPoint && !pickupPointId) {
+      throw new Error('CDEK booking failed: pickupPointId is required for warehouse/PVZ delivery mode');
+    }
+
     const payload: Record<string, unknown> = {
       type: orderType,
       number: orderNumber,
@@ -632,15 +639,10 @@ export class CdekAdapter implements CarrierAdapter {
         phones: [{ number: recipientPhone }],
       },
       from_location: { code: fromCode, address: fromAddress },
-      to_location: { code: toCode, address: toAddress },
+      to_location: requiresPickupPoint ? { code: toCode } : { code: toCode, address: toAddress },
       packages: packagesPayload,
     };
-    const deliveryMode = extractDeliveryModeFromQuoteId(quote.id);
-    const pickupPointId = (input.draft.pickupPointId ?? '').trim();
-    if (deliveryMode != null && (deliveryMode === 2 || deliveryMode === 4)) {
-      if (!pickupPointId) {
-        throw new Error('CDEK booking failed: pickupPointId is required for warehouse/PVZ delivery mode');
-      }
+    if (requiresPickupPoint) {
       payload.delivery_point = pickupPointId;
     }
     this.logger.log(
