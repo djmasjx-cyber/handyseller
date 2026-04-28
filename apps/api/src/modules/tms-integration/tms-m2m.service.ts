@@ -1044,6 +1044,11 @@ components:
           type: string
           description: ID выбранного варианта доставки из options.
           example: req_1777066854894_wfovj3:dellin:terminal-terminal
+        pickupPointId:
+          type: string
+          nullable: true
+          description: Код ПВЗ/терминала (обязательно для тарифов до склада/ПВЗ, например CDEK delivery_mode=2/4).
+          example: MSK123
 
     SelectQuoteResponse:
       type: object
@@ -1548,6 +1553,10 @@ paths:
               required: [quoteId]
               properties:
                 quoteId: { type: string }
+                pickupPointId:
+                  type: string
+                  nullable: true
+                  description: Код ПВЗ/терминала для тарифов до склада/ПВЗ.
       responses:
         '200':
           description: Тариф выбран
