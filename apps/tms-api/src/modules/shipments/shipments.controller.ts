@@ -190,6 +190,7 @@ export class ShipmentsController {
     @Query('dateFrom') dateFrom?: string,
     @Query('dateTo') dateTo?: string,
     @Query('hasShipment') hasShipment?: string,
+    @Query('deleted') deleted?: string,
     @Query('limit') limit?: string,
     @Query('cursor') cursor?: string,
   ) {
@@ -197,6 +198,7 @@ export class ShipmentsController {
     const parsedLimit = limit ? Number.parseInt(limit, 10) : undefined;
     const parsedHasShipment =
       hasShipment === 'true' ? true : hasShipment === 'false' ? false : undefined;
+    const parsedDeleted = deleted === 'true' ? true : deleted === 'false' ? false : undefined;
     return this.shipmentsService.listOrderRegistry(userId, {
       authToken,
       q,
@@ -207,6 +209,7 @@ export class ShipmentsController {
       dateFrom,
       dateTo,
       hasShipment: parsedHasShipment,
+      deleted: parsedDeleted,
       limit: Number.isFinite(parsedLimit) ? parsedLimit : undefined,
       cursor,
     });
