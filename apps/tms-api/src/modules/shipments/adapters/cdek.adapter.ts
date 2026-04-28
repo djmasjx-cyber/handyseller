@@ -106,10 +106,23 @@ function cdekCityCandidates(label: string | null | undefined): string[] {
     const t = v.replace(/^\s*\d{6}\s*,?\s*/u, '').replace(/\s+/g, ' ').trim();
     if (t.length >= 2 && !out.includes(t)) out.push(t);
   };
+  const stripStreetTail = (v: string): string => {
+    return v
+      .replace(
+        /\b(ул\.?|улица|пр-?кт|проспект|б-р|бульвар|пер\.?|переулок|наб\.?|набережная|шоссе|дом|д\.|кв\.?|квартира)\b.*$/iu,
+        '',
+      )
+      .trim();
+  };
   push(label);
   for (const part of label.split(',').map((x) => x.trim())) if (part) push(part);
-  const m = label.match(/(?:г\.?|город)\s*([А-Яа-яЁёA-Za-z\- ]{2,80})/u);
+  const withoutStreetTail = stripStreetTail(label);
+  if (withoutStreetTail) push(withoutStreetTail);
+  const m = label.match(/(?:г\.?|город)\s*([А-Яа-яЁёA-Za-z\-]{2,80})/u);
   if (m?.[1]) push(m[1]);
+  for (const part of label.split(/[;,]/).map((x) => stripStreetTail(x))) {
+    if (part) push(part);
+  }
   return out;
 }
 
