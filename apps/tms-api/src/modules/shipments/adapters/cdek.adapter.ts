@@ -679,14 +679,13 @@ export class CdekAdapter implements CarrierAdapter {
       if (!point?.code) {
         throw new Error(`CDEK booking failed: pickupPointId "${pickupPointId}" not found`);
       }
-      const pointAddress = (point.location?.address ?? point.address ?? '').trim();
       const pointCityCode = typeof point.location?.city_code === 'number' ? point.location.city_code : null;
       if (pointCityCode != null && pointCityCode !== toCode) {
         throw new Error(
           `CDEK booking failed: pickupPointId "${pickupPointId}" belongs to city ${pointCityCode}, destination city is ${toCode}`,
         );
       }
-      payload.to_location = { code: toCode, address: pointAddress || toAddress };
+      payload.to_location = { code: toCode };
       payload.delivery_point = pickupPointId;
     }
     this.logger.log(
