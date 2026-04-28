@@ -82,6 +82,8 @@ function statusLabel(value: string): string {
       return "На доставке"
     case "DELIVERED":
       return "Доставлено"
+    case "DELETED_EXTERNAL":
+      return "Удален у перевозчика"
     case "SUPERSEDED":
       return "Заменено"
     case "NO_REQUEST":
@@ -105,6 +107,7 @@ function orderTypeLabel(value: string | null): string {
 }
 
 export default function TmsRegistryPage() {
+  const [view, setView] = useState<"active" | "deleted">("active")
   const [items, setItems] = useState<RegistryOrder[]>([])
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [query, setQuery] = useState("")
@@ -135,6 +138,7 @@ export default function TmsRegistryPage() {
       params.set("limit", "25")
       if (query.trim()) params.set("q", query.trim())
       if (status) params.set("status", status)
+      params.set("deleted", view === "deleted" ? "true" : "false")
       if (carrierId) params.set("carrierId", carrierId)
       if (hasShipment) params.set("hasShipment", hasShipment)
       if (cursor) params.set("cursor", cursor)
@@ -157,7 +161,7 @@ export default function TmsRegistryPage() {
   useEffect(() => {
     void loadRegistry(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [view])
 
   const applyFilters = () => {
     setNextCursor(null)
@@ -175,6 +179,22 @@ export default function TmsRegistryPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          <div className="inline-flex rounded-md border bg-muted/20 p-1">
+            <button
+              type="button"
+              onClick={() => setView("active")}
+              className={`rounded px-3 py-1 text-sm ${view === "active" ? "bg-background shadow-sm" : "text-muted-foreground"}`}
+            >
+              Активные
+            </button>
+            <button
+              type="button"
+              onClick={() => setView("deleted")}
+              className={`rounded px-3 py-1 text-sm ${view === "deleted" ? "bg-background shadow-sm" : "text-muted-foreground"}`}
+            >
+              Удаленные заказы
+            </button>
+          </div>
           <div className="grid gap-3 md:grid-cols-[1fr_180px_180px_160px_auto]">
             <label className="relative">
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -193,6 +213,7 @@ export default function TmsRegistryPage() {
               <option value="CONFIRMED">Подтверждено</option>
               <option value="IN_TRANSIT">В пути</option>
               <option value="DELIVERED">Доставлено</option>
+              <option value="DELETED_EXTERNAL">Удален у перевозчика</option>
               <option value="SUPERSEDED">Заменено</option>
               <option value="NO_REQUEST">Новый, без расчета</option>
             </select>
@@ -257,6 +278,9 @@ export default function TmsRegistryPage() {
                           {!item.hasRequest ? " · расчет доставки еще не запускался" : ""}
                         </p>
                         {item.hasArchivedShipments ? <Badge variant="secondary">Есть история замен</Badge> : null}
+                        {item.status === "DELETED_EXTERNAL" ? (
+                          <Badge variant="destructive">Удален в ЛК перевозчика</Badge>
+                        ) : null}
                       </td>
                       <td className="px-3 py-3">
                         <p>{item.externalOrderId || "—"}</p>
