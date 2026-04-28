@@ -255,10 +255,14 @@ export class ShipmentsService implements OnModuleInit {
       quoteCarrierIds.size > 0 && !filter?.carrierId
         ? points.filter((point) => quoteCarrierIds.has(point.carrierId))
         : points;
+    const pointsWithFallback =
+      filteredPoints.length === 0 && points.length > 0 && quoteCarrierIds.size > 0 && !filter?.carrierId
+        ? points
+        : filteredPoints;
     return {
       requestId,
       destinationLabel,
-      points: filteredPoints,
+      points: pointsWithFallback,
     };
   }
 
