@@ -224,11 +224,21 @@ function isLikelyPdf(buffer: Buffer): boolean {
   return buffer.subarray(0, 5).toString('ascii') === '%PDF-';
 }
 
-/** Только дверь-дверь: у нас нет кодов ПВЗ, тарифы «до склада» дают «Не задан офис получателя». */
-function isDoorToDoorTariff(t: CdekTariff): boolean {
-  const dm = t.delivery_mode;
-  if (dm == null || Number.isNaN(Number(dm))) return true;
-  return Number(dm) === 1;
+function cdekDeliveryModeLabel(dm: number | null | undefined): string {
+  if (dm == null || Number.isNaN(Number(dm))) return 'режим ?';
+  if (Number(dm) === 1) return 'дверь-дверь';
+  if (Number(dm) === 2) return 'дверь-склад/ПВЗ';
+  if (Number(dm) === 3) return 'склад/ПВЗ-дверь';
+  if (Number(dm) === 4) return 'склад/ПВЗ-склад/ПВЗ';
+  return `режим ${dm}`;
+}
+
+function extractDeliveryModeFromQuoteId(quoteId: string): number | null {
+  const tail = quoteId.split(':').at(-1) ?? '';
+  const m = /^m(\d+)$/i.exec(tail.trim());
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isFinite(n) ? n : null;
 }
 
 /**
@@ -390,17 +400,9 @@ export class CdekAdapter implements CarrierAdapter {
     const tariffs = tariffsRaw as CdekTariff[];
     if (!tariffs.length) return done([], 'no_tariffs');
 
-    const tariffsDoor = tariffs.filter(isDoorToDoorTariff);
-    const tariffsForQuotes = tariffsDoor.length ? tariffsDoor : tariffs;
-    if (!tariffsDoor.length && tariffs.length) {
-      this.logger.warn(
-        `CDEK quote: no door-to-door tariffs after filter; using full list (may require ПВЗ). requestId=${requestId}`,
-      );
-    }
-
     const serviceFlags = input.draft.serviceFlags.filter((f) => this.descriptor.supportedFlags.includes(f));
     const quotes: CarrierQuote[] = [];
-    for (const t of tariffsForQuotes) {
+    for (const t of tariffs) {
       const priceRub = asNum(t.delivery_sum);
       if (!priceRub || priceRub <= 0) continue;
       const etaMin = asNum(t.calendar_min) ?? asNum(t.period_min) ?? 1;
@@ -409,9 +411,9 @@ export class CdekAdapter implements CarrierAdapter {
       const code = t.tariff_code ?? Math.round(priceRub);
       const name = t.tariff_name ?? `Тариф ${code}`;
       const dm = t.delivery_mode;
-      const modeLabel = dm === 1 ? 'дверь-дверь' : dm != null ? `режим ${dm}` : 'режим ?';
+      const modeLabel = cdekDeliveryModeLabel(dm);
       quotes.push({
-        id: `${requestId}:${this.descriptor.id}:${code}`,
+        id: `${requestId}:${this.descriptor.id}:${code}:${dm != null ? `m${dm}` : 'm0'}`,
         requestId,
         carrierId: this.descriptor.id,
         carrierName: this.descriptor.name,
@@ -633,6 +635,14 @@ export class CdekAdapter implements CarrierAdapter {
       to_location: { code: toCode, address: toAddress },
       packages: packagesPayload,
     };
+    const deliveryMode = extractDeliveryModeFromQuoteId(quote.id);
+    const pickupPointId = (input.draft.pickupPointId ?? '').trim();
+    if (deliveryMode != null && (deliveryMode === 2 || deliveryMode === 4)) {
+      if (!pickupPointId) {
+        throw new Error('CDEK booking failed: pickupPointId is required for warehouse/PVZ delivery mode');
+      }
+      payload.delivery_point = pickupPointId;
+    }
     this.logger.log(
       `[cdek-booking] base=${base} type=${orderType} request send requestId=${quote.requestId} number=${orderNumber} tariff=${tariffCode} packageWeightG=${packageWeightGrams}`,
     );
@@ -1100,8 +1110,9 @@ export class CdekAdapter implements CarrierAdapter {
   }
 
   private extractTariffCode(quoteId: string): number {
-    const tail = quoteId.split(':').at(-1) ?? '';
-    const n = Number(tail);
+    const parts = quoteId.split(':');
+    const candidate = parts.length >= 3 ? parts[2] : parts.at(-1) ?? '';
+    const n = Number(candidate);
     if (Number.isFinite(n) && n > 0) return Math.round(n);
     return 136;
   }

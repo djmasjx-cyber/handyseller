@@ -1251,13 +1251,14 @@ export class ShipmentsService implements OnModuleInit {
     return this.quotes.get(requestId) ?? [];
   }
 
-  selectQuote(userId: string, requestId: string, quoteId: string): ShipmentRequestRecord {
+  selectQuote(userId: string, requestId: string, quoteId: string, pickupPointId?: string): ShipmentRequestRecord {
     const request = this.getRequestOrThrow(userId, requestId);
     const quote = (this.quotes.get(requestId) ?? []).find((item) => item.id === quoteId);
     if (!quote) {
       throw new NotFoundException('Тариф не найден');
     }
     request.selectedQuoteId = quoteId;
+    request.selectedPickupPointId = pickupPointId?.trim() || undefined;
     request.updatedAt = new Date().toISOString();
     this.requests.set(requestId, request);
     void this.store.saveRequest(request);
@@ -1324,7 +1325,10 @@ export class ShipmentsService implements OnModuleInit {
         quote,
         input: {
           snapshot: request.snapshot,
-          draft: request.draft,
+          draft: {
+            ...request.draft,
+            pickupPointId: request.selectedPickupPointId ?? request.draft.pickupPointId,
+          },
         },
         context: { userId, authToken, requestId: requestTraceId ?? requestId },
       });
@@ -1436,11 +1440,12 @@ export class ShipmentsService implements OnModuleInit {
     userId: string,
     requestId: string,
     quoteId: string,
+    pickupPointId?: string,
     idempotencyKey?: string | null,
     authToken?: string | null,
     requestTraceId?: string | null,
   ): Promise<ShipmentRecord> {
-    this.selectQuote(userId, requestId, quoteId);
+    this.selectQuote(userId, requestId, quoteId, pickupPointId);
     return this.confirmSelectedQuoteIdempotent(
       userId,
       requestId,
