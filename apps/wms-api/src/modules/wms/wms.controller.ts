@@ -11,13 +11,16 @@ import {
   CreateLocationDto,
   CreateReceiptDto,
   CreateWarehouseDto,
+  ImportTransferOrdersDto,
   MoveInventoryDto,
   PrintLabelForScanDto,
   ReserveReceiptBarcodesDto,
   UpdateItemDto,
 } from './wms.dto';
+import { WmsAnalyticsService } from './analytics/wms-analytics.service';
 import { WmsLabelingService } from './labeling/wms-labeling.service';
 import { WmsService } from './wms.service';
+import type { WmsBiTransferFilters, WmsBiTransferOrderKind } from '@handyseller/wms-sdk';
 
 @Controller('wms')
 @UseGuards(AuthGuard('jwt'), WmsScopeGuard)
@@ -25,6 +28,7 @@ export class WmsController {
   constructor(
     private readonly wms: WmsService,
     private readonly labeling: WmsLabelingService,
+    private readonly analytics: WmsAnalyticsService,
   ) {}
 
   @Get('v1/warehouses')
@@ -195,5 +199,54 @@ export class WmsController {
   listEvents(@CurrentUser('userId') userId: string, @Query('limit') limit?: string) {
     const parsedLimit = limit ? Number.parseInt(limit, 10) : undefined;
     return this.wms.listEvents(userId, Number.isFinite(parsedLimit) ? parsedLimit : undefined);
+  }
+
+  @Post('v1/analytics/imports/transfer-orders')
+  @WmsAccess('write')
+  importTransferOrders(@CurrentUser('userId') userId: string, @Body() input: ImportTransferOrdersDto) {
+    return this.analytics.importTransferOrders(userId, input);
+  }
+
+  @Get('v1/analytics/imports')
+  @WmsAccess('read')
+  listAnalyticsImports(@CurrentUser('userId') userId: string) {
+    return this.analytics.listImports(userId);
+  }
+
+  @Get('v1/analytics/transfers/summary')
+  @WmsAccess('read')
+  transferSummary(@CurrentUser('userId') userId: string, @Query() query: Record<string, string | undefined>) {
+    return this.analytics.getTransferSummary(userId, this.transferFilters(query));
+  }
+
+  @Get('v1/analytics/transfers/by-op')
+  @WmsAccess('read')
+  transfersByOp(@CurrentUser('userId') userId: string, @Query() query: Record<string, string | undefined>) {
+    return this.analytics.getTransfersByOp(userId, this.transferFilters(query));
+  }
+
+  @Get('v1/analytics/transfers/tourists')
+  @WmsAccess('read')
+  tourists(@CurrentUser('userId') userId: string, @Query() query: Record<string, string | undefined>) {
+    return this.analytics.getTourists(userId, this.transferFilters(query));
+  }
+
+  @Get('v1/analytics/transfers/replenishment-risks')
+  @WmsAccess('read')
+  replenishmentRisks(@CurrentUser('userId') userId: string, @Query() query: Record<string, string | undefined>) {
+    return this.analytics.getReplenishmentRisks(userId, this.transferFilters(query));
+  }
+
+  private transferFilters(query: Record<string, string | undefined>): WmsBiTransferFilters {
+    const kind = query.kind?.trim() as WmsBiTransferOrderKind | undefined;
+    return {
+      from: query.from?.trim() ? `${query.from.trim()}T00:00:00.000Z` : undefined,
+      to: query.to?.trim() ? `${query.to.trim()}T23:59:59.999Z` : undefined,
+      receiverWarehouse: query.receiverWarehouse?.trim() || undefined,
+      senderWarehouse: query.senderWarehouse?.trim() || undefined,
+      item: query.item?.trim() || undefined,
+      batchId: query.batchId?.trim() || undefined,
+      kind: kind === 'REPLENISHMENT' || kind === 'TOURIST' ? kind : undefined,
+    };
   }
 }

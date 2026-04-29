@@ -1,4 +1,4 @@
-import type { WmsLocationRecord } from '@handyseller/wms-sdk';
+import type { WmsBiTransferOrderKind, WmsLocationRecord } from '@handyseller/wms-sdk';
 
 /** 11 цифр счётчика (0 … 99_999_999_999). */
 const MOD_11 = 100_000_000_000;
@@ -47,4 +47,13 @@ export function rankPutawayLocations(locations: WmsLocationRecord[]): WmsLocatio
   return [...locations]
     .filter((location) => location.status === 'ACTIVE')
     .sort((a, b) => a.path.localeCompare(b.path));
+}
+
+export function classifyTransferOrderLine(input: {
+  purpose?: string | null;
+  baseDocument?: string | null;
+}): WmsBiTransferOrderKind {
+  const purpose = input.purpose?.trim() ?? '';
+  const baseDocument = input.baseDocument?.trim() ?? '';
+  return purpose || baseDocument ? 'REPLENISHMENT' : 'TOURIST';
 }
