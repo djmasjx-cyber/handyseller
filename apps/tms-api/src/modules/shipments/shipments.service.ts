@@ -312,7 +312,9 @@ export class ShipmentsService implements OnModuleInit {
       .filter((request) => !this.isMarketplaceOrder(request.snapshot.marketplace))
       .filter((request) => {
         if (request.integration?.fulfillmentMode === 'PARTNER_SELF_SERVE') {
-          return this.hasActiveNonArchivedShipmentForRequest(userId, request.id);
+          // Для витрины (Lonmadi) запись должна оставаться в журнале, если заказ
+          // уже дошел до бронирования или хотя бы одна отгрузка была создана.
+          return request.status === 'BOOKED' || this.hasAnyShipmentForRequest(userId, request.id);
         }
         return true;
       })
@@ -1860,6 +1862,10 @@ export class ShipmentsService implements OnModuleInit {
     return this.listShipmentsForRequest(userId, requestId).some(
       (shipment) => !this.isArchivedShipment(shipment),
     );
+  }
+
+  private hasAnyShipmentForRequest(userId: string, requestId: string): boolean {
+    return this.listShipmentsForRequest(userId, requestId).length > 0;
   }
 
   private isVisibleOnOperatorComparisonPage(userId: string, request: ShipmentRequestRecord): boolean {

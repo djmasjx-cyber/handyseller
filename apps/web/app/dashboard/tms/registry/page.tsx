@@ -83,7 +83,7 @@ function statusLabel(value: string): string {
     case "DELIVERED":
       return "Доставлено"
     case "DELETED_EXTERNAL":
-      return "Удален у перевозчика"
+      return "Перенесен в архив"
     case "SUPERSEDED":
       return "Заменено"
     case "NO_REQUEST":
@@ -146,10 +146,10 @@ export default function TmsRegistryPage() {
         const params = new URLSearchParams()
         params.set("limit", "25")
         if (f.query.trim()) params.set("q", f.query.trim())
-        if (f.status) params.set("status", f.status)
         params.set("deleted", f.view === "deleted" ? "true" : "false")
+        if (f.view !== "deleted" && f.status) params.set("status", f.status)
         if (f.carrierId) params.set("carrierId", f.carrierId)
-        if (f.hasShipment) params.set("hasShipment", f.hasShipment)
+        if (f.view !== "deleted" && f.hasShipment) params.set("hasShipment", f.hasShipment)
         if (cursor) params.set("cursor", cursor)
         const res = await authFetch(`/api/tms/v1/orders?${params.toString()}`, {
           headers: { Authorization: `Bearer ${token}` },
@@ -202,10 +202,17 @@ export default function TmsRegistryPage() {
     return () => window.clearInterval(id)
   }, [token, loadRegistry])
 
+  useEffect(() => {
+    if (view !== "deleted") return
+    if (status) setStatus("")
+    if (hasShipment) setHasShipment("")
+  }, [view, status, hasShipment])
+
   const applyFilters = () => {
     setNextCursor(null)
     void loadRegistry(null)
   }
+  const showDeletedView = view === "deleted"
 
   return (
     <div className="space-y-4">
@@ -235,7 +242,7 @@ export default function TmsRegistryPage() {
               Удаленные заказы
             </button>
           </div>
-          <div className="grid gap-3 md:grid-cols-[1fr_180px_180px_160px_auto]">
+          <div className={`grid gap-3 ${showDeletedView ? "md:grid-cols-[1fr_180px_auto]" : "md:grid-cols-[1fr_180px_180px_160px_auto]"}`}>
             <label className="relative">
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
               <input
@@ -245,18 +252,6 @@ export default function TmsRegistryPage() {
                 className="h-9 w-full rounded-md border bg-background pl-9 pr-3 text-sm"
               />
             </label>
-            <select value={status} onChange={(e) => setStatus(e.target.value)} className="h-9 rounded-md border bg-background px-3 text-sm">
-              <option value="">Все статусы</option>
-              <option value="DRAFT">Черновик</option>
-              <option value="QUOTED">Тарифы рассчитаны</option>
-              <option value="BOOKED">Забронировано</option>
-              <option value="CONFIRMED">Подтверждено</option>
-              <option value="IN_TRANSIT">В пути</option>
-              <option value="DELIVERED">Доставлено</option>
-              <option value="DELETED_EXTERNAL">Удален у перевозчика</option>
-              <option value="SUPERSEDED">Заменено</option>
-              <option value="NO_REQUEST">Новый, без расчета</option>
-            </select>
             <select value={carrierId} onChange={(e) => setCarrierId(e.target.value)} className="h-9 rounded-md border bg-background px-3 text-sm">
               <option value="">Все перевозчики</option>
               {carrierOptions.map((carrier) => (
@@ -265,11 +260,27 @@ export default function TmsRegistryPage() {
                 </option>
               ))}
             </select>
-            <select value={hasShipment} onChange={(e) => setHasShipment(e.target.value)} className="h-9 rounded-md border bg-background px-3 text-sm">
-              <option value="">Все записи</option>
-              <option value="true">Есть отгрузка</option>
-              <option value="false">До бронирования</option>
-            </select>
+            {!showDeletedView ? (
+              <select value={status} onChange={(e) => setStatus(e.target.value)} className="h-9 rounded-md border bg-background px-3 text-sm">
+                <option value="">Все статусы</option>
+                <option value="DRAFT">Черновик</option>
+                <option value="QUOTED">Тарифы рассчитаны</option>
+                <option value="BOOKED">Забронировано</option>
+                <option value="CONFIRMED">Подтверждено</option>
+                <option value="IN_TRANSIT">В пути</option>
+                <option value="DELIVERED">Доставлено</option>
+                <option value="DELETED_EXTERNAL">Перенесен в архив</option>
+                <option value="SUPERSEDED">Заменено</option>
+                <option value="NO_REQUEST">Новый, без расчета</option>
+              </select>
+            ) : null}
+            {!showDeletedView ? (
+              <select value={hasShipment} onChange={(e) => setHasShipment(e.target.value)} className="h-9 rounded-md border bg-background px-3 text-sm">
+                <option value="">Все записи</option>
+                <option value="true">Есть отгрузка</option>
+                <option value="false">До бронирования</option>
+              </select>
+            ) : null}
             <Button type="button" onClick={applyFilters} disabled={loading}>
               Применить
             </Button>
