@@ -47,6 +47,7 @@ type StaleShipmentCandidateRow = {
 export class TmsStoreService implements OnModuleInit {
   private readonly logger = new Logger(TmsStoreService.name);
   private readonly pool: Pool | null;
+  private schemaInitPromise: Promise<void> | null = null;
 
   constructor() {
     const conn = process.env.TMS_DATABASE_URL?.trim() || '';
@@ -58,7 +59,17 @@ export class TmsStoreService implements OnModuleInit {
       this.logger.warn('TMS_DATABASE_URL is not set; tms-api runs with in-memory state only.');
       return;
     }
-    await this.pool.query(`
+    await this.ensureSchema();
+  }
+
+  private async ensureSchema(): Promise<void> {
+    if (!this.pool) return;
+    if (this.schemaInitPromise) {
+      await this.schemaInitPromise;
+      return;
+    }
+    this.schemaInitPromise = this.pool
+      .query(`
       CREATE TABLE IF NOT EXISTS tms_shipment_request (
         id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL,
@@ -170,7 +181,18 @@ export class TmsStoreService implements OnModuleInit {
         ON tms_tracking_event(shipment_id, occurred_at DESC);
       CREATE INDEX IF NOT EXISTS ix_tms_document_asset_shipment_updated
         ON tms_document_asset(shipment_id, updated_at DESC);
-    `);
+    `)
+      .then(() => undefined)
+      .finally(() => {
+        this.schemaInitPromise = null;
+      });
+    await this.schemaInitPromise;
+  }
+
+  private isMissingRelationError(error: unknown): boolean {
+    if (!error || typeof error !== 'object') return false;
+    const code = (error as { code?: string }).code;
+    return code === '42P01';
   }
 
   isEnabled(): boolean {
@@ -179,26 +201,54 @@ export class TmsStoreService implements OnModuleInit {
 
   async loadRequests(): Promise<ShipmentRequestRecord[]> {
     if (!this.pool) return [];
-    const rows = await this.pool.query<JsonRow>('SELECT payload FROM tms_shipment_request');
-    return rows.rows.map((r) => r.payload as ShipmentRequestRecord);
+    try {
+      const rows = await this.pool.query<JsonRow>('SELECT payload FROM tms_shipment_request');
+      return rows.rows.map((r) => r.payload as ShipmentRequestRecord);
+    } catch (error) {
+      if (!this.isMissingRelationError(error)) throw error;
+      await this.ensureSchema();
+      const rows = await this.pool.query<JsonRow>('SELECT payload FROM tms_shipment_request');
+      return rows.rows.map((r) => r.payload as ShipmentRequestRecord);
+    }
   }
 
   async loadShipments(): Promise<ShipmentRecord[]> {
     if (!this.pool) return [];
-    const rows = await this.pool.query<JsonRow>('SELECT payload FROM tms_shipment');
-    return rows.rows.map((r) => r.payload as ShipmentRecord);
+    try {
+      const rows = await this.pool.query<JsonRow>('SELECT payload FROM tms_shipment');
+      return rows.rows.map((r) => r.payload as ShipmentRecord);
+    } catch (error) {
+      if (!this.isMissingRelationError(error)) throw error;
+      await this.ensureSchema();
+      const rows = await this.pool.query<JsonRow>('SELECT payload FROM tms_shipment');
+      return rows.rows.map((r) => r.payload as ShipmentRecord);
+    }
   }
 
   async loadTracking(): Promise<TrackingEventRecord[]> {
     if (!this.pool) return [];
-    const rows = await this.pool.query<JsonRow>('SELECT payload FROM tms_tracking_event');
-    return rows.rows.map((r) => r.payload as TrackingEventRecord);
+    try {
+      const rows = await this.pool.query<JsonRow>('SELECT payload FROM tms_tracking_event');
+      return rows.rows.map((r) => r.payload as TrackingEventRecord);
+    } catch (error) {
+      if (!this.isMissingRelationError(error)) throw error;
+      await this.ensureSchema();
+      const rows = await this.pool.query<JsonRow>('SELECT payload FROM tms_tracking_event');
+      return rows.rows.map((r) => r.payload as TrackingEventRecord);
+    }
   }
 
   async loadDocuments(): Promise<ShipmentDocumentRecord[]> {
     if (!this.pool) return [];
-    const rows = await this.pool.query<JsonRow>('SELECT payload FROM tms_document_asset');
-    return rows.rows.map((r) => r.payload as ShipmentDocumentRecord);
+    try {
+      const rows = await this.pool.query<JsonRow>('SELECT payload FROM tms_document_asset');
+      return rows.rows.map((r) => r.payload as ShipmentDocumentRecord);
+    } catch (error) {
+      if (!this.isMissingRelationError(error)) throw error;
+      await this.ensureSchema();
+      const rows = await this.pool.query<JsonRow>('SELECT payload FROM tms_document_asset');
+      return rows.rows.map((r) => r.payload as ShipmentDocumentRecord);
+    }
   }
 
   async saveRequest(record: ShipmentRequestRecord): Promise<void> {
