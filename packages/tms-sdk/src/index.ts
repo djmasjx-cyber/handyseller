@@ -9,11 +9,19 @@ export type CarrierServiceType = 'EXPRESS' | 'LTL';
 export type OrderLogisticsScenario = 'MARKETPLACE_RC' | 'CARRIER_DELIVERY';
 export type PartnerOrderType = 'CLIENT_ORDER' | 'INTERNAL_TRANSFER' | 'SUPPLIER_PICKUP';
 
+/**
+ * PARTNER_SELF_SERVE — сценарий витрины (Lonmadi и т.п.): выбор ТК/тарифа на стороне покупателя;
+ * заявки не показываем на «Сравнение тарифов»; в «Журнале» — после оформления (есть отгрузка).
+ * OPERATOR_QUEUE — 1С / ручной логист: выбор в кабинете HandySeller до «Подтвердить»; после — в журнале.
+ */
+export type TmsFulfillmentMode = 'PARTNER_SELF_SERVE' | 'OPERATOR_QUEUE';
+
 export type TmsOrderStatus =
   | 'NO_REQUEST'
   | 'DRAFT'
   | 'QUOTED'
   | 'BOOKED'
+  | 'DELETED_EXTERNAL'
   | 'IN_TRANSIT'
   | 'DELIVERED';
 
@@ -25,6 +33,7 @@ export type ShipmentStatus =
   | 'IN_TRANSIT'
   | 'OUT_FOR_DELIVERY'
   | 'DELIVERED'
+  | 'DELETED_EXTERNAL'
   | 'SUPERSEDED';
 
 export interface CargoSnapshot {
@@ -175,6 +184,8 @@ export interface ShipmentRequestRecord {
   integration?: {
     externalOrderId?: string;
     orderType?: PartnerOrderType;
+    /** Если не задано при создании из кабинета/1С-интеграции, подставляется OPERATOR_QUEUE. */
+    fulfillmentMode?: TmsFulfillmentMode;
   };
 }
 
@@ -273,6 +284,8 @@ export interface CreateShipmentRequestInput {
   integration?: {
     externalOrderId?: string;
     orderType?: PartnerOrderType;
+    /** Для M2M обычно не передают: `POST v1/shipments/estimate` выставляет PARTNER_SELF_SERVE, кабинет — OPERATOR_QUEUE. */
+    fulfillmentMode?: TmsFulfillmentMode;
   };
 }
 

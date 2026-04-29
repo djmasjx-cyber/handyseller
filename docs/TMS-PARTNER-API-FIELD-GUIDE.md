@@ -15,6 +15,7 @@
 Рабочая цепочка endpoint-ов:
 - `POST /api/tms/oauth/token`
 - `POST /api/tms/v1/shipments/estimate`
+- `GET /api/tms/v1/shipments/{requestId}/pickup-points` (для доставки в ПВЗ/терминал)
 - `POST /api/tms/v1/shipments/{requestId}/select`
 - `POST /api/tms/v1/shipments/{requestId}/confirm`
 - `GET /api/tms/v1/shipments/{shipmentId}` и `.../events`
@@ -25,6 +26,7 @@
 - `externalOrderId` (ваш id заказа на сайте),
 - `shipmentRequestId` (из `estimate`),
 - `selectedQuoteId` (выбранный тариф),
+- `pickupPointId` (если выбран тариф до ПВЗ/терминала),
 - `shipmentId` (из `confirm`),
 - `trackingNumber` (из `confirm`),
 - `carrierId`/`carrierName`.
@@ -72,6 +74,19 @@
 
 ## 5) Когда пользователь выбрал вариант
 
+### 5.0 Если выбран тариф до ПВЗ/терминала
+
+Перед `select` получите точки выдачи:
+- `GET /api/tms/v1/shipments/{requestId}/pickup-points`
+
+Что взять из ответа для UI:
+- `id/code` точки,
+- `address`,
+- `lat/lon` (для карты),
+- `workTime`.
+
+Далее пользователь выбирает точку, и ее `pickupPointId` нужно передать в `select`/`confirm`.
+
 ### 5.1 Запрос `select`
 
 Вызов:
@@ -81,9 +96,14 @@
 
 ```json
 {
-  "quoteId": "q_..."
+  "quoteId": "q_...",
+  "pickupPointId": "MSK11"
 }
 ```
+
+Примечание:
+- для тарифов до ПВЗ/терминала `pickupPointId` обязателен;
+- для дверь-дверь/склад-дверь можно отправлять только `quoteId`.
 
 После этого выбранный тариф зафиксирован за `requestId`.
 
@@ -125,6 +145,7 @@
 
 - `401/403` -> неверный или просроченный OAuth токен.
 - `400 validation` -> не хватает обязательных полей в payload.
+- `400 ... pickupPointId is required` -> выбран тариф до ПВЗ/терминала, но точка не передана.
 - `429` -> rate limit внешнего перевозчика, нужен backoff и повтор через паузу.
 - `5xx` -> временная ошибка, повторить с exponential backoff.
 

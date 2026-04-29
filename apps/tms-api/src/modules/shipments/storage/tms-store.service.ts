@@ -620,7 +620,7 @@ export class TmsStoreService implements OnModuleInit {
     const rows = await this.pool.query<StaleShipmentCandidateRow>(
       `SELECT id, user_id, carrier, status, updated_at::text
        FROM tms_shipment
-       WHERE status NOT IN ('DELIVERED', 'CANCELLED', 'SUPERSEDED')
+       WHERE status NOT IN ('DELIVERED', 'CANCELLED', 'SUPERSEDED', 'DELETED_EXTERNAL')
          AND updated_at <= NOW() - make_interval(mins => $1::int)
        ORDER BY updated_at ASC
        LIMIT $2`,

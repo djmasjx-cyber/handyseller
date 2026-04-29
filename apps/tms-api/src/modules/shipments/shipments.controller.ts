@@ -58,7 +58,14 @@ export class ShipmentsController {
   }
 
   @Get('shipment-requests')
-  listRequests(@CurrentUser('userId') userId: string) {
+  listRequests(
+    @CurrentUser('userId') userId: string,
+    /** `operator` — заявки для «Сравнение тарифов» (без витрины PARTNER, без завершённых с отгрузкой). */
+    @Query('view') view?: string,
+  ) {
+    if (view === 'operator' || view === 'comparison') {
+      return this.shipmentsService.listRequestsForOperatorComparison(userId);
+    }
     return this.shipmentsService.listRequests(userId);
   }
 
@@ -135,9 +142,16 @@ export class ShipmentsController {
     @Headers('x-request-id') requestId?: string,
   ) {
     const authToken = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
+    const forPartner: CreateShipmentRequestInput = {
+      ...input,
+      integration: {
+        ...input.integration,
+        fulfillmentMode: input.integration?.fulfillmentMode ?? 'PARTNER_SELF_SERVE',
+      },
+    };
     const result = await this.shipmentsService.createFromCoreOrderIdempotent(
       userId,
-      input,
+      forPartner,
       idempotencyKey,
       authToken,
       this.resolveRequestId(requestId),
@@ -147,6 +161,7 @@ export class ShipmentsController {
       status: result.request.status,
       externalOrderId: result.request.integration?.externalOrderId ?? null,
       orderType: result.request.integration?.orderType ?? null,
+      fulfillmentMode: result.request.integration?.fulfillmentMode ?? null,
       options: result.quotes.map((quote) => ({
         quoteId: quote.id,
         carrierId: quote.carrierId,
@@ -175,6 +190,7 @@ export class ShipmentsController {
     @Query('dateFrom') dateFrom?: string,
     @Query('dateTo') dateTo?: string,
     @Query('hasShipment') hasShipment?: string,
+    @Query('deleted') deleted?: string,
     @Query('limit') limit?: string,
     @Query('cursor') cursor?: string,
   ) {
@@ -182,6 +198,7 @@ export class ShipmentsController {
     const parsedLimit = limit ? Number.parseInt(limit, 10) : undefined;
     const parsedHasShipment =
       hasShipment === 'true' ? true : hasShipment === 'false' ? false : undefined;
+    const parsedDeleted = deleted === 'true' ? true : deleted === 'false' ? false : undefined;
     return this.shipmentsService.listOrderRegistry(userId, {
       authToken,
       q,
@@ -192,6 +209,7 @@ export class ShipmentsController {
       dateFrom,
       dateTo,
       hasShipment: parsedHasShipment,
+      deleted: parsedDeleted,
       limit: Number.isFinite(parsedLimit) ? parsedLimit : undefined,
       cursor,
     });
@@ -288,6 +306,7 @@ export class ShipmentsController {
       selectedQuoteId: result.request.selectedQuoteId ?? null,
       externalOrderId: result.request.integration?.externalOrderId ?? null,
       orderType: result.request.integration?.orderType ?? null,
+      fulfillmentMode: result.request.integration?.fulfillmentMode ?? null,
       quotes: result.quotes,
     };
   }

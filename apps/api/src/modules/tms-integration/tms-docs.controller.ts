@@ -13,4 +13,12 @@ export class TmsDocsController {
   openApi() {
     return this.tmsM2m.getOpenApiYaml();
   }
+
+  /** Полная спецификация: витрина + 1С/оператор + webhooks (см. описание в корневом info). */
+  @Get('openapi-extended.yaml')
+  @Header('Content-Type', 'application/yaml; charset=utf-8')
+  @Header('Cache-Control', 'public, max-age=300')
+  openApiExtended() {
+    return this.tmsM2m.getOpenApiExtendedYaml();
+  }
 }
