@@ -131,8 +131,10 @@ function formatHttpError(data: unknown, fallback: string): string {
   if (!data || typeof data !== "object") return fallback
   const d = data as Record<string, unknown>
   const m = d.message
+  const e = d.error
   if (typeof m === "string" && m.trim()) return m.trim()
   if (Array.isArray(m) && m.every((x) => typeof x === "string")) return m.join("; ")
+  if (typeof e === "string" && e.trim()) return e.trim()
   return fallback
 }
 
