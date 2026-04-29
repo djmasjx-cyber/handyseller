@@ -34,6 +34,9 @@ export type WmsInventoryUnitStatus =
 export type WmsReceiptStatus = 'DRAFT' | 'EXPECTED' | 'RECEIVING' | 'RECEIVED' | 'CLOSED' | 'CANCELLED';
 export type WmsTaskType = 'RECEIVE' | 'PUTAWAY' | 'MOVE' | 'PICK' | 'PACK' | 'COUNT' | 'SHIP';
 export type WmsTaskStatus = 'OPEN' | 'ASSIGNED' | 'IN_PROGRESS' | 'DONE' | 'CANCELLED';
+export type WmsBiImportSourceType = 'FILE' | 'INTEGRATION';
+export type WmsBiImportBatchStatus = 'IMPORTED' | 'FAILED';
+export type WmsBiTransferOrderKind = 'REPLENISHMENT' | 'TOURIST';
 export type WmsInventoryEventType =
   | 'WAREHOUSE_CREATED'
   | 'LOCATION_CREATED'
@@ -164,6 +167,139 @@ export interface WmsInventoryEventRecord {
   referenceType: string | null;
   referenceId: string | null;
   payload: Record<string, unknown>;
+}
+
+export interface WmsBiImportBatchRecord {
+  id: string;
+  userId: string;
+  sourceType: WmsBiImportSourceType;
+  sourceName: string;
+  fileName: string | null;
+  checksum: string | null;
+  status: WmsBiImportBatchStatus;
+  rawRowCount: number;
+  importedRowCount: number;
+  errorCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WmsBiRawRowRecord {
+  id: string;
+  userId: string;
+  batchId: string;
+  rowNumber: number;
+  payload: Record<string, unknown>;
+  errors: string[];
+  createdAt: string;
+}
+
+export interface WmsBiTransferOrderLineRecord {
+  id: string;
+  userId: string;
+  batchId: string;
+  rowNumber: number;
+  orderRef: string | null;
+  orderNumber: string;
+  orderDate: string;
+  senderWarehouse: string;
+  receiverWarehouse: string;
+  itemName: string;
+  itemArticle: string | null;
+  itemCode: string;
+  purpose: string | null;
+  baseDocument: string | null;
+  isRetailPrice: boolean | null;
+  price: number;
+  kind: WmsBiTransferOrderKind;
+  createdAt: string;
+}
+
+export interface WmsBiTransferOrderLineInput {
+  rowNumber: number;
+  orderRef?: string | null;
+  orderNumber: string;
+  orderDate: string;
+  senderWarehouse: string;
+  receiverWarehouse: string;
+  itemName: string;
+  itemArticle?: string | null;
+  itemCode: string;
+  purpose?: string | null;
+  baseDocument?: string | null;
+  isRetailPrice?: boolean | null;
+  price?: number | null;
+}
+
+export interface WmsBiTransferFilters {
+  from?: string;
+  to?: string;
+  receiverWarehouse?: string;
+  senderWarehouse?: string;
+  item?: string;
+  kind?: WmsBiTransferOrderKind;
+  batchId?: string;
+}
+
+export interface WmsBiTransferSummary {
+  rowsTotal: number;
+  ordersTotal: number;
+  replenishmentRows: number;
+  replenishmentOrders: number;
+  replenishmentValue: number;
+  touristRows: number;
+  touristOrders: number;
+  touristValue: number;
+  valueTotal: number;
+  minDate: string | null;
+  maxDate: string | null;
+}
+
+export interface WmsBiTransferByOpRow {
+  receiverWarehouse: string;
+  rows: number;
+  orders: number;
+  replenishmentRows: number;
+  touristRows: number;
+  valueTotal: number;
+  touristValue: number;
+  firstDate: string | null;
+  lastDate: string | null;
+}
+
+export interface WmsBiTouristRow {
+  receiverWarehouse: string;
+  senderWarehouse: string;
+  itemCode: string;
+  itemArticle: string | null;
+  itemName: string;
+  rows: number;
+  orders: number;
+  valueTotal: number;
+  firstDate: string | null;
+  lastDate: string | null;
+}
+
+export interface WmsBiReplenishmentRiskRow {
+  receiverWarehouse: string;
+  itemCode: string;
+  itemArticle: string | null;
+  itemName: string;
+  replenishmentDate: string;
+  nextReplenishmentDate: string | null;
+  touristRowsUntilNextReplenishment: number;
+  touristOrdersUntilNextReplenishment: number;
+  touristValueUntilNextReplenishment: number;
+}
+
+export interface WmsBiTransferImportInput {
+  fileName: string;
+  contentBase64: string;
+}
+
+export interface WmsBiTransferImportResult {
+  batch: WmsBiImportBatchRecord;
+  summary: WmsBiTransferSummary;
 }
 
 export interface CreateWarehouseInput {
