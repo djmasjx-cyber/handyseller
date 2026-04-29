@@ -132,6 +132,21 @@ export class ShipmentsController {
     );
   }
 
+  @Post('shipment-requests/:id/archive')
+  @TmsAccess('write')
+  archiveRequest(@CurrentUser('userId') userId: string, @Param('id') requestId: string) {
+    return this.shipmentsService.archiveRequest(userId, requestId);
+  }
+
+  @Post('shipment-requests/archive')
+  @TmsAccess('write')
+  archiveRequestsBulk(
+    @CurrentUser('userId') userId: string,
+    @Body() body: { requestIds?: string[] },
+  ) {
+    return this.shipmentsService.archiveRequestsBulk(userId, body?.requestIds ?? []);
+  }
+
   @Post('v1/shipments/estimate')
   @TmsAccess('write')
   async v1Estimate(

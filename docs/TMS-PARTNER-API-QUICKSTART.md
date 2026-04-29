@@ -283,3 +283,68 @@ export function verifyHsWebhook(rawBody, signatureHeader, signingSecret) {
   - `docs/TMS-Partner-API.postman_collection.json`
 - Подробный справочник полей и типичных ошибок:
   - `docs/TMS-PARTNER-API-FIELD-GUIDE.md`
+
+## 11) Lonmadi troubleshooting: `status=DRAFT` и `options=[]`
+
+Если в ответе `estimate` вы видите:
+- `status: "DRAFT"`
+- `options: []`
+
+это почти всегда не проблема бизнес-логики расчета, а вопрос контекста запроса.
+
+Проверьте по порядку:
+- тот ли контур: запрос должен идти в `https://api.handyseller.ru/api`;
+- тот ли OAuth-клиент: токен должен быть выпущен именно для prod-клиента Лонмади;
+- активны ли перевозчики для этого клиента (`GET /api/tms/carriers` с тем же токеном);
+- действительно ли подставились переменные (`userId`, `externalOrderId`, `orderType`, адреса), а не шаблонные строки;
+- если после `estimate` заявка осталась `DRAFT`, вызовите `POST /api/tms/shipment-requests/{requestId}/quotes/refresh`.
+
+### 11.1 Референсный запрос `estimate` (рабочий в production)
+
+```bash
+curl -X POST "https://api.handyseller.ru/api/tms/v1/shipments/estimate" \
+  -H "Authorization: Bearer <ACCESS_TOKEN>" \
+  -H "Idempotency-Key: estimate-lonmadi-debug-1" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "snapshot": {
+      "sourceSystem": "HANDYSELLER_CORE",
+      "userId": "lonmadi_test",
+      "coreOrderId": "ord_debug_1",
+      "coreOrderNumber": "debug_1",
+      "marketplace": "OWN_SITE",
+      "createdAt": "2026-01-01T10:00:00.000Z",
+      "originLabel": "Московская обл, г Химки, деревня Елино, тер Промышленная зона, стр 1",
+      "destinationLabel": "Московская обл, г Солнечногорск",
+      "cargo": {
+        "weightGrams": 1500,
+        "widthMm": 200,
+        "lengthMm": 300,
+        "heightMm": 150,
+        "places": 1,
+        "declaredValueRub": 10000
+      },
+      "itemSummary": [{"productId":"p1","title":"Товар","quantity":1,"weightGrams":1500}]
+    },
+    "draft": {
+      "originLabel":"Московская обл, г Химки, деревня Елино, тер Промышленная зона, стр 1",
+      "destinationLabel":"Московская обл, г Солнечногорск",
+      "serviceFlags":["CONSOLIDATED"]
+    },
+    "integration": {
+      "externalOrderId": "debug-ext-1",
+      "orderType": "CLIENT_ORDER"
+    }
+  }'
+```
+
+Ожидаемый результат: `status=QUOTED` и ненулевой `options[]`.
+
+### 11.2 Что прислать в поддержку HandySeller, если не работает
+
+Чтобы быстро локализовать причину, передайте:
+- полный raw response `estimate`;
+- заголовок `X-Request-Id` запроса;
+- `API_BASE_URL`, куда отправлялся запрос;
+- ответ `GET /api/tms/carriers` с тем же токеном;
+- (если был) ответ `quotes/refresh`.
