@@ -6,6 +6,7 @@ import type {
   WmsBiReplenishmentRiskRow,
   WmsBiTouristRow,
   WmsBiTransferByOpRow,
+  WmsBiTransferFilterOptions,
   WmsBiTransferFilters,
   WmsBiTransferImportInput,
   WmsBiTransferImportResult,
@@ -52,6 +53,26 @@ const HEADER_ALIASES: Record<string, string> = {
   'это розничная цена': 'ЭтоРозничнаяЦена',
   цена: 'Цена',
 };
+
+const WAREHOUSE_TYPE_PREFIXES = [
+  'Склад Недостачи/Пересортицы запчастей',
+  'Склад для производства Спецтехники',
+  'Склад ЦРД Коммерческие работы',
+  'Склад ответ. хранения техники',
+  'Склад Некондиция Запчасти',
+  'Склад временного хранения',
+  'Склад Товары в пути',
+  'Склад Техники USED',
+  'Склад Хоз. Нужды',
+  'Склад на Контракт',
+  'Склад Некондиция',
+  'Склад Недопоставка',
+  'Склад Генераторы',
+  'Склад Запчасти',
+  'Склад Гарантия',
+  'Склад Техники',
+  'Склад Реклама',
+].sort((a, b) => b.length - a.length);
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -111,6 +132,38 @@ function parseBooleanRu(value: unknown): boolean | null {
   return null;
 }
 
+function parseWarehouseDimension(raw: string): { warehouseType: string; op: string } {
+  const cleaned = cleanString(raw);
+  if (!cleaned) {
+    return { warehouseType: '', op: '' };
+  }
+  const normalized = cleaned.toLowerCase();
+  const prefix = WAREHOUSE_TYPE_PREFIXES.find((candidate) => {
+    const lower = candidate.toLowerCase();
+    return normalized === lower || normalized.startsWith(`${lower} `);
+  });
+  if (prefix) {
+    return {
+      warehouseType: prefix,
+      op: cleaned.slice(prefix.length).trim() || cleaned,
+    };
+  }
+  const parts = cleaned.split(' ').filter(Boolean);
+  if (parts.length >= 3 && parts[0].toLowerCase() === 'склад') {
+    return {
+      warehouseType: `${parts[0]} ${parts[1]}`,
+      op: parts.slice(2).join(' '),
+    };
+  }
+  if (parts.length >= 2 && parts[0].toLowerCase() === 'склад') {
+    return {
+      warehouseType: parts[0],
+      op: parts.slice(1).join(' '),
+    };
+  }
+  return { warehouseType: 'Без типа склада', op: cleaned };
+}
+
 function parseOrderDate(value: unknown): string | null {
   if (value instanceof Date && Number.isFinite(value.getTime())) {
     return value.toISOString();
@@ -143,14 +196,28 @@ function chunks<T>(items: T[], size: number): T[][] {
 }
 
 function matchesFilters(line: WmsBiTransferOrderLineRecord, filters: WmsBiTransferFilters): boolean {
+  const normalized = normalizeTransferLine(line);
   if (filters.batchId && line.batchId !== filters.batchId) return false;
   if (filters.kind && line.kind !== filters.kind) return false;
   if (filters.from && line.orderDate < filters.from) return false;
   if (filters.to && line.orderDate > filters.to) return false;
-  if (filters.receiverWarehouse && !line.receiverWarehouse.toLowerCase().includes(filters.receiverWarehouse.toLowerCase())) {
+  if (filters.receiverWarehouse && !normalized.receiverOp.toLowerCase().includes(filters.receiverWarehouse.toLowerCase())) {
     return false;
   }
-  if (filters.senderWarehouse && !line.senderWarehouse.toLowerCase().includes(filters.senderWarehouse.toLowerCase())) {
+  if (filters.senderWarehouse && !normalized.senderOp.toLowerCase().includes(filters.senderWarehouse.toLowerCase())) {
+    return false;
+  }
+  if (filters.receiverOps?.length && !filters.receiverOps.includes(normalized.receiverOp)) {
+    return false;
+  }
+  if (filters.senderOps?.length && !filters.senderOps.includes(normalized.senderOp)) {
+    return false;
+  }
+  if (
+    filters.warehouseTypes?.length &&
+    !filters.warehouseTypes.includes(normalized.receiverWarehouseType) &&
+    !filters.warehouseTypes.includes(normalized.senderWarehouseType)
+  ) {
     return false;
   }
   if (filters.item) {
@@ -164,6 +231,18 @@ function matchesFilters(line: WmsBiTransferOrderLineRecord, filters: WmsBiTransf
     }
   }
   return true;
+}
+
+function normalizeTransferLine(line: WmsBiTransferOrderLineRecord): WmsBiTransferOrderLineRecord {
+  const sender = parseWarehouseDimension(line.senderWarehouse);
+  const receiver = parseWarehouseDimension(line.receiverWarehouse);
+  return {
+    ...line,
+    senderWarehouseType: line.senderWarehouseType || sender.warehouseType,
+    senderOp: line.senderOp || sender.op,
+    receiverWarehouseType: line.receiverWarehouseType || receiver.warehouseType,
+    receiverOp: line.receiverOp || receiver.op,
+  };
 }
 
 @Injectable()
@@ -336,32 +415,48 @@ export class WmsAnalyticsService implements OnModuleInit {
     return this.buildSummary(await this.filteredLines(userId, filters));
   }
 
+  async getTransferOptions(userId: string): Promise<WmsBiTransferFilterOptions> {
+    const lines = await this.listLines(userId);
+    return {
+      warehouseTypes: uniqueSorted(
+        lines.flatMap((line) => [line.senderWarehouseType, line.receiverWarehouseType]).filter(Boolean),
+      ),
+      receiverOps: uniqueSorted(lines.map((line) => line.receiverOp).filter(Boolean)),
+      senderOps: uniqueSorted(lines.map((line) => line.senderOp).filter(Boolean)),
+    };
+  }
+
   async getTransfersByOp(userId: string, filters: WmsBiTransferFilters): Promise<WmsBiTransferByOpRow[]> {
     const groups = new Map<string, WmsBiTransferOrderLineRecord[]>();
     for (const line of await this.filteredLines(userId, filters)) {
-      const group = groups.get(line.receiverWarehouse) ?? [];
+      const group = groups.get(line.receiverOp) ?? [];
       group.push(line);
-      groups.set(line.receiverWarehouse, group);
+      groups.set(line.receiverOp, group);
     }
     return [...groups.entries()]
-      .map(([receiverWarehouse, lines]) => ({
-        receiverWarehouse,
-        rows: lines.length,
-        orders: new Set(lines.map((l) => l.orderNumber)).size,
-        replenishmentRows: lines.filter((l) => l.kind === 'REPLENISHMENT').length,
-        touristRows: lines.filter((l) => l.kind === 'TOURIST').length,
-        valueTotal: sum(lines.map((l) => l.price)),
-        touristValue: sum(lines.filter((l) => l.kind === 'TOURIST').map((l) => l.price)),
-        firstDate: minDate(lines),
-        lastDate: maxDate(lines),
-      }))
+      .map(([receiverOp, lines]) => {
+        const first = lines[0];
+        return {
+          receiverWarehouse: first.receiverWarehouse,
+          receiverWarehouseType: first.receiverWarehouseType,
+          receiverOp,
+          rows: lines.length,
+          orders: new Set(lines.map((l) => l.orderNumber)).size,
+          replenishmentRows: lines.filter((l) => l.kind === 'REPLENISHMENT').length,
+          touristRows: lines.filter((l) => l.kind === 'TOURIST').length,
+          valueTotal: sum(lines.map((l) => l.price)),
+          touristValue: sum(lines.filter((l) => l.kind === 'TOURIST').map((l) => l.price)),
+          firstDate: minDate(lines),
+          lastDate: maxDate(lines),
+        };
+      })
       .sort((a, b) => b.touristRows - a.touristRows || b.valueTotal - a.valueTotal);
   }
 
   async getTourists(userId: string, filters: WmsBiTransferFilters): Promise<WmsBiTouristRow[]> {
     const groups = new Map<string, WmsBiTransferOrderLineRecord[]>();
     for (const line of await this.filteredLines(userId, { ...filters, kind: 'TOURIST' })) {
-      const key = [line.receiverWarehouse, line.senderWarehouse, line.itemCode].join('\t');
+      const key = [line.receiverOp, line.senderOp, line.itemCode].join('\t');
       const group = groups.get(key) ?? [];
       group.push(line);
       groups.set(key, group);
@@ -371,7 +466,11 @@ export class WmsAnalyticsService implements OnModuleInit {
         const first = lines[0];
         return {
           receiverWarehouse: first.receiverWarehouse,
+          receiverWarehouseType: first.receiverWarehouseType,
+          receiverOp: first.receiverOp,
           senderWarehouse: first.senderWarehouse,
+          senderWarehouseType: first.senderWarehouseType,
+          senderOp: first.senderOp,
           itemCode: first.itemCode,
           itemArticle: first.itemArticle,
           itemName: first.itemName,
@@ -389,7 +488,7 @@ export class WmsAnalyticsService implements OnModuleInit {
   async getReplenishmentRisks(userId: string, filters: WmsBiTransferFilters): Promise<WmsBiReplenishmentRiskRow[]> {
     const groups = new Map<string, WmsBiTransferOrderLineRecord[]>();
     for (const line of await this.filteredLines(userId, filters)) {
-      const key = [line.receiverWarehouse, line.itemCode].join('\t');
+      const key = [line.receiverOp, line.itemCode].join('\t');
       const group = groups.get(key) ?? [];
       group.push(line);
       groups.set(key, group);
@@ -403,6 +502,8 @@ export class WmsAnalyticsService implements OnModuleInit {
         if (!lastReplenishment || tourists.length === 0) return;
         risks.push({
           receiverWarehouse: lastReplenishment.receiverWarehouse,
+          receiverWarehouseType: lastReplenishment.receiverWarehouseType,
+          receiverOp: lastReplenishment.receiverOp,
           itemCode: lastReplenishment.itemCode,
           itemArticle: lastReplenishment.itemArticle,
           itemName: lastReplenishment.itemName,
@@ -473,6 +574,8 @@ export class WmsAnalyticsService implements OnModuleInit {
       purpose: input.purpose,
       baseDocument: input.baseDocument,
     });
+    const sender = parseWarehouseDimension(input.senderWarehouse);
+    const receiver = parseWarehouseDimension(input.receiverWarehouse);
     return {
       id: id('wmsbi_line'),
       userId,
@@ -482,7 +585,11 @@ export class WmsAnalyticsService implements OnModuleInit {
       orderNumber: input.orderNumber.trim(),
       orderDate: input.orderDate,
       senderWarehouse: input.senderWarehouse.trim(),
+      senderWarehouseType: sender.warehouseType,
+      senderOp: sender.op,
       receiverWarehouse: input.receiverWarehouse.trim(),
+      receiverWarehouseType: receiver.warehouseType,
+      receiverOp: receiver.op,
       itemName: input.itemName.trim(),
       itemArticle: input.itemArticle?.trim() || null,
       itemCode: input.itemCode.trim(),
@@ -612,9 +719,9 @@ export class WmsAnalyticsService implements OnModuleInit {
         'SELECT payload FROM wms_bi_transfer_order_line WHERE user_id = $1 ORDER BY order_date DESC',
         [userId],
       );
-      return res.rows.map((r) => r.payload);
+      return res.rows.map((r) => normalizeTransferLine(r.payload));
     }
-    return this.transferLines.filter((line) => line.userId === userId);
+    return this.transferLines.filter((line) => line.userId === userId).map(normalizeTransferLine);
   }
 
   private buildSummary(lines: WmsBiTransferOrderLineRecord[]): WmsBiTransferSummary {
@@ -638,6 +745,10 @@ export class WmsAnalyticsService implements OnModuleInit {
 
 function sum(values: number[]): number {
   return Math.round(values.reduce((acc, v) => acc + v, 0) * 100) / 100;
+}
+
+function uniqueSorted(values: string[]): string[] {
+  return [...new Set(values.map((v) => v.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ru'));
 }
 
 function minDate(lines: WmsBiTransferOrderLineRecord[]): string | null {
