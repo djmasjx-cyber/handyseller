@@ -19,6 +19,7 @@ import { Pool } from 'pg';
 import * as XLSX from 'xlsx';
 
 type JsonRow<T> = { payload: T };
+type DbClient = Pick<Pool, 'query'>;
 
 const REQUIRED_COLUMNS = [
   'Ссылка',
@@ -131,6 +132,14 @@ function parseOrderDate(value: unknown): string | null {
 
 function dateKey(value: string): string {
   return value.slice(0, 10);
+}
+
+function chunks<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    out.push(items.slice(i, i + size));
+  }
+  return out;
 }
 
 function matchesFilters(line: WmsBiTransferOrderLineRecord, filters: WmsBiTransferFilters): boolean {
@@ -519,48 +528,76 @@ export class WmsAnalyticsService implements OnModuleInit {
           JSON.stringify(batch),
         ],
       );
-      for (const row of rawRows) {
-        await client.query(
-          `INSERT INTO wms_bi_raw_row (id, user_id, batch_id, row_number, payload, errors, created_at)
-           VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7)`,
-          [row.id, row.userId, row.batchId, row.rowNumber, JSON.stringify(row.payload), JSON.stringify(row.errors), row.createdAt],
-        );
-      }
-      for (const line of lines) {
-        await client.query(
-          `INSERT INTO wms_bi_transfer_order_line
-           (id, user_id, batch_id, row_number, order_ref, order_number, order_date, sender_warehouse, receiver_warehouse,
-            item_name, item_article, item_code, purpose, base_document, is_retail_price, price, kind, created_at, payload)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19::jsonb)`,
-          [
-            line.id,
-            line.userId,
-            line.batchId,
-            line.rowNumber,
-            line.orderRef,
-            line.orderNumber,
-            line.orderDate,
-            line.senderWarehouse,
-            line.receiverWarehouse,
-            line.itemName,
-            line.itemArticle,
-            line.itemCode,
-            line.purpose,
-            line.baseDocument,
-            line.isRetailPrice,
-            line.price,
-            line.kind,
-            line.createdAt,
-            JSON.stringify(line),
-          ],
-        );
-      }
+      await this.insertRawRows(client, rawRows);
+      await this.insertTransferLines(client, lines);
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
     } finally {
       client.release();
+    }
+  }
+
+  private async insertRawRows(client: DbClient, rawRows: WmsBiRawRowRecord[]): Promise<void> {
+    for (const part of chunks(rawRows, 500)) {
+      const values: unknown[] = [];
+      const placeholders = part.map((row, rowIndex) => {
+        const base = rowIndex * 7;
+        values.push(
+          row.id,
+          row.userId,
+          row.batchId,
+          row.rowNumber,
+          JSON.stringify(row.payload),
+          JSON.stringify(row.errors),
+          row.createdAt,
+        );
+        return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}::jsonb, $${base + 6}::jsonb, $${base + 7})`;
+      });
+      await client.query(
+        `INSERT INTO wms_bi_raw_row (id, user_id, batch_id, row_number, payload, errors, created_at)
+         VALUES ${placeholders.join(', ')}`,
+        values,
+      );
+    }
+  }
+
+  private async insertTransferLines(client: DbClient, lines: WmsBiTransferOrderLineRecord[]): Promise<void> {
+    for (const part of chunks(lines, 300)) {
+      const values: unknown[] = [];
+      const placeholders = part.map((line, rowIndex) => {
+        const base = rowIndex * 19;
+        values.push(
+          line.id,
+          line.userId,
+          line.batchId,
+          line.rowNumber,
+          line.orderRef,
+          line.orderNumber,
+          line.orderDate,
+          line.senderWarehouse,
+          line.receiverWarehouse,
+          line.itemName,
+          line.itemArticle,
+          line.itemCode,
+          line.purpose,
+          line.baseDocument,
+          line.isRetailPrice,
+          line.price,
+          line.kind,
+          line.createdAt,
+          JSON.stringify(line),
+        );
+        return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, $${base + 9}, $${base + 10}, $${base + 11}, $${base + 12}, $${base + 13}, $${base + 14}, $${base + 15}, $${base + 16}, $${base + 17}, $${base + 18}, $${base + 19}::jsonb)`;
+      });
+      await client.query(
+        `INSERT INTO wms_bi_transfer_order_line
+         (id, user_id, batch_id, row_number, order_ref, order_number, order_date, sender_warehouse, receiver_warehouse,
+          item_name, item_article, item_code, purpose, base_document, is_retail_price, price, kind, created_at, payload)
+         VALUES ${placeholders.join(', ')}`,
+        values,
+      );
     }
   }
 
