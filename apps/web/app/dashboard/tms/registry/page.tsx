@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from "@handyseller/ui"
 import { Loader2, Search } from "lucide-react"
@@ -82,6 +82,8 @@ function statusLabel(value: string): string {
       return "На доставке"
     case "DELIVERED":
       return "Доставлено"
+    case "DELETED_EXTERNAL":
+      return "Перенесен в архив"
     case "SUPERSEDED":
       return "Заменено"
     case "NO_REQUEST":
@@ -105,6 +107,7 @@ function orderTypeLabel(value: string | null): string {
 }
 
 export default function TmsRegistryPage() {
+  const [view, setView] = useState<"active" | "deleted">("active")
   const [items, setItems] = useState<RegistryOrder[]>([])
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [query, setQuery] = useState("")
@@ -117,6 +120,13 @@ export default function TmsRegistryPage() {
 
   const token = getToken()
 
+  const filterSnapshot = useMemo(
+    () => ({ query, status, carrierId, hasShipment, view }),
+    [query, status, carrierId, hasShipment, view],
+  )
+  const filterRef = useRef(filterSnapshot)
+  filterRef.current = filterSnapshot
+
   const carrierOptions = useMemo(
     () =>
       [...new Map(items.filter((item) => item.carrierId).map((item) => [item.carrierId, item.carrierName ?? item.carrierId])).entries()]
@@ -125,44 +135,84 @@ export default function TmsRegistryPage() {
     [items],
   )
 
-  const loadRegistry = async (cursor?: string | null) => {
-    if (!token) return
-    if (cursor) setLoadingMore(true)
-    else setLoading(true)
-    setError(null)
-    try {
-      const params = new URLSearchParams()
-      params.set("limit", "25")
-      if (query.trim()) params.set("q", query.trim())
-      if (status) params.set("status", status)
-      if (carrierId) params.set("carrierId", carrierId)
-      if (hasShipment) params.set("hasShipment", hasShipment)
-      if (cursor) params.set("cursor", cursor)
-      const res = await authFetch(`/api/tms/v1/orders?${params.toString()}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      const data = (await res.json().catch(() => ({}))) as Partial<RegistryResponse>
-      if (!res.ok) throw new Error("Не удалось загрузить журнал TMS-заказов")
-      const nextItems = Array.isArray(data.items) ? data.items : []
-      setItems((prev) => (cursor ? [...prev, ...nextItems] : nextItems))
-      setNextCursor(data.nextCursor ?? null)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Не удалось загрузить журнал TMS-заказов")
-    } finally {
-      setLoading(false)
-      setLoadingMore(false)
-    }
-  }
+  const loadRegistry = useCallback(
+    async (cursor?: string | null, opts?: { silent?: boolean }) => {
+      if (!token) return
+      const f = filterRef.current
+      if (cursor) setLoadingMore(true)
+      else if (!opts?.silent) setLoading(true)
+      if (!opts?.silent) setError(null)
+      try {
+        const params = new URLSearchParams()
+        params.set("limit", "25")
+        if (f.query.trim()) params.set("q", f.query.trim())
+        params.set("deleted", f.view === "deleted" ? "true" : "false")
+        if (f.view !== "deleted" && f.status) params.set("status", f.status)
+        if (f.carrierId) params.set("carrierId", f.carrierId)
+        if (f.view !== "deleted" && f.hasShipment) params.set("hasShipment", f.hasShipment)
+        if (cursor) params.set("cursor", cursor)
+        const res = await authFetch(`/api/tms/v1/orders?${params.toString()}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        const data = (await res.json().catch(() => ({}))) as Partial<RegistryResponse>
+        if (!res.ok) throw new Error("Не удалось загрузить журнал TMS-заказов")
+        const nextItems = Array.isArray(data.items) ? data.items : []
+        if (cursor) {
+          setItems((prev) => [...prev, ...nextItems])
+          setNextCursor(data.nextCursor ?? null)
+        } else if (opts?.silent) {
+          /** Тихо подтягиваем актуальные статусы по первой странице, не сбрасывая пагинацию. */
+          setItems((prev) => {
+            if (prev.length === 0) return nextItems
+            const byId = new Map(nextItems.map((i) => [i.requestId, i]))
+            return prev.map((row) => byId.get(row.requestId) ?? row)
+          })
+        } else {
+          setItems(nextItems)
+          setNextCursor(data.nextCursor ?? null)
+        }
+      } catch (e) {
+        if (!opts?.silent) {
+          setError(e instanceof Error ? e.message : "Не удалось загрузить журнал TMS-заказов")
+        }
+      } finally {
+        if (cursor) setLoadingMore(false)
+        else if (!opts?.silent) setLoading(false)
+      }
+    },
+    [token],
+  )
 
   useEffect(() => {
+    if (!token) {
+      setLoading(false)
+      return
+    }
     void loadRegistry(null)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [token, loadRegistry, view])
+
+  /** Без кнопки «Обновить» в журнале: на фоне обновляем сводку по мере появления данных на бэке (и cron опроса ТК). */
+  useEffect(() => {
+    if (!token) return
+    const tick = () => {
+      if (typeof document === "undefined" || document.visibilityState !== "visible") return
+      void loadRegistry(null, { silent: true })
+    }
+    const id = window.setInterval(tick, 45_000)
+    return () => window.clearInterval(id)
+  }, [token, loadRegistry])
+
+  useEffect(() => {
+    if (view !== "deleted") return
+    if (status) setStatus("")
+    if (hasShipment) setHasShipment("")
+  }, [view, status, hasShipment])
 
   const applyFilters = () => {
     setNextCursor(null)
     void loadRegistry(null)
   }
+  const showDeletedView = view === "deleted"
 
   return (
     <div className="space-y-4">
@@ -171,11 +221,28 @@ export default function TmsRegistryPage() {
           <CardTitle>Журнал TMS-заказов</CardTitle>
           <CardDescription>
             Постоянный реестр всех заявок, расчетов и перевозок, прошедших через HandySeller TMS. Записи не удаляются:
-            при повторном бронировании старая отгрузка сохраняется в истории.
+            при повторном бронировании старая отгрузка сохраняется в истории. Статусы в таблице подгружаются в фоне, отдельная
+            кнопка обновления не требуется: данные приходят с сервера, где уже работает опрос и webhooks у перевозчиков.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid gap-3 md:grid-cols-[1fr_180px_180px_160px_auto]">
+          <div className="inline-flex rounded-md border bg-muted/20 p-1">
+            <button
+              type="button"
+              onClick={() => setView("active")}
+              className={`rounded px-3 py-1 text-sm ${view === "active" ? "bg-background shadow-sm" : "text-muted-foreground"}`}
+            >
+              Активные
+            </button>
+            <button
+              type="button"
+              onClick={() => setView("deleted")}
+              className={`rounded px-3 py-1 text-sm ${view === "deleted" ? "bg-background shadow-sm" : "text-muted-foreground"}`}
+            >
+              Удаленные заказы
+            </button>
+          </div>
+          <div className={`grid gap-3 ${showDeletedView ? "md:grid-cols-[1fr_180px_auto]" : "md:grid-cols-[1fr_180px_180px_160px_auto]"}`}>
             <label className="relative">
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
               <input
@@ -185,17 +252,6 @@ export default function TmsRegistryPage() {
                 className="h-9 w-full rounded-md border bg-background pl-9 pr-3 text-sm"
               />
             </label>
-            <select value={status} onChange={(e) => setStatus(e.target.value)} className="h-9 rounded-md border bg-background px-3 text-sm">
-              <option value="">Все статусы</option>
-              <option value="DRAFT">Черновик</option>
-              <option value="QUOTED">Тарифы рассчитаны</option>
-              <option value="BOOKED">Забронировано</option>
-              <option value="CONFIRMED">Подтверждено</option>
-              <option value="IN_TRANSIT">В пути</option>
-              <option value="DELIVERED">Доставлено</option>
-              <option value="SUPERSEDED">Заменено</option>
-              <option value="NO_REQUEST">Новый, без расчета</option>
-            </select>
             <select value={carrierId} onChange={(e) => setCarrierId(e.target.value)} className="h-9 rounded-md border bg-background px-3 text-sm">
               <option value="">Все перевозчики</option>
               {carrierOptions.map((carrier) => (
@@ -204,11 +260,27 @@ export default function TmsRegistryPage() {
                 </option>
               ))}
             </select>
-            <select value={hasShipment} onChange={(e) => setHasShipment(e.target.value)} className="h-9 rounded-md border bg-background px-3 text-sm">
-              <option value="">Все записи</option>
-              <option value="true">Есть отгрузка</option>
-              <option value="false">До бронирования</option>
-            </select>
+            {!showDeletedView ? (
+              <select value={status} onChange={(e) => setStatus(e.target.value)} className="h-9 rounded-md border bg-background px-3 text-sm">
+                <option value="">Все статусы</option>
+                <option value="DRAFT">Черновик</option>
+                <option value="QUOTED">Тарифы рассчитаны</option>
+                <option value="BOOKED">Забронировано</option>
+                <option value="CONFIRMED">Подтверждено</option>
+                <option value="IN_TRANSIT">В пути</option>
+                <option value="DELIVERED">Доставлено</option>
+                <option value="DELETED_EXTERNAL">Перенесен в архив</option>
+                <option value="SUPERSEDED">Заменено</option>
+                <option value="NO_REQUEST">Новый, без расчета</option>
+              </select>
+            ) : null}
+            {!showDeletedView ? (
+              <select value={hasShipment} onChange={(e) => setHasShipment(e.target.value)} className="h-9 rounded-md border bg-background px-3 text-sm">
+                <option value="">Все записи</option>
+                <option value="true">Есть отгрузка</option>
+                <option value="false">До бронирования</option>
+              </select>
+            ) : null}
             <Button type="button" onClick={applyFilters} disabled={loading}>
               Применить
             </Button>

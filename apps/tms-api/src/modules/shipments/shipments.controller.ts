@@ -109,9 +109,9 @@ export class ShipmentsController {
   selectQuote(
     @CurrentUser('userId') userId: string,
     @Param('id') requestId: string,
-    @Body('quoteId') quoteId: string,
+    @Body() body: { quoteId?: string; pickupPointId?: string },
   ) {
-    return this.shipmentsService.selectQuote(userId, requestId, quoteId);
+    return this.shipmentsService.selectQuote(userId, requestId, body?.quoteId ?? '', body?.pickupPointId);
   }
 
   @Post('shipment-requests/:id/confirm')
@@ -190,6 +190,7 @@ export class ShipmentsController {
     @Query('dateFrom') dateFrom?: string,
     @Query('dateTo') dateTo?: string,
     @Query('hasShipment') hasShipment?: string,
+    @Query('deleted') deleted?: string,
     @Query('limit') limit?: string,
     @Query('cursor') cursor?: string,
   ) {
@@ -197,6 +198,7 @@ export class ShipmentsController {
     const parsedLimit = limit ? Number.parseInt(limit, 10) : undefined;
     const parsedHasShipment =
       hasShipment === 'true' ? true : hasShipment === 'false' ? false : undefined;
+    const parsedDeleted = deleted === 'true' ? true : deleted === 'false' ? false : undefined;
     return this.shipmentsService.listOrderRegistry(userId, {
       authToken,
       q,
@@ -207,6 +209,7 @@ export class ShipmentsController {
       dateFrom,
       dateTo,
       hasShipment: parsedHasShipment,
+      deleted: parsedDeleted,
       limit: Number.isFinite(parsedLimit) ? parsedLimit : undefined,
       cursor,
     });
@@ -332,9 +335,9 @@ export class ShipmentsController {
   v1SelectQuote(
     @CurrentUser('userId') userId: string,
     @Param('id') requestId: string,
-    @Body('quoteId') quoteId: string,
+    @Body() body: { quoteId?: string; pickupPointId?: string },
   ) {
-    return this.shipmentsService.selectQuote(userId, requestId, quoteId);
+    return this.shipmentsService.selectQuote(userId, requestId, body?.quoteId ?? '', body?.pickupPointId);
   }
 
   @Post('v1/shipments/:id/select-and-confirm')
@@ -342,7 +345,7 @@ export class ShipmentsController {
   v1SelectAndConfirmShipment(
     @CurrentUser('userId') userId: string,
     @Param('id') requestId: string,
-    @Body('quoteId') quoteId: string,
+    @Body() body: { quoteId?: string; pickupPointId?: string },
     @Headers('authorization') authorization?: string,
     @Headers('idempotency-key') idempotencyKey?: string,
     @Headers('x-request-id') inboundRequestId?: string,
@@ -351,7 +354,8 @@ export class ShipmentsController {
     return this.shipmentsService.selectAndConfirmQuoteIdempotent(
       userId,
       requestId,
-      quoteId,
+      body?.quoteId ?? '',
+      body?.pickupPointId,
       idempotencyKey,
       authToken,
       this.resolveRequestId(inboundRequestId),

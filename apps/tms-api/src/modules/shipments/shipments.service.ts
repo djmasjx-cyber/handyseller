@@ -11,6 +11,7 @@ import type {
   RoutingPolicyRecord,
   ShipmentDocumentRecord,
   ShipmentRecord,
+  ShipmentStatus,
   ShipmentRequestRecord,
   TmsFulfillmentMode,
   TmsOrderStatus,
@@ -25,6 +26,10 @@ import type { CarrierAdapter } from './adapters/base-carrier.adapter';
 import { TmsStoreService } from './storage/tms-store.service';
 import { ObjectStorageService } from './storage/object-storage.service';
 import { createHmac, randomBytes } from 'crypto';
+import {
+  extractCarrierStatusHint,
+  normalizeCarrierShipmentStatus,
+} from './status-mapper';
 
 type RegistryOrderType = 'CLIENT_ORDER' | 'INTERNAL_TRANSFER' | 'SUPPLIER_PICKUP';
 const MP_MARKETPLACES = new Set(['WILDBERRIES', 'OZON', 'YANDEX']);
@@ -39,6 +44,7 @@ type OrderRegistryFilter = {
   dateFrom?: string;
   dateTo?: string;
   hasShipment?: boolean;
+  deleted?: boolean;
   limit?: number;
   cursor?: string;
 };
@@ -258,10 +264,14 @@ export class ShipmentsService implements OnModuleInit {
       quoteCarrierIds.size > 0 && !filter?.carrierId
         ? points.filter((point) => quoteCarrierIds.has(point.carrierId))
         : points;
+    const pointsWithFallback =
+      filteredPoints.length === 0 && points.length > 0 && quoteCarrierIds.size > 0 && !filter?.carrierId
+        ? points
+        : filteredPoints;
     return {
       requestId,
       destinationLabel,
-      points: filteredPoints,
+      points: pointsWithFallback,
     };
   }
 
@@ -307,7 +317,9 @@ export class ShipmentsService implements OnModuleInit {
       .filter((request) => !this.isMarketplaceOrder(request.snapshot.marketplace))
       .filter((request) => {
         if (request.integration?.fulfillmentMode === 'PARTNER_SELF_SERVE') {
-          return this.hasActiveNonArchivedShipmentForRequest(userId, request.id);
+          // Для витрины (Lonmadi) запись должна оставаться в журнале, если заказ
+          // уже дошел до бронирования или хотя бы одна отгрузка была создана.
+          return request.status === 'BOOKED' || this.hasAnyShipmentForRequest(userId, request.id);
         }
         return true;
       })
@@ -750,6 +762,22 @@ export class ShipmentsService implements OnModuleInit {
     if (!matchedShipmentId || !matchedUserId) {
       this.logger.warn(
         `[carrier-webhook] unresolved identifiers carrier=${carrier} eventType=${eventType} eventId=${eventId}`,
+      );
+      return;
+    }
+
+    const matchedShipment = this.shipments.get(matchedShipmentId);
+    const statusHint = extractCarrierStatusHint(body);
+    const { status: canonicalStatus } = normalizeCarrierShipmentStatus(statusHint, carrier, 'webhook');
+    if (matchedShipment && canonicalStatus === 'DELETED_EXTERNAL') {
+      const reason =
+        asString(body.reason) ||
+        asString(body.message) ||
+        asString(body.description) ||
+        `carrier-webhook ${eventType}`;
+      await this.markShipmentDeletedExternally(matchedShipment, reason, matchedUserId);
+      this.logger.log(
+        `[carrier-webhook] applied terminal status shipmentId=${matchedShipmentId} status=${canonicalStatus} eventId=${eventId}`,
       );
       return;
     }
@@ -1264,13 +1292,14 @@ export class ShipmentsService implements OnModuleInit {
     return this.quotes.get(requestId) ?? [];
   }
 
-  selectQuote(userId: string, requestId: string, quoteId: string): ShipmentRequestRecord {
+  selectQuote(userId: string, requestId: string, quoteId: string, pickupPointId?: string): ShipmentRequestRecord {
     const request = this.getRequestOrThrow(userId, requestId);
     const quote = (this.quotes.get(requestId) ?? []).find((item) => item.id === quoteId);
     if (!quote) {
       throw new NotFoundException('Тариф не найден');
     }
     request.selectedQuoteId = quoteId;
+    request.selectedPickupPointId = pickupPointId?.trim() || undefined;
     request.updatedAt = new Date().toISOString();
     this.requests.set(requestId, request);
     void this.store.saveRequest(request);
@@ -1337,7 +1366,10 @@ export class ShipmentsService implements OnModuleInit {
         quote,
         input: {
           snapshot: request.snapshot,
-          draft: request.draft,
+          draft: {
+            ...request.draft,
+            pickupPointId: request.selectedPickupPointId ?? request.draft.pickupPointId,
+          },
         },
         context: { userId, authToken, requestId: requestTraceId ?? requestId },
       });
@@ -1449,11 +1481,12 @@ export class ShipmentsService implements OnModuleInit {
     userId: string,
     requestId: string,
     quoteId: string,
+    pickupPointId?: string,
     idempotencyKey?: string | null,
     authToken?: string | null,
     requestTraceId?: string | null,
   ): Promise<ShipmentRecord> {
-    this.selectQuote(userId, requestId, quoteId);
+    this.selectQuote(userId, requestId, quoteId, pickupPointId);
     return this.confirmSelectedQuoteIdempotent(
       userId,
       requestId,
@@ -1548,10 +1581,35 @@ export class ShipmentsService implements OnModuleInit {
         error instanceof Error && error.message.trim()
           ? error.message
           : `Не удалось обновить статус отгрузки ${shipment.carrierName}`;
+      if (this.isCarrierDeletedShipmentError(message)) {
+        const deleted = await this.markShipmentDeletedExternally(shipment, message, userId);
+        return deleted;
+      }
       throw new BadRequestException(message);
     }
 
-    const updated: ShipmentRecord = { ...shipment, ...refreshed.shipmentPatch };
+    const shipmentPatch: Partial<ShipmentRecord> = { ...(refreshed.shipmentPatch ?? {}) };
+    const rawCarrierStatus =
+      typeof shipmentPatch.status === 'string' ? shipmentPatch.status : undefined;
+    const { status: canonicalStatus, matchedBy } = normalizeCarrierShipmentStatus(
+      rawCarrierStatus,
+      shipment.carrierId,
+      'refresh',
+    );
+    if (rawCarrierStatus && !canonicalStatus) {
+      this.logger.warn(
+        `[status-mapper] unknown carrier status carrier=${shipment.carrierId} raw="${rawCarrierStatus}" shipmentId=${shipmentId}`,
+      );
+      delete shipmentPatch.status;
+    } else if (canonicalStatus) {
+      if (rawCarrierStatus && rawCarrierStatus.trim().toUpperCase() !== canonicalStatus) {
+        this.logger.log(
+          `[status-mapper] normalized carrier=${shipment.carrierId} raw="${rawCarrierStatus}" canonical=${canonicalStatus} by=${matchedBy ?? 'n/a'} shipmentId=${shipmentId}`,
+        );
+      }
+      shipmentPatch.status = canonicalStatus;
+    }
+    const updated: ShipmentRecord = { ...shipment, ...shipmentPatch };
     const statusChanged = updated.status !== shipment.status;
     this.shipments.set(shipmentId, updated);
     void this.store.saveShipment(updated);
@@ -1740,6 +1798,8 @@ export class ShipmentsService implements OnModuleInit {
     if (externalOrderId && item.externalOrderId !== externalOrderId) return false;
     if (filter.orderType && item.orderType !== filter.orderType) return false;
     if (filter.hasShipment != null && item.hasShipment !== filter.hasShipment) return false;
+    if (filter.deleted === true && item.status !== 'DELETED_EXTERNAL') return false;
+    if (filter.deleted === false && item.status === 'DELETED_EXTERNAL') return false;
     const createdAt = Date.parse(item.createdAt);
     const dateFrom = filter.dateFrom ? Date.parse(filter.dateFrom) : NaN;
     const dateTo = filter.dateTo ? Date.parse(filter.dateTo) : NaN;
@@ -1846,6 +1906,9 @@ export class ShipmentsService implements OnModuleInit {
     );
   }
 
+  private hasAnyShipmentForRequest(userId: string, requestId: string): boolean {
+    return this.listShipmentsForRequest(userId, requestId).length > 0;
+  }
   private isVisibleOnOperatorComparisonPage(userId: string, request: ShipmentRequestRecord): boolean {
     if (request.integration?.fulfillmentMode === 'PARTNER_SELF_SERVE') return false;
     if (request.status === 'BOOKED' && this.hasActiveNonArchivedShipmentForRequest(userId, request.id)) {
@@ -1858,6 +1921,7 @@ export class ShipmentsService implements OnModuleInit {
     requestStatus?: ShipmentRequestRecord['status'],
     shipmentStatus?: ShipmentRecord['status'],
   ): TmsOrderStatus {
+    if (shipmentStatus === 'DELETED_EXTERNAL') return 'DELETED_EXTERNAL';
     if (shipmentStatus === 'DELIVERED') return 'DELIVERED';
     if (shipmentStatus && shipmentStatus !== 'CREATED' && shipmentStatus !== 'CONFIRMED') {
       return 'IN_TRANSIT';
@@ -1866,6 +1930,48 @@ export class ShipmentsService implements OnModuleInit {
     if (requestStatus === 'QUOTED') return 'QUOTED';
     if (requestStatus === 'DRAFT') return 'DRAFT';
     return 'NO_REQUEST';
+  }
+
+  private isCarrierDeletedShipmentError(message: string): boolean {
+    const normalized = message.toLowerCase();
+    return (
+      normalized.includes('not found') ||
+      normalized.includes('не найден') ||
+      normalized.includes('удален') ||
+      normalized.includes('deleted')
+    );
+  }
+
+
+  private async markShipmentDeletedExternally(
+    shipment: ShipmentRecord,
+    reason: string,
+    userId: string,
+  ): Promise<ShipmentRecord> {
+    if (shipment.status === 'DELETED_EXTERNAL') return shipment;
+    const updated: ShipmentRecord = { ...shipment, status: 'DELETED_EXTERNAL' };
+    this.shipments.set(shipment.id, updated);
+    await this.store.saveShipment(updated);
+    const now = new Date().toISOString();
+    const existing = this.tracking.get(shipment.id) ?? [];
+    const event: TrackingEventRecord = {
+      id: `${shipment.id}_deleted_${Date.now()}`,
+      shipmentId: shipment.id,
+      status: 'DELETED_EXTERNAL',
+      description: 'Удален в личном кабинете перевозчика',
+      occurredAt: now,
+      location: reason.slice(0, 200),
+    };
+    this.tracking.set(shipment.id, [...existing, event]);
+    await this.store.replaceTracking(shipment.id, this.tracking.get(shipment.id) ?? []);
+    await this.enqueuePartnerWebhookEvents(userId, 'shipment.updated', {
+      requestId: shipment.requestId,
+      shipmentId: shipment.id,
+      status: updated.status,
+      trackingNumber: updated.trackingNumber,
+      reason,
+    });
+    return updated;
   }
 
   private extractInlinePdfMarker(content?: string | null): { buffer: Buffer } | null {
@@ -1904,17 +2010,35 @@ export class ShipmentsService implements OnModuleInit {
       return [];
     }
     const base = (process.env.CORE_API_URL ?? 'http://localhost:4000').replace(/\/api\/?$/, '');
-    const res = await fetch(`${base}/api/tms/orders/candidates`, {
-      headers: {
-        Authorization: `Bearer ${authToken}`,
-      },
-      cache: 'no-store',
-    });
-    if (!res.ok) {
-      throw new NotFoundException('Не удалось получить заказы клиента из core');
+    const url = `${base}/api/tms/orders/candidates`;
+    const controller = new AbortController();
+    const timeoutMs = Math.max(1000, Number.parseInt(process.env.TMS_CORE_FETCH_TIMEOUT_MS ?? '5000', 10) || 5000);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+        },
+        cache: 'no-store',
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        this.logger.warn(
+          `[registry] core candidates unavailable userId=${userId} status=${res.status} url=${url}; fallback to TMS-only registry`,
+        );
+        return [];
+      }
+      const data = await res.json().catch(() => []);
+      return Array.isArray(data) ? data : [];
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `[registry] core candidates fetch failed userId=${userId} url=${url} reason="${reason}"; fallback to TMS-only registry`,
+      );
+      return [];
+    } finally {
+      clearTimeout(timer);
     }
-    const data = await res.json().catch(() => []);
-    return Array.isArray(data) ? data : [];
   }
 
   private buildIdempotencyScopeKey(userId: string, operation: string, idempotencyKey?: string | null): string | null {
