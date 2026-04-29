@@ -38,9 +38,10 @@ curl -X POST "https://api.handyseller.ru/api/tms/oauth/token" \
 
 1. Когда корзина и адрес заполнены -> вызываете `estimate`.
 2. Из ответа `estimate` берете массив `options` и показываете его в блоке "Способ доставки".
-3. Пользователь выбирает один вариант -> отправляете `select` с выбранным `quoteId`.
-4. Пользователь нажимает "Оформить заказ" -> вызываете `confirm`.
-5. Из ответа `confirm` берете `trackingNumber` и сохраняете в заказе клиента.
+3. Если выбран тариф до ПВЗ/терминала, сначала запрашиваете список точек и сохраняете выбранный `pickupPointId`.
+4. Пользователь выбирает один вариант -> отправляете `select` с выбранным `quoteId` (и `pickupPointId` для ПВЗ-тарифов).
+5. Пользователь нажимает "Оформить заказ" -> вызываете `confirm`.
+6. Из ответа `confirm` берете `trackingNumber` и сохраняете в заказе клиента.
 
 Если нужно, статусы дальше получаете через webhook и/или pull-методы.
 
@@ -125,11 +126,19 @@ curl -X POST "https://api.handyseller.ru/api/tms/v1/shipments/estimate" \
 
 `POST /api/tms/v1/shipments` с тем же payload (если нужен отдельный этап).
 
+### 4.3a Получить ПВЗ/терминалы (для тарифов до ПВЗ)
+
+Если в `estimate` пользователь выбрал вариант с доставкой в ПВЗ/терминал:
+- вызовите `GET /api/tms/v1/shipments/{requestId}/pickup-points`;
+- отобразите `id/code`, `address`, `lat/lon`, график работы;
+- передайте выбранный `pickupPointId` в `select`/`confirm`.
+
 ### 4.4 Подтвердить выбранный вариант
 
 1. Выберите `quoteId`.
 2. Установите выбранный тариф:
-   - `POST /api/tms/v1/shipments/{requestId}/select` с `{ "quoteId": "..." }`
+   - `POST /api/tms/v1/shipments/{requestId}/select` с `{ "quoteId": "...", "pickupPointId": "..." }` для тарифов до ПВЗ;
+   - для дверь-дверь/склад-дверь достаточно `{ "quoteId": "..." }`.
 3. Подтвердите:
 
 ```bash
@@ -139,6 +148,10 @@ curl -X POST "https://api.handyseller.ru/api/tms/v1/shipments/<REQUEST_ID>/confi
 ```
 
 В ответе будет `trackingNumber`.
+
+Важно:
+- для тарифов до ПВЗ/терминала (`door->PVZ`, `warehouse->PVZ`) `pickupPointId` обязателен;
+- `pickupPointId` нужно брать из нашего списка `pickup-points`, а не генерировать вручную.
 
 ### 4.5 Что вернется в `confirm` и что сохранить у себя
 
