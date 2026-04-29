@@ -1909,7 +1909,6 @@ export class ShipmentsService implements OnModuleInit {
   private hasAnyShipmentForRequest(userId: string, requestId: string): boolean {
     return this.listShipmentsForRequest(userId, requestId).length > 0;
   }
-
   private isVisibleOnOperatorComparisonPage(userId: string, request: ShipmentRequestRecord): boolean {
     if (request.integration?.fulfillmentMode === 'PARTNER_SELF_SERVE') return false;
     if (request.status === 'BOOKED' && this.hasActiveNonArchivedShipmentForRequest(userId, request.id)) {
