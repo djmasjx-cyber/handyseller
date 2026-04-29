@@ -266,6 +266,8 @@ export default function TmsRequestsPage() {
   const [errorDetails, setErrorDetails] = useState<string[]>([])
   const [success, setSuccess] = useState<string | null>(null)
   const [toast, setToast] = useState<ToastState>(null)
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [archivingKey, setArchivingKey] = useState<string | null>(null)
   const [search, setSearch] = useState("")
   const [sortMode, setSortMode] = useState<SortMode>("newest")
   const requestIdFromQuery = searchParams.get("requestId")
@@ -470,6 +472,8 @@ export default function TmsRequestsPage() {
     rows.sort(cmpCreated)
     return rows
   }, [items, quotesByRequest, search, sortMode, workQueue])
+  const visibleIds = useMemo(() => sortedRows.map((item) => item.id), [sortedRows])
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.includes(id))
 
   const refreshQuotes = async (requestId: string) => {
     if (!token) return
@@ -590,9 +594,73 @@ export default function TmsRequestsPage() {
     }
   }
 
+  const archiveRequests = async (requestIds: string[]) => {
+    if (!token || requestIds.length === 0) return
+    const uniqueIds = [...new Set(requestIds)]
+    const isBulk = uniqueIds.length > 1
+    setArchivingKey(isBulk ? "bulk" : uniqueIds[0])
+    setError(null)
+    setErrorDetails([])
+    setSuccess(null)
+    try {
+      const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }
+      const res = isBulk
+        ? await authFetch("/api/tms/shipment-requests/archive", {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ requestIds: uniqueIds }),
+          })
+        : await authFetch(`/api/tms/shipment-requests/${uniqueIds[0]}/archive`, {
+            method: "POST",
+            headers,
+          })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        const parsed = extractApiError(data, "Не удалось перенести заявку в архив")
+        throw new Error([parsed.message, ...parsed.details].join("\n"))
+      }
+      const result = await res.json().catch(() => ({}))
+      const archivedCount =
+        isBulk && result && typeof result === "object" && typeof (result as { archived?: unknown }).archived === "number"
+          ? (result as { archived: number }).archived
+          : 1
+      setSuccess(
+        archivedCount > 1
+          ? `В архив перенесено ${archivedCount} заявок.`
+          : "Заявка перенесена в архив и доступна во вкладке «Удаленные заказы».",
+      )
+      showToast(
+        "success",
+        archivedCount > 1 ? `В архив: ${archivedCount}` : "Заявка перенесена в архив",
+      )
+      setSelectedIds((prev) => prev.filter((id) => !uniqueIds.includes(id)))
+      await loadAll({ silent: true })
+    } catch (e) {
+      const text = e instanceof Error ? e.message : "Не удалось перенести заявку в архив"
+      const lines = normalizeMessageLines(text.split("\n"))
+      setError(lines[0] ?? "Не удалось перенести заявку в архив")
+      setErrorDetails(lines.length > 1 ? lines.slice(1) : [])
+      showToast("error", lines[0] ?? "Не удалось перенести заявку в архив")
+    } finally {
+      setArchivingKey(null)
+    }
+  }
+
   const toggleVariants = (requestId: string, carrierId: string) => {
     const key = `${requestId}:${carrierId}`
     setExpandedVariants((prev) => ({ ...prev, [key]: !prev[key] }))
+  }
+
+  const toggleSelected = (requestId: string) => {
+    setSelectedIds((prev) => (prev.includes(requestId) ? prev.filter((id) => id !== requestId) : [...prev, requestId]))
+  }
+
+  const toggleSelectAllVisible = () => {
+    setSelectedIds((prev) => {
+      if (allVisibleSelected) return prev.filter((id) => !visibleIds.includes(id))
+      const merged = new Set([...prev, ...visibleIds])
+      return [...merged]
+    })
   }
 
   if (loading) {
@@ -700,6 +768,17 @@ export default function TmsRequestsPage() {
                 ))}
               </select>
             </div>
+            <div className="sm:ml-auto">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={selectedIds.length === 0 || archivingKey === "bulk"}
+                onClick={() => void archiveRequests(selectedIds)}
+              >
+                {archivingKey === "bulk" ? <Loader2 className="h-4 w-4 animate-spin" /> : "В архив (выбранные)"}
+              </Button>
+            </div>
           </div>
         ) : null}
 
@@ -713,6 +792,15 @@ export default function TmsRequestsPage() {
                 return (
                   <div key={item.id} className="rounded-md border p-3 space-y-3">
                     <div>
+                      <label className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.includes(item.id)}
+                          onChange={() => toggleSelected(item.id)}
+                          className="h-4 w-4"
+                        />
+                        Выбрать для массового архива
+                      </label>
                       <p className="text-sm font-medium">{item.snapshot.marketplace}</p>
                       <p className="text-xs text-muted-foreground">{item.snapshot.coreOrderNumber}</p>
                     </div>
@@ -790,10 +878,18 @@ export default function TmsRequestsPage() {
                       <Button
                         size="sm"
                         variant="outline"
-                        disabled={refreshingId === item.id || confirmingId === item.id}
+                        disabled={refreshingId === item.id || confirmingId === item.id || archivingKey === item.id}
                         onClick={() => void refreshQuotes(item.id)}
                       >
                         {refreshingId === item.id ? <Loader2 className="h-4 w-4 animate-spin" /> : "Обновить"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={refreshingId === item.id || confirmingId === item.id || archivingKey === item.id}
+                        onClick={() => void archiveRequests([item.id])}
+                      >
+                        {archivingKey === item.id ? <Loader2 className="h-4 w-4 animate-spin" /> : "В архив"}
                       </Button>
                     </div>
                   </div>
@@ -804,6 +900,15 @@ export default function TmsRequestsPage() {
             <table className="w-full min-w-[720px] text-sm border-collapse">
               <thead>
                 <tr className="border-b bg-muted/50 text-left">
+                  <th className="px-2 py-2">
+                    <input
+                      type="checkbox"
+                      checked={allVisibleSelected}
+                      onChange={toggleSelectAllVisible}
+                      aria-label="Выбрать все видимые заявки"
+                      className="h-4 w-4"
+                    />
+                  </th>
                   <th className="sticky left-0 z-10 bg-muted/95 px-3 py-2 font-medium whitespace-nowrap">Заказ</th>
                   <th className="px-3 py-2 font-medium min-w-[140px]">Откуда</th>
                   <th className="px-3 py-2 font-medium min-w-[140px]">Куда</th>
@@ -821,7 +926,7 @@ export default function TmsRequestsPage() {
                 {sortedRows.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={6 + carrierColumns.length}
+                      colSpan={7 + carrierColumns.length}
                       className="px-3 py-8 text-center text-muted-foreground"
                     >
                       В этой очереди сейчас нет заявок. Смените фильтр или снимите поиск.
@@ -836,6 +941,15 @@ export default function TmsRequestsPage() {
                       key={item.id}
                       className={`border-b last:border-0 ${highlight ? "bg-primary/5" : ""} hover:bg-muted/30`}
                     >
+                      <td className="px-2 py-2 align-top">
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.includes(item.id)}
+                          onChange={() => toggleSelected(item.id)}
+                          aria-label={`Выбрать заявку ${item.snapshot.coreOrderNumber}`}
+                          className="h-4 w-4"
+                        />
+                      </td>
                       <td className="sticky left-0 z-[1] bg-background px-3 py-2 align-top whitespace-nowrap font-medium">
                         <span className="block">{item.snapshot.marketplace}</span>
                         <span className="text-muted-foreground">{item.snapshot.coreOrderNumber}</span>
@@ -910,10 +1024,18 @@ export default function TmsRequestsPage() {
                           <Button
                             size="sm"
                             variant="outline"
-                            disabled={refreshingId === item.id || confirmingId === item.id}
+                            disabled={refreshingId === item.id || confirmingId === item.id || archivingKey === item.id}
                             onClick={() => void refreshQuotes(item.id)}
                           >
                             {refreshingId === item.id ? <Loader2 className="h-4 w-4 animate-spin" /> : "Обновить"}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={refreshingId === item.id || confirmingId === item.id || archivingKey === item.id}
+                            onClick={() => void archiveRequests([item.id])}
+                          >
+                            {archivingKey === item.id ? <Loader2 className="h-4 w-4 animate-spin" /> : "В архив"}
                           </Button>
                         </div>
                       </td>
