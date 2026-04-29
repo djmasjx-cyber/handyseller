@@ -17,7 +17,12 @@ function getToken(req: NextRequest): string | null {
  */
 function shouldUseCoreApi(path: string[]): boolean {
   const head = path[0]
-  return head === "oauth" || head === "integration-clients" || head === "openapi.yaml"
+  return (
+    head === "oauth" ||
+    head === "integration-clients" ||
+    head === "openapi.yaml" ||
+    head === "openapi-extended.yaml"
+  )
 }
 
 function resolveTarget(req: NextRequest, path: string[]): string {
@@ -35,7 +40,11 @@ function resolveTarget(req: NextRequest, path: string[]): string {
 }
 
 function isPublicOpenApiRoute(req: NextRequest, path: string[]): boolean {
-  return req.method === "GET" && path.length === 1 && path[0] === "openapi.yaml"
+  return (
+    req.method === "GET" &&
+    path.length === 1 &&
+    (path[0] === "openapi.yaml" || path[0] === "openapi-extended.yaml")
+  )
 }
 
 function isPublicOAuthTokenRoute(req: NextRequest, path: string[]): boolean {

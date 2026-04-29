@@ -12,6 +12,7 @@ import type {
   ShipmentDocumentRecord,
   ShipmentRecord,
   ShipmentRequestRecord,
+  TmsFulfillmentMode,
   TmsOrderStatus,
   TmsOverview,
   TrackingEventRecord,
@@ -74,6 +75,8 @@ type OrderRegistryItem = {
   hasShipment: boolean;
   hasArchivedShipments: boolean;
   hasRequest: boolean;
+  /** null — строка только из core, без заявки TMS. */
+  fulfillmentMode: TmsFulfillmentMode | null;
 };
 
 @Injectable()
@@ -282,6 +285,14 @@ export class ShipmentsService implements OnModuleInit {
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
+  /**
+   * Список для «Сравнение тарифов» и дашборда: без витринных заявок (PARTNER_SELF_SERVE);
+   * после подтверждения и появления отгрузки — строка уезжает в «Журнал» (здесь не показываем).
+   */
+  listRequestsForOperatorComparison(userId: string): ShipmentRequestRecord[] {
+    return this.listRequests(userId).filter((request) => this.isVisibleOnOperatorComparisonPage(userId, request));
+  }
+
   listShipments(userId: string): ShipmentRecord[] {
     return [...this.shipments.values()]
       .filter((shipment) => shipment.userId === userId)
@@ -298,6 +309,12 @@ export class ShipmentsService implements OnModuleInit {
     const requestItems = [...this.requests.values()]
       .filter((request) => request.userId === userId)
       .filter((request) => !this.isMarketplaceOrder(request.snapshot.marketplace))
+      .filter((request) => {
+        if (request.integration?.fulfillmentMode === 'PARTNER_SELF_SERVE') {
+          return this.hasActiveNonArchivedShipmentForRequest(userId, request.id);
+        }
+        return true;
+      })
       .map((request) => this.buildOrderRegistryItem(request))
       .map((item) => ({ ...item, sortKey: `${item.updatedAt}|${item.requestId}` }));
     const requestOrderIds = new Set(
@@ -774,7 +791,7 @@ export class ShipmentsService implements OnModuleInit {
   }
 
   getOverview(userId: string): TmsOverview {
-    const requests = this.listRequests(userId);
+    const requests = this.listRequestsForOperatorComparison(userId);
     const shipments = this.listShipments(userId);
     return {
       carriersCount: this.adapters.length,
@@ -1077,7 +1094,7 @@ export class ShipmentsService implements OnModuleInit {
       status: 'DRAFT',
       snapshot: input.snapshot,
       draft: input.draft,
-      integration: input.integration,
+      integration: this.mergeRequestIntegration(input.integration, 'OPERATOR_QUEUE'),
       createdAt: now,
       updatedAt: now,
     };
@@ -1642,6 +1659,7 @@ export class ShipmentsService implements OnModuleInit {
       hasShipment: shipments.length > 0,
       hasArchivedShipments: shipments.some((shipment) => this.isArchivedShipment(shipment)),
       hasRequest: true,
+      fulfillmentMode: request.integration?.fulfillmentMode ?? 'OPERATOR_QUEUE',
     };
   }
 
@@ -1678,6 +1696,7 @@ export class ShipmentsService implements OnModuleInit {
       hasShipment: false,
       hasArchivedShipments: false,
       hasRequest: false,
+      fulfillmentMode: null,
     };
   }
 
@@ -1817,6 +1836,31 @@ export class ShipmentsService implements OnModuleInit {
 
   private isArchivedShipment(shipment: ShipmentRecord): boolean {
     return shipment.status === 'SUPERSEDED';
+  }
+
+  private mergeRequestIntegration(
+    partial: ShipmentRequestRecord['integration'] | CreateShipmentRequestInput['integration'] | undefined,
+    defaultMode: TmsFulfillmentMode,
+  ): ShipmentRequestRecord['integration'] | undefined {
+    const merged: ShipmentRequestRecord['integration'] = {
+      ...partial,
+      fulfillmentMode: partial?.fulfillmentMode ?? defaultMode,
+    };
+    return merged;
+  }
+
+  private hasActiveNonArchivedShipmentForRequest(userId: string, requestId: string): boolean {
+    return this.listShipmentsForRequest(userId, requestId).some(
+      (shipment) => !this.isArchivedShipment(shipment),
+    );
+  }
+
+  private isVisibleOnOperatorComparisonPage(userId: string, request: ShipmentRequestRecord): boolean {
+    if (request.integration?.fulfillmentMode === 'PARTNER_SELF_SERVE') return false;
+    if (request.status === 'BOOKED' && this.hasActiveNonArchivedShipmentForRequest(userId, request.id)) {
+      return false;
+    }
+    return true;
   }
 
   private resolveTmsOrderStatus(

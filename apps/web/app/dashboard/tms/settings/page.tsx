@@ -410,9 +410,13 @@ estimate -> pickup-points -> select-and-confirm`
           <CardTitle>Внешние системы (API TMS)</CardTitle>
           <CardDescription>
             Подключение для ERP/1С/WMS занимает 10-15 минут: OAuth2 client credentials, короткоживущие токены,
-            идемпотентные операции и webhook-подписки. Полная спецификация — в{" "}
+            идемпотентные операции и webhook-подписки. Витрина:{" "}
             <a className="underline" href="/api/tms/openapi.yaml" target="_blank" rel="noreferrer">
-              OpenAPI (YAML)
+              OpenAPI (короткий)
+            </a>
+            ; полный набор путей (1С, webhooks):{" "}
+            <a className="underline" href="/api/tms/openapi-extended.yaml" target="_blank" rel="noreferrer">
+              OpenAPI (расширенный)
             </a>
             .
           </CardDescription>
@@ -432,7 +436,15 @@ estimate -> pickup-points -> select-and-confirm`
                 target="_blank"
                 rel="noreferrer"
               >
-                Скачать OpenAPI (YAML)
+                OpenAPI: витрина
+              </a>
+              <a
+                className="inline-flex items-center rounded-md border px-3 py-2 text-xs font-medium hover:bg-muted"
+                href="/api/tms/openapi-extended.yaml"
+                target="_blank"
+                rel="noreferrer"
+              >
+                OpenAPI: 1С + webhooks
               </a>
               <Button type="button" variant="outline" size="sm" onClick={copyIntegrationChecklist}>
                 {copiedChecklist ? "Скопировано" : "Скопировать чек-лист интеграции"}

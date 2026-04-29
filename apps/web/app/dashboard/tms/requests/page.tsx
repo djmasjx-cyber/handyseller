@@ -300,7 +300,7 @@ export default function TmsRequestsPage() {
       if (!opts?.silent) setError(null)
       const headers = { Authorization: `Bearer ${token}` }
       try {
-        const r = await authFetch("/api/tms/shipment-requests", { headers })
+        const r = await authFetch("/api/tms/shipment-requests?view=operator", { headers })
         const data = r.ok ? await r.json() : []
         const requests = Array.isArray(data) ? data : []
         setItems(requests)
@@ -608,8 +608,10 @@ export default function TmsRequestsPage() {
       <CardHeader>
         <CardTitle>Сравнение тарифов</CardTitle>
         <CardDescription>
-          Строки — заявки, колонки — перевозчики; в ячейках варианты тарифов (дверь/терминал и др.). Наведите на
-          цену, чтобы увидеть состав суммы. Клик по варианту — выбор тарифа, далее нажмите «Подтвердить».
+          Здесь — заявки, где логист выбирает перевозчика в HandySeller (в т.ч. с 1С). Заказы витрины, где выбор
+          сделан на сайте, попадают в «Журнал» после оформления, не дублируясь в этой матрице. Строки — заявки,
+          колонки — перевозчики; в ячейках варианты тарифов (дверь/терминал и др.). Наведите на цену, чтобы увидеть
+          состав суммы. Клик по варианту — выбор тарифа, далее нажмите «Подтвердить».
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
