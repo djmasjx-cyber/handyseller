@@ -1968,17 +1968,35 @@ export class ShipmentsService implements OnModuleInit {
       return [];
     }
     const base = (process.env.CORE_API_URL ?? 'http://localhost:4000').replace(/\/api\/?$/, '');
-    const res = await fetch(`${base}/api/tms/orders/candidates`, {
-      headers: {
-        Authorization: `Bearer ${authToken}`,
-      },
-      cache: 'no-store',
-    });
-    if (!res.ok) {
-      throw new NotFoundException('Не удалось получить заказы клиента из core');
+    const url = `${base}/api/tms/orders/candidates`;
+    const controller = new AbortController();
+    const timeoutMs = Math.max(1000, Number.parseInt(process.env.TMS_CORE_FETCH_TIMEOUT_MS ?? '5000', 10) || 5000);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+        },
+        cache: 'no-store',
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        this.logger.warn(
+          `[registry] core candidates unavailable userId=${userId} status=${res.status} url=${url}; fallback to TMS-only registry`,
+        );
+        return [];
+      }
+      const data = await res.json().catch(() => []);
+      return Array.isArray(data) ? data : [];
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `[registry] core candidates fetch failed userId=${userId} url=${url} reason="${reason}"; fallback to TMS-only registry`,
+      );
+      return [];
+    } finally {
+      clearTimeout(timer);
     }
-    const data = await res.json().catch(() => []);
-    return Array.isArray(data) ? data : [];
   }
 
   private buildIdempotencyScopeKey(userId: string, operation: string, idempotencyKey?: string | null): string | null {
