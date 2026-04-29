@@ -128,6 +128,10 @@ function readFileAsBase64(file: File): Promise<string> {
 }
 
 function formatHttpError(data: unknown, fallback: string): string {
+  if (typeof data === "string") {
+    const text = data.trim()
+    if (text) return text.length > 240 ? `${text.slice(0, 240)}...` : text
+  }
   if (!data || typeof data !== "object") return fallback
   const d = data as Record<string, unknown>
   const m = d.message
@@ -203,7 +207,13 @@ export default function WmsTransferAnalyticsPage() {
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ fileName: file.name, contentBase64 }),
       })
-      const data = (await res.json().catch(() => ({}))) as unknown
+      const responseText = await res.text()
+      let data: unknown = responseText
+      try {
+        data = responseText ? JSON.parse(responseText) : {}
+      } catch {
+        data = responseText
+      }
       if (!res.ok) {
         setError(formatHttpError(data, "Не удалось импортировать файл."))
         return
