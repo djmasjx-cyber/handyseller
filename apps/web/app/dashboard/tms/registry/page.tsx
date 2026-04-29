@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from "@handyseller/ui"
 import { Loader2, Search } from "lucide-react"
@@ -120,6 +120,13 @@ export default function TmsRegistryPage() {
 
   const token = getToken()
 
+  const filterSnapshot = useMemo(
+    () => ({ query, status, carrierId, hasShipment, view }),
+    [query, status, carrierId, hasShipment, view],
+  )
+  const filterRef = useRef(filterSnapshot)
+  filterRef.current = filterSnapshot
+
   const carrierOptions = useMemo(
     () =>
       [...new Map(items.filter((item) => item.carrierId).map((item) => [item.carrierId, item.carrierName ?? item.carrierId])).entries()]
@@ -128,40 +135,72 @@ export default function TmsRegistryPage() {
     [items],
   )
 
-  const loadRegistry = async (cursor?: string | null) => {
-    if (!token) return
-    if (cursor) setLoadingMore(true)
-    else setLoading(true)
-    setError(null)
-    try {
-      const params = new URLSearchParams()
-      params.set("limit", "25")
-      if (query.trim()) params.set("q", query.trim())
-      if (status) params.set("status", status)
-      params.set("deleted", view === "deleted" ? "true" : "false")
-      if (carrierId) params.set("carrierId", carrierId)
-      if (hasShipment) params.set("hasShipment", hasShipment)
-      if (cursor) params.set("cursor", cursor)
-      const res = await authFetch(`/api/tms/v1/orders?${params.toString()}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      const data = (await res.json().catch(() => ({}))) as Partial<RegistryResponse>
-      if (!res.ok) throw new Error("Не удалось загрузить журнал TMS-заказов")
-      const nextItems = Array.isArray(data.items) ? data.items : []
-      setItems((prev) => (cursor ? [...prev, ...nextItems] : nextItems))
-      setNextCursor(data.nextCursor ?? null)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Не удалось загрузить журнал TMS-заказов")
-    } finally {
-      setLoading(false)
-      setLoadingMore(false)
-    }
-  }
+  const loadRegistry = useCallback(
+    async (cursor?: string | null, opts?: { silent?: boolean }) => {
+      if (!token) return
+      const f = filterRef.current
+      if (cursor) setLoadingMore(true)
+      else if (!opts?.silent) setLoading(true)
+      if (!opts?.silent) setError(null)
+      try {
+        const params = new URLSearchParams()
+        params.set("limit", "25")
+        if (f.query.trim()) params.set("q", f.query.trim())
+        if (f.status) params.set("status", f.status)
+        params.set("deleted", f.view === "deleted" ? "true" : "false")
+        if (f.carrierId) params.set("carrierId", f.carrierId)
+        if (f.hasShipment) params.set("hasShipment", f.hasShipment)
+        if (cursor) params.set("cursor", cursor)
+        const res = await authFetch(`/api/tms/v1/orders?${params.toString()}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        const data = (await res.json().catch(() => ({}))) as Partial<RegistryResponse>
+        if (!res.ok) throw new Error("Не удалось загрузить журнал TMS-заказов")
+        const nextItems = Array.isArray(data.items) ? data.items : []
+        if (cursor) {
+          setItems((prev) => [...prev, ...nextItems])
+          setNextCursor(data.nextCursor ?? null)
+        } else if (opts?.silent) {
+          /** Тихо подтягиваем актуальные статусы по первой странице, не сбрасывая пагинацию. */
+          setItems((prev) => {
+            if (prev.length === 0) return nextItems
+            const byId = new Map(nextItems.map((i) => [i.requestId, i]))
+            return prev.map((row) => byId.get(row.requestId) ?? row)
+          })
+        } else {
+          setItems(nextItems)
+          setNextCursor(data.nextCursor ?? null)
+        }
+      } catch (e) {
+        if (!opts?.silent) {
+          setError(e instanceof Error ? e.message : "Не удалось загрузить журнал TMS-заказов")
+        }
+      } finally {
+        if (cursor) setLoadingMore(false)
+        else if (!opts?.silent) setLoading(false)
+      }
+    },
+    [token],
+  )
 
   useEffect(() => {
+    if (!token) {
+      setLoading(false)
+      return
+    }
     void loadRegistry(null)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view])
+  }, [token, loadRegistry, view])
+
+  /** Без кнопки «Обновить» в журнале: на фоне обновляем сводку по мере появления данных на бэке (и cron опроса ТК). */
+  useEffect(() => {
+    if (!token) return
+    const tick = () => {
+      if (typeof document === "undefined" || document.visibilityState !== "visible") return
+      void loadRegistry(null, { silent: true })
+    }
+    const id = window.setInterval(tick, 45_000)
+    return () => window.clearInterval(id)
+  }, [token, loadRegistry])
 
   const applyFilters = () => {
     setNextCursor(null)
@@ -175,7 +214,8 @@ export default function TmsRegistryPage() {
           <CardTitle>Журнал TMS-заказов</CardTitle>
           <CardDescription>
             Постоянный реестр всех заявок, расчетов и перевозок, прошедших через HandySeller TMS. Записи не удаляются:
-            при повторном бронировании старая отгрузка сохраняется в истории.
+            при повторном бронировании старая отгрузка сохраняется в истории. Статусы в таблице подгружаются в фоне, отдельная
+            кнопка обновления не требуется: данные приходят с сервера, где уже работает опрос и webhooks у перевозчиков.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -278,9 +318,6 @@ export default function TmsRegistryPage() {
                           {!item.hasRequest ? " · расчет доставки еще не запускался" : ""}
                         </p>
                         {item.hasArchivedShipments ? <Badge variant="secondary">Есть история замен</Badge> : null}
-                        {item.status === "DELETED_EXTERNAL" ? (
-                          <Badge variant="destructive">Удален в ЛК перевозчика</Badge>
-                        ) : null}
                       </td>
                       <td className="px-3 py-3">
                         <p>{item.externalOrderId || "—"}</p>

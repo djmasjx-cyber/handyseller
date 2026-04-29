@@ -671,7 +671,7 @@ export class CdekAdapter implements CarrierAdapter {
         phones: [{ number: recipientPhone }],
       },
       from_location: { code: fromCode, address: fromAddress },
-      to_location: { code: toCode, address: toAddress },
+      to_location: requiresPickupPoint ? { code: pickupPointId } : { code: toCode, address: toAddress },
       packages: packagesPayload,
     };
     if (requiresPickupPoint) {
