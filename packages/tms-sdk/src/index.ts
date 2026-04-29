@@ -21,6 +21,7 @@ export type TmsOrderStatus =
   | 'DRAFT'
   | 'QUOTED'
   | 'BOOKED'
+  | 'DELETED_EXTERNAL'
   | 'IN_TRANSIT'
   | 'DELIVERED';
 
@@ -32,6 +33,7 @@ export type ShipmentStatus =
   | 'IN_TRANSIT'
   | 'OUT_FOR_DELIVERY'
   | 'DELIVERED'
+  | 'DELETED_EXTERNAL'
   | 'SUPERSEDED';
 
 export interface CargoSnapshot {

@@ -39,6 +39,7 @@ type OrderRegistryFilter = {
   dateFrom?: string;
   dateTo?: string;
   hasShipment?: boolean;
+  deleted?: boolean;
   limit?: number;
   cursor?: string;
 };
@@ -1557,6 +1558,10 @@ export class ShipmentsService implements OnModuleInit {
         error instanceof Error && error.message.trim()
           ? error.message
           : `Не удалось обновить статус отгрузки ${shipment.carrierName}`;
+      if (this.isCarrierDeletedShipmentError(message)) {
+        const deleted = await this.markShipmentDeletedExternally(shipment, message, userId);
+        return deleted;
+      }
       throw new BadRequestException(message);
     }
 
@@ -1749,6 +1754,8 @@ export class ShipmentsService implements OnModuleInit {
     if (externalOrderId && item.externalOrderId !== externalOrderId) return false;
     if (filter.orderType && item.orderType !== filter.orderType) return false;
     if (filter.hasShipment != null && item.hasShipment !== filter.hasShipment) return false;
+    if (filter.deleted === true && item.status !== 'DELETED_EXTERNAL') return false;
+    if (filter.deleted === false && item.status === 'DELETED_EXTERNAL') return false;
     const createdAt = Date.parse(item.createdAt);
     const dateFrom = filter.dateFrom ? Date.parse(filter.dateFrom) : NaN;
     const dateTo = filter.dateTo ? Date.parse(filter.dateTo) : NaN;
@@ -1867,6 +1874,7 @@ export class ShipmentsService implements OnModuleInit {
     requestStatus?: ShipmentRequestRecord['status'],
     shipmentStatus?: ShipmentRecord['status'],
   ): TmsOrderStatus {
+    if (shipmentStatus === 'DELETED_EXTERNAL') return 'DELETED_EXTERNAL';
     if (shipmentStatus === 'DELIVERED') return 'DELIVERED';
     if (shipmentStatus && shipmentStatus !== 'CREATED' && shipmentStatus !== 'CONFIRMED') {
       return 'IN_TRANSIT';
@@ -1875,6 +1883,47 @@ export class ShipmentsService implements OnModuleInit {
     if (requestStatus === 'QUOTED') return 'QUOTED';
     if (requestStatus === 'DRAFT') return 'DRAFT';
     return 'NO_REQUEST';
+  }
+
+  private isCarrierDeletedShipmentError(message: string): boolean {
+    const normalized = message.toLowerCase();
+    return (
+      normalized.includes('not found') ||
+      normalized.includes('не найден') ||
+      normalized.includes('удален') ||
+      normalized.includes('deleted')
+    );
+  }
+
+  private async markShipmentDeletedExternally(
+    shipment: ShipmentRecord,
+    reason: string,
+    userId: string,
+  ): Promise<ShipmentRecord> {
+    if (shipment.status === 'DELETED_EXTERNAL') return shipment;
+    const updated: ShipmentRecord = { ...shipment, status: 'DELETED_EXTERNAL' };
+    this.shipments.set(shipment.id, updated);
+    await this.store.saveShipment(updated);
+    const now = new Date().toISOString();
+    const existing = this.tracking.get(shipment.id) ?? [];
+    const event: TrackingEventRecord = {
+      id: `${shipment.id}_deleted_${Date.now()}`,
+      shipmentId: shipment.id,
+      status: 'DELETED_EXTERNAL',
+      description: 'Удален в личном кабинете перевозчика',
+      occurredAt: now,
+      location: reason.slice(0, 200),
+    };
+    this.tracking.set(shipment.id, [...existing, event]);
+    await this.store.replaceTracking(shipment.id, this.tracking.get(shipment.id) ?? []);
+    await this.enqueuePartnerWebhookEvents(userId, 'shipment.updated', {
+      requestId: shipment.requestId,
+      shipmentId: shipment.id,
+      status: updated.status,
+      trackingNumber: updated.trackingNumber,
+      reason,
+    });
+    return updated;
   }
 
   private extractInlinePdfMarker(content?: string | null): { buffer: Buffer } | null {
