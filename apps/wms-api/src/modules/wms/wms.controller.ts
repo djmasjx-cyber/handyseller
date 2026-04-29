@@ -215,38 +215,57 @@ export class WmsController {
 
   @Get('v1/analytics/transfers/summary')
   @WmsAccess('read')
-  transferSummary(@CurrentUser('userId') userId: string, @Query() query: Record<string, string | undefined>) {
+  transferSummary(@CurrentUser('userId') userId: string, @Query() query: Record<string, string | string[] | undefined>) {
     return this.analytics.getTransferSummary(userId, this.transferFilters(query));
+  }
+
+  @Get('v1/analytics/transfers/options')
+  @WmsAccess('read')
+  transferOptions(@CurrentUser('userId') userId: string) {
+    return this.analytics.getTransferOptions(userId);
   }
 
   @Get('v1/analytics/transfers/by-op')
   @WmsAccess('read')
-  transfersByOp(@CurrentUser('userId') userId: string, @Query() query: Record<string, string | undefined>) {
+  transfersByOp(@CurrentUser('userId') userId: string, @Query() query: Record<string, string | string[] | undefined>) {
     return this.analytics.getTransfersByOp(userId, this.transferFilters(query));
   }
 
   @Get('v1/analytics/transfers/tourists')
   @WmsAccess('read')
-  tourists(@CurrentUser('userId') userId: string, @Query() query: Record<string, string | undefined>) {
+  tourists(@CurrentUser('userId') userId: string, @Query() query: Record<string, string | string[] | undefined>) {
     return this.analytics.getTourists(userId, this.transferFilters(query));
   }
 
   @Get('v1/analytics/transfers/replenishment-risks')
   @WmsAccess('read')
-  replenishmentRisks(@CurrentUser('userId') userId: string, @Query() query: Record<string, string | undefined>) {
+  replenishmentRisks(@CurrentUser('userId') userId: string, @Query() query: Record<string, string | string[] | undefined>) {
     return this.analytics.getReplenishmentRisks(userId, this.transferFilters(query));
   }
 
-  private transferFilters(query: Record<string, string | undefined>): WmsBiTransferFilters {
-    const kind = query.kind?.trim() as WmsBiTransferOrderKind | undefined;
+  private transferFilters(query: Record<string, string | string[] | undefined>): WmsBiTransferFilters {
+    const kind = this.firstQueryValue(query.kind)?.trim() as WmsBiTransferOrderKind | undefined;
     return {
-      from: query.from?.trim() ? `${query.from.trim()}T00:00:00.000Z` : undefined,
-      to: query.to?.trim() ? `${query.to.trim()}T23:59:59.999Z` : undefined,
-      receiverWarehouse: query.receiverWarehouse?.trim() || undefined,
-      senderWarehouse: query.senderWarehouse?.trim() || undefined,
-      item: query.item?.trim() || undefined,
-      batchId: query.batchId?.trim() || undefined,
+      from: this.firstQueryValue(query.from)?.trim() ? `${this.firstQueryValue(query.from)?.trim()}T00:00:00.000Z` : undefined,
+      to: this.firstQueryValue(query.to)?.trim() ? `${this.firstQueryValue(query.to)?.trim()}T23:59:59.999Z` : undefined,
+      receiverWarehouse: this.firstQueryValue(query.receiverWarehouse)?.trim() || undefined,
+      senderWarehouse: this.firstQueryValue(query.senderWarehouse)?.trim() || undefined,
+      receiverOps: this.listQueryValues(query.receiverOps),
+      senderOps: this.listQueryValues(query.senderOps),
+      warehouseTypes: this.listQueryValues(query.warehouseTypes),
+      item: this.firstQueryValue(query.item)?.trim() || undefined,
+      batchId: this.firstQueryValue(query.batchId)?.trim() || undefined,
       kind: kind === 'REPLENISHMENT' || kind === 'TOURIST' ? kind : undefined,
     };
+  }
+
+  private firstQueryValue(value: string | string[] | undefined): string | undefined {
+    return Array.isArray(value) ? value[0] : value;
+  }
+
+  private listQueryValues(value: string | string[] | undefined): string[] | undefined {
+    const raw = Array.isArray(value) ? value : value ? value.split(',') : [];
+    const out = raw.map((v) => v.trim()).filter(Boolean);
+    return out.length ? out : undefined;
   }
 }

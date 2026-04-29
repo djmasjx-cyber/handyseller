@@ -35,6 +35,8 @@ type Summary = {
 
 type ByOpRow = {
   receiverWarehouse: string
+  receiverWarehouseType: string
+  receiverOp: string
   rows: number
   orders: number
   replenishmentRows: number
@@ -47,7 +49,11 @@ type ByOpRow = {
 
 type TouristRow = {
   receiverWarehouse: string
+  receiverWarehouseType: string
+  receiverOp: string
   senderWarehouse: string
+  senderWarehouseType: string
+  senderOp: string
   itemCode: string
   itemArticle: string | null
   itemName: string
@@ -60,6 +66,8 @@ type TouristRow = {
 
 type RiskRow = {
   receiverWarehouse: string
+  receiverWarehouseType: string
+  receiverOp: string
   itemCode: string
   itemArticle: string | null
   itemName: string
@@ -73,11 +81,18 @@ type RiskRow = {
 type Filters = {
   from: string
   to: string
-  receiverWarehouse: string
-  senderWarehouse: string
+  receiverOps: string[]
+  senderOps: string[]
+  warehouseTypes: string[]
   item: string
   kind: "" | TransferKind
   batchId: string
+}
+
+type FilterOptions = {
+  warehouseTypes: string[]
+  receiverOps: string[]
+  senderOps: string[]
 }
 
 const emptySummary: Summary = {
@@ -109,7 +124,11 @@ function dateShort(value: string | null): string {
 function queryFromFilters(filters: Filters): string {
   const qs = new URLSearchParams()
   for (const [key, value] of Object.entries(filters)) {
-    if (value) qs.set(key, value)
+    if (Array.isArray(value)) {
+      if (value.length) qs.set(key, value.join(","))
+    } else if (value) {
+      qs.set(key, value)
+    }
   }
   const raw = qs.toString()
   return raw ? `?${raw}` : ""
@@ -146,14 +165,16 @@ export default function WmsTransferAnalyticsPage() {
   const token = typeof window !== "undefined" ? localStorage.getItem(AUTH_STORAGE_KEYS.accessToken) : null
   const [summary, setSummary] = useState<Summary>(emptySummary)
   const [imports, setImports] = useState<ImportBatch[]>([])
+  const [options, setOptions] = useState<FilterOptions>({ warehouseTypes: [], receiverOps: [], senderOps: [] })
   const [byOp, setByOp] = useState<ByOpRow[]>([])
   const [tourists, setTourists] = useState<TouristRow[]>([])
   const [risks, setRisks] = useState<RiskRow[]>([])
   const [filters, setFilters] = useState<Filters>({
     from: "",
     to: "",
-    receiverWarehouse: "",
-    senderWarehouse: "",
+    receiverOps: [],
+    senderOps: [],
+    warehouseTypes: [],
     item: "",
     kind: "",
     batchId: "",
@@ -171,9 +192,10 @@ export default function WmsTransferAnalyticsPage() {
     setError(null)
     try {
       const headers = { Authorization: `Bearer ${token}` }
-      const [summaryRes, importsRes, byOpRes, touristsRes, risksRes] = await Promise.all([
+      const [summaryRes, importsRes, optionsRes, byOpRes, touristsRes, risksRes] = await Promise.all([
         authFetch(`/api/wms/v1/analytics/transfers/summary${query}`, { headers }),
         authFetch("/api/wms/v1/analytics/imports", { headers }),
+        authFetch("/api/wms/v1/analytics/transfers/options", { headers }),
         authFetch(`/api/wms/v1/analytics/transfers/by-op${query}`, { headers }),
         authFetch(`/api/wms/v1/analytics/transfers/tourists${query}`, { headers }),
         authFetch(`/api/wms/v1/analytics/transfers/replenishment-risks${query}`, { headers }),
@@ -181,6 +203,7 @@ export default function WmsTransferAnalyticsPage() {
       if (!summaryRes.ok) throw new Error("Не удалось загрузить сводку аналитики.")
       setSummary((await summaryRes.json()) as Summary)
       setImports(importsRes.ok ? ((await importsRes.json()) as ImportBatch[]) : [])
+      setOptions(optionsRes.ok ? ((await optionsRes.json()) as FilterOptions) : { warehouseTypes: [], receiverOps: [], senderOps: [] })
       setByOp(byOpRes.ok ? ((await byOpRes.json()) as ByOpRow[]) : [])
       setTourists(touristsRes.ok ? ((await touristsRes.json()) as TouristRow[]) : [])
       setRisks(risksRes.ok ? ((await risksRes.json()) as RiskRow[]) : [])
@@ -233,7 +256,11 @@ export default function WmsTransferAnalyticsPage() {
     }
   }
 
-  const setFilter = (key: keyof Filters, value: string) => {
+  const setFilter = (key: "from" | "to" | "item" | "kind" | "batchId", value: string) => {
+    setFilters((prev) => ({ ...prev, [key]: value }))
+  }
+
+  const setListFilter = (key: "receiverOps" | "senderOps" | "warehouseTypes", value: string[]) => {
     setFilters((prev) => ({ ...prev, [key]: value }))
   }
 
@@ -278,14 +305,27 @@ export default function WmsTransferAnalyticsPage() {
               <Label htmlFor="to">По дату</Label>
               <Input id="to" type="date" value={filters.to} onChange={(e) => setFilter("to", e.target.value)} />
             </div>
-            <div className="space-y-1">
-              <Label htmlFor="receiver">ОП-получатель</Label>
-              <Input id="receiver" value={filters.receiverWarehouse} onChange={(e) => setFilter("receiverWarehouse", e.target.value)} />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="sender">Отправитель</Label>
-              <Input id="sender" value={filters.senderWarehouse} onChange={(e) => setFilter("senderWarehouse", e.target.value)} />
-            </div>
+            <CheckSelect
+              id="warehouseTypes"
+              label="Склад"
+              options={options.warehouseTypes}
+              value={filters.warehouseTypes}
+              onChange={(value) => setListFilter("warehouseTypes", value)}
+            />
+            <CheckSelect
+              id="receiverOps"
+              label="Получатель"
+              options={options.receiverOps}
+              value={filters.receiverOps}
+              onChange={(value) => setListFilter("receiverOps", value)}
+            />
+            <CheckSelect
+              id="senderOps"
+              label="Отправитель"
+              options={options.senderOps}
+              value={filters.senderOps}
+              onChange={(value) => setListFilter("senderOps", value)}
+            />
             <div className="space-y-1">
               <Label htmlFor="item">Товар / артикул</Label>
               <Input id="item" value={filters.item} onChange={(e) => setFilter("item", e.target.value)} />
@@ -349,9 +389,10 @@ export default function WmsTransferAnalyticsPage() {
           </CardHeader>
           <CardContent>
             <SimpleTable
-              headers={["ОП", "Строк", "Заказов", "Туристы", "Сумма туристов"]}
+              headers={["Получатель", "Склад", "Строк", "Заказов", "Туристы", "Сумма туристов"]}
               rows={byOp.slice(0, 20).map((row) => [
-                row.receiverWarehouse,
+                row.receiverOp,
+                row.receiverWarehouseType,
                 numberRu.format(row.rows),
                 numberRu.format(row.orders),
                 numberRu.format(row.touristRows),
@@ -368,9 +409,10 @@ export default function WmsTransferAnalyticsPage() {
           </CardHeader>
           <CardContent>
             <SimpleTable
-              headers={["ОП", "Товар", "После пополнения", "Туристов", "Сумма"]}
+              headers={["Получатель", "Склад", "Товар", "После пополнения", "Туристов", "Сумма"]}
               rows={risks.slice(0, 20).map((row) => [
-                row.receiverWarehouse,
+                row.receiverOp,
+                row.receiverWarehouseType,
                 row.itemArticle ? `${row.itemArticle} · ${row.itemName}` : row.itemName,
                 dateShort(row.replenishmentDate),
                 numberRu.format(row.touristRowsUntilNextReplenishment),
@@ -388,10 +430,13 @@ export default function WmsTransferAnalyticsPage() {
         </CardHeader>
         <CardContent>
           <SimpleTable
-            headers={["Получатель", "Отправитель", "Товар", "Строк", "Заказов", "Сумма", "Период"]}
+            headers={["Получатель", "Отправитель", "Склад", "Товар", "Строк", "Заказов", "Сумма", "Период"]}
             rows={tourists.slice(0, 50).map((row) => [
-              row.receiverWarehouse,
-              row.senderWarehouse,
+              row.receiverOp,
+              row.senderOp,
+              row.receiverWarehouseType === row.senderWarehouseType
+                ? row.receiverWarehouseType
+                : `${row.senderWarehouseType} → ${row.receiverWarehouseType}`,
               row.itemArticle ? `${row.itemArticle} · ${row.itemName}` : row.itemName,
               numberRu.format(row.rows),
               numberRu.format(row.orders),
@@ -417,6 +462,76 @@ function Stat({ title, value, hint, accent }: { title: string; value: string; hi
       </CardHeader>
       <CardContent className="text-sm text-muted-foreground">{hint}</CardContent>
     </Card>
+  )
+}
+
+function CheckSelect({
+  id,
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  id: string
+  label: string
+  options: string[]
+  value: string[]
+  onChange: (value: string[]) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const selected = new Set(value)
+  const toggle = (option: string) => {
+    if (selected.has(option)) {
+      onChange(value.filter((v) => v !== option))
+      return
+    }
+    onChange([...value, option])
+  }
+
+  return (
+    <div className="relative space-y-1">
+      <Label htmlFor={id}>{label}</Label>
+      <Button
+        id={id}
+        type="button"
+        variant="outline"
+        className="h-10 w-full justify-between overflow-hidden px-3 font-normal"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="truncate">{value.length ? `Выбрано: ${value.length}` : "Все"}</span>
+        <span className="text-muted-foreground">v</span>
+      </Button>
+      {open ? (
+        <div className="absolute z-20 mt-1 max-h-72 w-72 overflow-auto rounded-md border bg-background p-2 shadow-sm">
+          {options.length === 0 ? (
+            <p className="px-2 py-1 text-sm text-muted-foreground">Нет данных</p>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="mb-1 w-full rounded px-2 py-1 text-left text-sm text-muted-foreground hover:bg-muted"
+                onClick={() => onChange([])}
+              >
+                Сбросить выбор
+              </button>
+              {options.map((option) => (
+                <label key={option} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted">
+                  <input
+                    type="checkbox"
+                    checked={selected.has(option)}
+                    onChange={() => toggle(option)}
+                    className="h-4 w-4 rounded border-input"
+                  />
+                  <span className="truncate" title={option}>
+                    {option}
+                  </span>
+                </label>
+              ))}
+            </>
+          )}
+        </div>
+      ) : null}
+    </div>
   )
 }
 

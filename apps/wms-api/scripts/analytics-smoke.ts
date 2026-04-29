@@ -21,11 +21,11 @@ async function main() {
       'ЭтоРозничнаяЦена',
       'Цена',
     ],
-    ['ref-1', 'MOV-1', '01.01.2026 10:00:00', 'Склад Б', 'ОП А', 'Товар X', '', 'ART-X', 'CODE-X', '', 'Нет', 10],
-    ['ref-2', 'MOV-2', '02.01.2026 10:00:00', 'Елино', 'ОП А', 'Товар X', '', 'ART-X', 'CODE-X', 'Заказ клиента', 'Нет', 20],
-    ['ref-3', 'MOV-3', '03.01.2026 10:00:00', 'Склад В', 'ОП А', 'Товар X', '', 'ART-X', 'CODE-X', '', 'Нет', 30],
-    ['ref-4', 'MOV-4', '04.01.2026 10:00:00', 'Елино', 'ОП А', 'Товар X', 'Пополнение', 'ART-X', 'CODE-X', '', 'Нет', 40],
-    ['ref-5', 'MOV-5', '05.01.2026 10:00:00', 'Склад Г', 'ОП Б', 'Товар Y', '', 'ART-Y', 'CODE-Y', '', 'Нет', 50],
+    ['ref-1', 'MOV-1', '01.01.2026 10:00:00', 'Склад Запчасти ОСИНОВО', 'Склад Запчасти ЛОНМАДИ ЕЛИНО', 'Товар X', '', 'ART-X', 'CODE-X', '', 'Нет', 10],
+    ['ref-2', 'MOV-2', '02.01.2026 10:00:00', 'Склад Запчасти ЕЛИНО', 'Склад Запчасти ЛОНМАДИ ЕЛИНО', 'Товар X', '', 'ART-X', 'CODE-X', 'Заказ клиента', 'Нет', 20],
+    ['ref-3', 'MOV-3', '03.01.2026 10:00:00', 'Склад Техники РОСТОВ', 'Склад Запчасти ЛОНМАДИ ЕЛИНО', 'Товар X', '', 'ART-X', 'CODE-X', '', 'Нет', 30],
+    ['ref-4', 'MOV-4', '04.01.2026 10:00:00', 'Склад Запчасти ЕЛИНО', 'Склад Запчасти ЛОНМАДИ ЕЛИНО', 'Товар X', 'Пополнение', 'ART-X', 'CODE-X', '', 'Нет', 40],
+    ['ref-5', 'MOV-5', '05.01.2026 10:00:00', 'Склад Гарантия САМАРА', 'Склад Запчасти РОСТОВ', 'Товар Y', '', 'ART-Y', 'CODE-Y', '', 'Нет', 50],
   ];
   const book = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet(rows), 'Лист_1');
@@ -46,16 +46,22 @@ async function main() {
   assert.equal(result.summary.touristValue, 90);
 
   const byOp = await service.getTransfersByOp('test-user', {});
-  assert.equal(byOp[0].receiverWarehouse, 'ОП А');
+  assert.equal(byOp[0].receiverOp, 'ЛОНМАДИ ЕЛИНО');
+  assert.equal(byOp[0].receiverWarehouseType, 'Склад Запчасти');
   assert.equal(byOp[0].rows, 4);
   assert.equal(byOp[0].touristRows, 2);
+
+  const options = await service.getTransferOptions('test-user');
+  assert.equal(options.warehouseTypes.includes('Склад Запчасти'), true);
+  assert.equal(options.warehouseTypes.includes('Склад Техники'), true);
+  assert.equal(options.receiverOps.includes('ЛОНМАДИ ЕЛИНО'), true);
 
   const tourists = await service.getTourists('test-user', {});
   assert.equal(tourists.some((row) => row.itemCode === 'CODE-X' && row.valueTotal === 30), true);
 
   const risks = await service.getReplenishmentRisks('test-user', {});
   assert.equal(risks.length, 1);
-  assert.equal(risks[0].receiverWarehouse, 'ОП А');
+  assert.equal(risks[0].receiverOp, 'ЛОНМАДИ ЕЛИНО');
   assert.equal(risks[0].touristRowsUntilNextReplenishment, 1);
   assert.equal(risks[0].touristValueUntilNextReplenishment, 30);
 }

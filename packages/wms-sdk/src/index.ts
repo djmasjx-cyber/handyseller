@@ -203,7 +203,11 @@ export interface WmsBiTransferOrderLineRecord {
   orderNumber: string;
   orderDate: string;
   senderWarehouse: string;
+  senderWarehouseType: string;
+  senderOp: string;
   receiverWarehouse: string;
+  receiverWarehouseType: string;
+  receiverOp: string;
   itemName: string;
   itemArticle: string | null;
   itemCode: string;
@@ -236,9 +240,18 @@ export interface WmsBiTransferFilters {
   to?: string;
   receiverWarehouse?: string;
   senderWarehouse?: string;
+  receiverOps?: string[];
+  senderOps?: string[];
+  warehouseTypes?: string[];
   item?: string;
   kind?: WmsBiTransferOrderKind;
   batchId?: string;
+}
+
+export interface WmsBiTransferFilterOptions {
+  warehouseTypes: string[];
+  receiverOps: string[];
+  senderOps: string[];
 }
 
 export interface WmsBiTransferSummary {
@@ -257,6 +270,8 @@ export interface WmsBiTransferSummary {
 
 export interface WmsBiTransferByOpRow {
   receiverWarehouse: string;
+  receiverWarehouseType: string;
+  receiverOp: string;
   rows: number;
   orders: number;
   replenishmentRows: number;
@@ -269,7 +284,11 @@ export interface WmsBiTransferByOpRow {
 
 export interface WmsBiTouristRow {
   receiverWarehouse: string;
+  receiverWarehouseType: string;
+  receiverOp: string;
   senderWarehouse: string;
+  senderWarehouseType: string;
+  senderOp: string;
   itemCode: string;
   itemArticle: string | null;
   itemName: string;
@@ -282,6 +301,8 @@ export interface WmsBiTouristRow {
 
 export interface WmsBiReplenishmentRiskRow {
   receiverWarehouse: string;
+  receiverWarehouseType: string;
+  receiverOp: string;
   itemCode: string;
   itemArticle: string | null;
   itemName: string;
