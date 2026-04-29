@@ -1496,6 +1496,75 @@ export class ShipmentsService implements OnModuleInit {
     );
   }
 
+  archiveRequest(userId: string, requestId: string): ShipmentRecord {
+    const request = this.requests.get(requestId);
+    if (!request || request.userId !== userId) {
+      throw new NotFoundException('Заявка не найдена');
+    }
+    const existingDeleted = this.listShipmentsForRequest(userId, requestId).find(
+      (shipment) => shipment.status === 'DELETED_EXTERNAL',
+    );
+    if (existingDeleted) {
+      return existingDeleted;
+    }
+    const now = new Date().toISOString();
+    const shipmentId = `shp_arch_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const shipment: ShipmentRecord = {
+      id: shipmentId,
+      userId,
+      requestId,
+      carrierId: 'manual-archive',
+      carrierName: 'Архив',
+      trackingNumber: `ARCHIVE-${requestId.slice(-8)}`,
+      carrierOrderReference: 'manual-archive',
+      status: 'DELETED_EXTERNAL',
+      priceRub: 0,
+      etaDays: 0,
+      createdAt: now,
+    };
+    this.shipments.set(shipmentId, shipment);
+    void this.store.saveShipment(shipment);
+    this.tracking.set(shipmentId, [
+      {
+        id: `${shipmentId}_archived_${Date.now()}`,
+        shipmentId,
+        status: 'DELETED_EXTERNAL',
+        description: 'Перенесен в архив вручную из «Сравнение тарифов»',
+        occurredAt: now,
+      },
+    ]);
+    void this.store.replaceTracking(shipmentId, this.tracking.get(shipmentId) ?? []);
+    request.status = 'BOOKED';
+    request.updatedAt = now;
+    if (!request.selectedQuoteId) {
+      request.selectedQuoteId = 'archived-manually';
+    }
+    this.requests.set(requestId, request);
+    void this.store.saveRequest(request);
+    void this.enqueuePartnerWebhookEvents(userId, 'shipment.updated', {
+      requestId,
+      shipmentId,
+      status: 'DELETED_EXTERNAL',
+      archivedManually: true,
+    });
+    return shipment;
+  }
+
+  archiveRequestsBulk(userId: string, requestIds: string[]): { archived: number; skipped: number } {
+    const uniqueIds = [...new Set((requestIds ?? []).filter((id) => typeof id === 'string' && id.trim()))];
+    let archived = 0;
+    let skipped = 0;
+    for (const requestId of uniqueIds) {
+      try {
+        this.archiveRequest(userId, requestId);
+        archived += 1;
+      } catch {
+        skipped += 1;
+      }
+    }
+    return { archived, skipped };
+  }
+
   getTracking(userId: string, shipmentId: string): TrackingEventRecord[] {
     const shipment = this.shipments.get(shipmentId);
     if (!shipment || shipment.userId !== userId) {
