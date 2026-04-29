@@ -26,6 +26,10 @@ import type { CarrierAdapter } from './adapters/base-carrier.adapter';
 import { TmsStoreService } from './storage/tms-store.service';
 import { ObjectStorageService } from './storage/object-storage.service';
 import { createHmac, randomBytes } from 'crypto';
+import {
+  extractCarrierStatusHint,
+  normalizeCarrierShipmentStatus,
+} from './status-mapper';
 
 type RegistryOrderType = 'CLIENT_ORDER' | 'INTERNAL_TRANSFER' | 'SUPPLIER_PICKUP';
 const MP_MARKETPLACES = new Set(['WILDBERRIES', 'OZON', 'YANDEX']);
@@ -763,8 +767,8 @@ export class ShipmentsService implements OnModuleInit {
     }
 
     const matchedShipment = this.shipments.get(matchedShipmentId);
-    const statusHint = this.extractCarrierStatusHint(body);
-    const canonicalStatus = this.normalizeCarrierStatus(statusHint, carrier, 'webhook');
+    const statusHint = extractCarrierStatusHint(body);
+    const { status: canonicalStatus } = normalizeCarrierShipmentStatus(statusHint, carrier, 'webhook');
     if (matchedShipment && canonicalStatus === 'DELETED_EXTERNAL') {
       const reason =
         asString(body.reason) ||
@@ -1587,13 +1591,22 @@ export class ShipmentsService implements OnModuleInit {
     const shipmentPatch: Partial<ShipmentRecord> = { ...(refreshed.shipmentPatch ?? {}) };
     const rawCarrierStatus =
       typeof shipmentPatch.status === 'string' ? shipmentPatch.status : undefined;
-    const canonicalStatus = this.normalizeCarrierStatus(rawCarrierStatus, shipment.carrierId, 'refresh');
+    const { status: canonicalStatus, matchedBy } = normalizeCarrierShipmentStatus(
+      rawCarrierStatus,
+      shipment.carrierId,
+      'refresh',
+    );
     if (rawCarrierStatus && !canonicalStatus) {
       this.logger.warn(
         `[status-mapper] unknown carrier status carrier=${shipment.carrierId} raw="${rawCarrierStatus}" shipmentId=${shipmentId}`,
       );
       delete shipmentPatch.status;
     } else if (canonicalStatus) {
+      if (rawCarrierStatus && rawCarrierStatus.trim().toUpperCase() !== canonicalStatus) {
+        this.logger.log(
+          `[status-mapper] normalized carrier=${shipment.carrierId} raw="${rawCarrierStatus}" canonical=${canonicalStatus} by=${matchedBy ?? 'n/a'} shipmentId=${shipmentId}`,
+        );
+      }
       shipmentPatch.status = canonicalStatus;
     }
     const updated: ShipmentRecord = { ...shipment, ...shipmentPatch };
@@ -1930,63 +1943,6 @@ export class ShipmentsService implements OnModuleInit {
     );
   }
 
-  private extractCarrierStatusHint(body: Record<string, unknown>): string | undefined {
-    const pick = (...values: unknown[]): string | undefined => {
-      for (const value of values) {
-        if (typeof value === 'string' && value.trim()) return value.trim();
-      }
-      return undefined;
-    };
-    const meta = (body.meta ?? body.metadata ?? body.data ?? body.payload) as Record<string, unknown> | undefined;
-    return pick(
-      body.status,
-      body.orderStatus,
-      body.shipmentStatus,
-      body.state,
-      body.deliveryStatus,
-      meta?.status,
-      meta?.orderStatus,
-      meta?.shipmentStatus,
-      meta?.state,
-      meta?.deliveryStatus,
-    );
-  }
-
-  private normalizeCarrierStatus(
-    rawStatus: string | undefined,
-    carrier: string | undefined,
-    source: 'refresh' | 'webhook',
-  ): ShipmentStatus | null {
-    if (!rawStatus) return null;
-    const normalized = rawStatus.trim().toUpperCase();
-    if (!normalized) return null;
-    if (
-      normalized === 'CREATED' ||
-      normalized === 'CONFIRMED' ||
-      normalized === 'IN_TRANSIT' ||
-      normalized === 'OUT_FOR_DELIVERY' ||
-      normalized === 'DELIVERED' ||
-      normalized === 'DELETED_EXTERNAL' ||
-      normalized === 'SUPERSEDED'
-    ) {
-      return normalized as ShipmentStatus;
-    }
-    const dictionary: Array<{ match: RegExp; status: ShipmentStatus }> = [
-      { match: /(NOT[\s_-]*FOUND|DELETED|CANCEL|CANCELED|CANCELLED|УДАЛЕН|ОТМЕН)/i, status: 'DELETED_EXTERNAL' },
-      { match: /(DELIVERED|DELIVERY_COMPLETE|ВРУЧЕН|ДОСТАВЛЕН)/i, status: 'DELIVERED' },
-      { match: /(OUT_FOR_DELIVERY|ON_COURIER|НА[\s_-]*ДОСТАВК)/i, status: 'OUT_FOR_DELIVERY' },
-      { match: /(IN_TRANSIT|IN[\s_-]*WAY|В[\s_-]*ПУТИ|ТРАНЗИТ)/i, status: 'IN_TRANSIT' },
-      { match: /(CONFIRMED|ACCEPTED|SUCCESS|ПРИНЯТ|ОФОРМЛЕН)/i, status: 'CONFIRMED' },
-      { match: /(CREATED|NEW|DRAFT|СОЗДАН)/i, status: 'CREATED' },
-    ];
-    for (const row of dictionary) {
-      if (row.match.test(normalized)) return row.status;
-    }
-    this.logger.warn(
-      `[status-mapper] unresolved status source=${source} carrier=${carrier ?? 'unknown'} raw="${rawStatus}"`,
-    );
-    return null;
-  }
 
   private async markShipmentDeletedExternally(
     shipment: ShipmentRecord,
