@@ -8,6 +8,12 @@ export class CarrierSyncWorkerService implements OnModuleInit, OnModuleDestroy {
   private timer: NodeJS.Timeout | null = null;
   private busy = false;
   private lastStalePollAt = 0;
+  private readonly defaultStaleMinutesByStatus: Record<string, number> = {
+    CREATED: 5,
+    CONFIRMED: 5,
+    IN_TRANSIT: 20,
+    OUT_FOR_DELIVERY: 20,
+  };
 
   constructor(
     private readonly store: TmsStoreService,
@@ -50,19 +56,29 @@ export class CarrierSyncWorkerService implements OnModuleInit, OnModuleDestroy {
 
   private async enqueueStaleRefreshJobs(): Promise<void> {
     const pollEverySeconds = Math.max(30, Number.parseInt(process.env.TMS_STALE_POLL_EVERY_SECONDS ?? '120', 10) || 120);
-    const staleMinutes = Math.max(
+    const fallbackStaleMinutes = Math.max(
       5,
       Number.parseInt(process.env.TMS_STALE_SHIPMENT_MINUTES ?? '30', 10) || 30,
     );
     const maxJobs = Math.max(1, Number.parseInt(process.env.TMS_STALE_POLL_MAX_JOBS ?? '30', 10) || 30);
+    const staleByStatus = this.resolveStaleMinutesPolicy(fallbackStaleMinutes);
+    const minStaleMinutes = Math.min(...Object.values(staleByStatus), fallbackStaleMinutes);
     const now = Date.now();
     if (now - this.lastStalePollAt < pollEverySeconds * 1000) return;
     this.lastStalePollAt = now;
 
-    const candidates = await this.store.listStaleShipmentCandidates(staleMinutes, maxJobs);
+    const candidates = await this.store.listStaleShipmentCandidates(
+      minStaleMinutes,
+      Math.min(200, maxJobs * 4),
+    );
     if (!candidates.length) return;
+    const eligible = candidates
+      .filter((candidate) => this.isEligibleForRefresh(candidate.status, candidate.updatedAt, now, staleByStatus))
+      .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt))
+      .slice(0, maxJobs);
+    if (!eligible.length) return;
     const bucket = Math.floor(now / (pollEverySeconds * 1000));
-    for (const candidate of candidates) {
+    for (const candidate of eligible) {
       await this.store.enqueueSyncJob({
         id: `job_refresh_stale_${candidate.shipmentId}_${bucket}`,
         kind: 'refresh_shipment',
@@ -71,7 +87,53 @@ export class CarrierSyncWorkerService implements OnModuleInit, OnModuleDestroy {
         payload: { userId: candidate.userId, shipmentId: candidate.shipmentId },
       });
     }
-    this.logger.log(`[sync-worker] queued stale refresh jobs=${candidates.length} staleMinutes=${staleMinutes}`);
+    this.logger.log(
+      `[sync-worker] queued stale refresh jobs=${eligible.length} ` +
+        `policyMinutes=${JSON.stringify(staleByStatus)} minStaleMinutes=${minStaleMinutes}`,
+    );
+  }
+
+  private resolveStaleMinutesPolicy(fallbackStaleMinutes: number): Record<string, number> {
+    const raw = process.env.TMS_STALE_MINUTES_BY_STATUS?.trim();
+    if (!raw) {
+      return {
+        ...this.defaultStaleMinutesByStatus,
+        DEFAULT: fallbackStaleMinutes,
+      };
+    }
+    try {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const normalized: Record<string, number> = {};
+      for (const [key, value] of Object.entries(parsed)) {
+        const num = Number.parseInt(String(value), 10);
+        if (Number.isFinite(num) && num >= 1) {
+          normalized[key.trim().toUpperCase()] = Math.max(1, Math.min(24 * 60, num));
+        }
+      }
+      return {
+        ...this.defaultStaleMinutesByStatus,
+        ...normalized,
+        DEFAULT: normalized.DEFAULT ?? fallbackStaleMinutes,
+      };
+    } catch {
+      return {
+        ...this.defaultStaleMinutesByStatus,
+        DEFAULT: fallbackStaleMinutes,
+      };
+    }
+  }
+
+  private isEligibleForRefresh(
+    status: string,
+    updatedAt: string,
+    nowMs: number,
+    policy: Record<string, number>,
+  ): boolean {
+    const updatedMs = Date.parse(updatedAt);
+    if (!Number.isFinite(updatedMs)) return false;
+    const normalizedStatus = (status || '').trim().toUpperCase();
+    const staleMinutes = policy[normalizedStatus] ?? policy.DEFAULT ?? 30;
+    return nowMs - updatedMs >= staleMinutes * 60 * 1000;
   }
 
   private async execute(job: { id: string; kind: string; payload: unknown; attempt: number }): Promise<void> {
