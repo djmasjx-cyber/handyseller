@@ -1,0 +1,63 @@
+import { strict as assert } from 'assert';
+import * as XLSX from 'xlsx';
+import { WmsAnalyticsService } from '../src/modules/wms/analytics/wms-analytics.service';
+
+async function main() {
+  delete process.env.WMS_DATABASE_URL;
+  delete process.env.DATABASE_URL;
+
+  const rows = [
+    [
+      'Ссылка',
+      'Номер',
+      'Дата',
+      'СкладОтправитель',
+      'СкладПолучатель',
+      'Номенклатура',
+      'Назначение',
+      'НоменклатураАртикул',
+      'НоменклатураКод',
+      'ДокументОснование',
+      'ЭтоРозничнаяЦена',
+      'Цена',
+    ],
+    ['ref-1', 'MOV-1', '01.01.2026 10:00:00', 'Склад Б', 'ОП А', 'Товар X', '', 'ART-X', 'CODE-X', '', 'Нет', 10],
+    ['ref-2', 'MOV-2', '02.01.2026 10:00:00', 'Елино', 'ОП А', 'Товар X', '', 'ART-X', 'CODE-X', 'Заказ клиента', 'Нет', 20],
+    ['ref-3', 'MOV-3', '03.01.2026 10:00:00', 'Склад В', 'ОП А', 'Товар X', '', 'ART-X', 'CODE-X', '', 'Нет', 30],
+    ['ref-4', 'MOV-4', '04.01.2026 10:00:00', 'Елино', 'ОП А', 'Товар X', 'Пополнение', 'ART-X', 'CODE-X', '', 'Нет', 40],
+    ['ref-5', 'MOV-5', '05.01.2026 10:00:00', 'Склад Г', 'ОП Б', 'Товар Y', '', 'ART-Y', 'CODE-Y', '', 'Нет', 50],
+  ];
+  const book = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet(rows), 'Лист_1');
+  const contentBase64 = XLSX.write(book, { bookType: 'xlsx', type: 'buffer' }).toString('base64');
+
+  const service = new WmsAnalyticsService();
+  const result = await service.importTransferOrders('test-user', {
+    fileName: 'transfer-orders.xlsx',
+    contentBase64,
+  });
+
+  assert.equal(result.batch.rawRowCount, 5);
+  assert.equal(result.batch.importedRowCount, 5);
+  assert.equal(result.summary.rowsTotal, 5);
+  assert.equal(result.summary.ordersTotal, 5);
+  assert.equal(result.summary.replenishmentRows, 2);
+  assert.equal(result.summary.touristRows, 3);
+  assert.equal(result.summary.touristValue, 90);
+
+  const byOp = await service.getTransfersByOp('test-user', {});
+  assert.equal(byOp[0].receiverWarehouse, 'ОП А');
+  assert.equal(byOp[0].rows, 4);
+  assert.equal(byOp[0].touristRows, 2);
+
+  const tourists = await service.getTourists('test-user', {});
+  assert.equal(tourists.some((row) => row.itemCode === 'CODE-X' && row.valueTotal === 30), true);
+
+  const risks = await service.getReplenishmentRisks('test-user', {});
+  assert.equal(risks.length, 1);
+  assert.equal(risks[0].receiverWarehouse, 'ОП А');
+  assert.equal(risks[0].touristRowsUntilNextReplenishment, 1);
+  assert.equal(risks[0].touristValueUntilNextReplenishment, 30);
+}
+
+void main();
