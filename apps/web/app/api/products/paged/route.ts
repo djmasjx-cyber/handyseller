@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
   if (!token) return NextResponse.json({ error: "Не авторизован" }, { status: 401 })
 
   const qs = new URLSearchParams()
-  for (const key of ["limit", "offset", "search", "sortBy", "sortDirection"]) {
+  for (const key of ["limit", "offset", "search", "sortBy", "sortDirection", "marketplaceFilter"]) {
     const value = req.nextUrl.searchParams.get(key)
     if (value) qs.set(key, value)
   }

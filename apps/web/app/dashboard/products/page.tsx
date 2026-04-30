@@ -162,6 +162,8 @@ export default function ProductsPage() {
       sortBy: sortKey === "stockFbo" ? "createdAt" : sortKey,
       sortDirection,
     })
+    if (warehouseFilter === "local") params.set("marketplaceFilter", "WB_OZON_BOTH")
+    else if (warehouseFilter !== "local") params.set("marketplaceFilter", warehouseFilter)
     if (searchQuery.trim()) params.set("search", searchQuery.trim())
     const res = await fetch(`/api/products/paged?${params.toString()}`, { headers: { Authorization: `Bearer ${token}` } })
     const data = await res.json().catch(() => ({}))
@@ -172,7 +174,7 @@ export default function ProductsPage() {
     setOffset(newOffset)
     offsetRef.current = newOffset
     setProductsTotal(typeof data?.total === "number" ? data.total : 0)
-  }, [token, sortKey, sortDirection, searchQuery])
+  }, [token, sortKey, sortDirection, searchQuery, warehouseFilter])
 
   const fetchWbStockFbo = () => {
     if (!token || !isWbConnected) return
@@ -308,16 +310,7 @@ export default function ProductsPage() {
 
   const filteredProducts = (() => {
     let list = products
-    if (warehouseFilter === "local") {
-      // "Мой склад": показываем только товары, у которых есть обе связки одновременно (WB + Ozon).
-      list = list.filter((p) => {
-        const marketplaces = new Set((p.marketplaceMappings ?? []).map((m) => m.marketplace))
-        return marketplaces.has("WILDBERRIES") && marketplaces.has("OZON")
-      })
-    } else {
-      // Вкладки маркетплейсов: показываем только товары с маппингом на выбранный маркетплейс.
-      list = list.filter((p) => (p.marketplaceMappings ?? []).some((m) => m.marketplace === warehouseFilter))
-    }
+    // Фильтрация по маркетплейс-связкам уже применяется на сервере через marketplaceFilter.
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase()
       list = list.filter(
