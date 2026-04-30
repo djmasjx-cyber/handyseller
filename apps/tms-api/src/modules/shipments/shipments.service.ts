@@ -840,8 +840,8 @@ export class ShipmentsService implements OnModuleInit {
   }
 
   private adapterQuoteTimeoutMs(): number {
-    const raw = Number.parseInt(process.env.TMS_ADAPTER_QUOTE_TIMEOUT_MS ?? '4500', 10);
-    return Number.isFinite(raw) ? Math.max(800, raw) : 4500;
+    const raw = Number.parseInt(process.env.TMS_ADAPTER_QUOTE_TIMEOUT_MS ?? '900', 10);
+    return Number.isFinite(raw) ? Math.max(300, raw) : 900;
   }
 
   private breakerFailureThreshold(): number {
@@ -1210,7 +1210,7 @@ export class ShipmentsService implements OnModuleInit {
     const adapterStartedAt = enabledAdapters.map(() => Date.now());
     const quoteResults = await Promise.allSettled(
       enabledAdapters.map((adapter) =>
-        this.withQuoteTimeout(
+        this.withQuoteSoftTimeout(
           adapter.descriptor.id,
           adapter.quote(
             {
@@ -1220,6 +1220,8 @@ export class ShipmentsService implements OnModuleInit {
             requestId,
             { userId, authToken, requestId: requestTraceId ?? requestId },
           ),
+          (lateQuotes) =>
+            this.mergeLateQuotes(userId, requestId, adapter.descriptor.id, lateQuotes, cacheKey),
         ),
       ),
     );
@@ -1275,16 +1277,69 @@ export class ShipmentsService implements OnModuleInit {
     return quotes;
   }
 
-  private withQuoteTimeout(carrierId: string, promise: Promise<CarrierQuote[]>): Promise<CarrierQuote[]> {
+  private withQuoteSoftTimeout(
+    carrierId: string,
+    promise: Promise<CarrierQuote[]>,
+    onLate: (quotes: CarrierQuote[]) => Promise<void>,
+  ): Promise<CarrierQuote[]> {
     const timeoutMs = this.adapterQuoteTimeoutMs();
+    let timedOut = false;
     let timer: NodeJS.Timeout | null = null;
     const timeout = new Promise<CarrierQuote[]>((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`quote timeout after ${timeoutMs}ms carrier=${carrierId}`)), timeoutMs);
+      timer = setTimeout(() => {
+        timedOut = true;
+        reject(new Error(`quote timeout after ${timeoutMs}ms carrier=${carrierId}`));
+      }, timeoutMs);
       timer.unref?.();
     });
+    promise
+      .then((quotes) => {
+        if (!timedOut || quotes.length === 0) return;
+        return onLate(quotes).catch((error) => {
+          this.logger.warn(
+            `[quote-late] carrier=${carrierId} status=merge_failed reason=${error instanceof Error ? error.message : String(error)}`,
+          );
+        });
+      })
+      .catch((error) => {
+        if (!timedOut) return;
+        this.logger.warn(
+          `[quote-late] carrier=${carrierId} status=failed reason=${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
     return Promise.race([promise, timeout]).finally(() => {
       if (timer) clearTimeout(timer);
     });
+  }
+
+  private async mergeLateQuotes(
+    userId: string,
+    requestId: string,
+    carrierId: string,
+    lateQuotes: CarrierQuote[],
+    cacheKey?: string,
+  ): Promise<void> {
+    const request = this.requests.get(requestId);
+    if (!request || request.userId !== userId || lateQuotes.length === 0) return;
+    const current = this.quotes.get(requestId) ?? [];
+    const merged = rankQuotes([
+      ...current.filter((quote) => quote.carrierId !== carrierId),
+      ...lateQuotes,
+    ]);
+    request.status = merged.length > 0 ? 'QUOTED' : request.status;
+    request.updatedAt = new Date().toISOString();
+    this.requests.set(requestId, request);
+    this.quotes.set(requestId, merged);
+    void this.store.saveRequest(request);
+    if (cacheKey) {
+      this.quoteCache.set(cacheKey, {
+        quotes: merged,
+        expiresAt: Date.now() + this.quoteCacheTtlMs(),
+      });
+    }
+    this.logger.log(
+      `[quote-late] requestId=${requestId} carrier=${carrierId} status=merged quotes=${lateQuotes.length} totalQuotes=${merged.length}`,
+    );
   }
 
   private logQuoteAudit(requestId: string, request: ShipmentRequestRecord, quotes: CarrierQuote[]): void {

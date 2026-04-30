@@ -751,6 +751,11 @@ export class DellinAdapter implements CarrierAdapter {
     return Number.isFinite(raw) ? Math.max(500, raw) : 2500;
   }
 
+  private calculatorTimeoutMs(): number {
+    const raw = Number.parseInt(process.env.TMS_DELLIN_CALCULATOR_TIMEOUT_MS ?? '6500', 10);
+    return Number.isFinite(raw) ? Math.max(1000, raw) : 6500;
+  }
+
   private async fetchWithTimeout(input: string, init: RequestInit, timeoutMs: number): Promise<Response | null> {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), timeoutMs);
@@ -874,7 +879,7 @@ export class DellinAdapter implements CarrierAdapter {
         headers: withRequestIdHeaders({ Accept: 'application/json', 'Content-Type': 'application/json' }, traceId),
         body: JSON.stringify(calcBody),
         cache: 'no-store',
-      }, this.quoteTimeoutMs());
+      }, this.calculatorTimeoutMs());
       if (!res?.ok) {
         this.logger.warn(
           `Dellin calculator HTTP failed: status=${res?.status ?? 'n/a'}; url=${calcUrl}; requestId=${requestId}; variant=${variant.key}`,
