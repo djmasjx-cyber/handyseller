@@ -308,11 +308,15 @@ export default function ProductsPage() {
 
   const filteredProducts = (() => {
     let list = products
-    if (warehouseFilter !== "local") {
-      // Фильтр по связкам: показываем товары с маппингом на выбранный маркетплейс
-      list = list.filter((p) =>
-        (p.marketplaceMappings ?? []).some((m) => m.marketplace === warehouseFilter)
-      )
+    if (warehouseFilter === "local") {
+      // "Мой склад": показываем только товары, у которых есть обе связки одновременно (WB + Ozon).
+      list = list.filter((p) => {
+        const marketplaces = new Set((p.marketplaceMappings ?? []).map((m) => m.marketplace))
+        return marketplaces.has("WILDBERRIES") && marketplaces.has("OZON")
+      })
+    } else {
+      // Вкладки маркетплейсов: показываем только товары с маппингом на выбранный маркетплейс.
+      list = list.filter((p) => (p.marketplaceMappings ?? []).some((m) => m.marketplace === warehouseFilter))
     }
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase()
@@ -1325,7 +1329,7 @@ export default function ProductsPage() {
               {products.length === 0
                 ? "Подключите Wildberries и нажмите «Импорт с Wildberries», чтобы загрузить товары в каталог."
                 : warehouseFilter === "local"
-                  ? "Добавьте товары в каталог."
+                  ? "Нет товаров с одновременными связками WB и Ozon."
                   : `Нет товаров со связкой на ${warehouseTabs.find((o) => o.value === warehouseFilter)?.label ?? ""}. Выгрузите товары на маркетплейс из карточки.`}
             </p>
             {products.length === 0 && !isWbConnected && (
