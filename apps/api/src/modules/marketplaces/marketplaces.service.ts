@@ -3392,14 +3392,26 @@ export class MarketplacesService {
     }
 
     const wbProducts = await withRetry(() => adapter.getProductsFromWb(), 'getProductsFromWb');
+    const userIds = await this.getEffectiveUserIds(userId);
     let imported = 0;
     let skipped = 0;
     let articlesUpdated = 0;
     const errors: string[] = [];
 
     for (const p of wbProducts) {
+      const wbExternalId = String(p.nmId);
+      const vendorCode = (p.vendorCode ?? '').toString().trim();
       const sku = `WB-${userId.slice(0, 8)}-${p.nmId}`;
-      const existing = await this.productsService.findBySku(userId, sku);
+      // WB delta import (no duplicates):
+      // 1) exact mapping by nmId, 2) mapping by externalArticle/vendorCode,
+      // 3) local product by article, 4) legacy sku fallback.
+      const existing =
+        (await this.productMappingService.findProductByExternalIdForUserIds(userIds, 'WILDBERRIES', wbExternalId)) ??
+        (vendorCode
+          ? await this.productMappingService.findProductByExternalArticle(userIds, 'WILDBERRIES', vendorCode)
+          : null) ??
+        (vendorCode ? await this.productsService.findByArticleForUserIds(userIds, vendorCode) : null) ??
+        (await this.productsService.findBySku(userId, sku));
       if (existing) {
         // Обновить артикул, наименование и остальные поля для уже импортированных товаров
         const newTitle = (p.name || `Товар ${p.nmId}`).trim().slice(0, 500);
@@ -3452,8 +3464,8 @@ export class MarketplacesService {
           });
           articlesUpdated++;
         }
-        await this.productMappingService.upsertMapping(existing.id, userId, 'WILDBERRIES', String(p.nmId), {
-          externalArticle: p.vendorCode || undefined,
+        await this.productMappingService.upsertMapping(existing.id, userId, 'WILDBERRIES', wbExternalId, {
+          externalArticle: vendorCode || undefined,
         });
         skipped++;
         continue;
@@ -3486,7 +3498,7 @@ export class MarketplacesService {
           barcodeWb: p.barcode,
         });
         await this.productMappingService.upsertMapping(created.id, userId, 'WILDBERRIES', String(p.nmId), {
-          externalArticle: p.vendorCode || undefined,
+          externalArticle: vendorCode || undefined,
         });
         imported++;
       } catch (err) {

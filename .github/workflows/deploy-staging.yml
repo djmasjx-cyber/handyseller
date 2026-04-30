@@ -204,6 +204,13 @@ jobs:
             # -p обязателен: иначе проект = имя каталога /opt/handyseller и `compose up` staging затирает prod.
             STAGING_DC="$DC -p handyseller-staging"
             # Staging: отдельный compose/сеть; production (docker-compose.ci.yml) на VM не трогаем.
+            # Cleanup stale legacy network name (created by manual compose runs without -p), if empty.
+            if docker network inspect handyseller_staging >/dev/null 2>&1; then
+              CCOUNT="$(docker network inspect handyseller_staging --format '{{ len .Containers }}' 2>/dev/null || echo 1)"
+              if [ "${CCOUNT}" = "0" ]; then
+                docker network rm handyseller_staging >/dev/null 2>&1 || true
+              fi
+            fi
             free_mb() {
               df --output=avail -Bm / | tail -1 | tr -dc '0-9'
             }
@@ -259,6 +266,8 @@ jobs:
             pull_with_fallback web handyseller-staging-web || exit 1
             $STAGING_DC -f "${STAGING_COMPOSE}" --env-file "${ENV_FILE}" up -d --no-deps redis
             $STAGING_DC -f "${STAGING_COMPOSE}" --env-file "${ENV_FILE}" up -d --no-deps api tms-api wms-api web
+            # Guard against 504 on imports: verify API container resolves redis hostname inside staging network.
+            docker exec handyseller-staging-api node -e "require('dns').lookup('redis',(e)=>{if(e){console.error(e.message);process.exit(1)}process.exit(0)})"
             for i in $(seq 1 30); do
               curl -sf --connect-timeout 3 http://127.0.0.1:4010/health >/dev/null && break
               [ "$i" -eq 30 ] && { echo "Staging API health check timeout (4010)"; exit 1; }
