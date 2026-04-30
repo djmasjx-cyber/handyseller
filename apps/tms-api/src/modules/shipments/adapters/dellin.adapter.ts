@@ -746,6 +746,23 @@ export class DellinAdapter implements CarrierAdapter {
     requiresCredentials: true,
   };
 
+  private quoteTimeoutMs(): number {
+    const raw = Number.parseInt(process.env.TMS_CARRIER_QUOTE_TIMEOUT_MS ?? '2500', 10);
+    return Number.isFinite(raw) ? Math.max(500, raw) : 2500;
+  }
+
+  private async fetchWithTimeout(input: string, init: RequestInit, timeoutMs: number): Promise<Response | null> {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), timeoutMs);
+    try {
+      return await fetch(input, { ...init, signal: ctl.signal });
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async listPickupPoints(
     input: CarrierPickupPointSearchInput,
     context: CarrierQuoteContext,
@@ -759,11 +776,11 @@ export class DellinAdapter implements CarrierAdapter {
     url.searchParams.set('appkey', appKey);
     const query = input.city?.trim() || input.address?.trim();
     if (query) url.searchParams.set('q', query);
-    const res = await fetch(url.toString(), {
+    const res = await this.fetchWithTimeout(url.toString(), {
       method: 'GET',
       headers: withRequestIdHeaders({ Accept: 'application/json' }, context.requestId),
       cache: 'no-store',
-    }).catch(() => null);
+    }, this.quoteTimeoutMs());
     if (!res?.ok) {
       this.logger.warn(`Dellin terminals HTTP failed: status=${res?.status ?? 'n/a'}`);
       return [];
@@ -797,12 +814,12 @@ export class DellinAdapter implements CarrierAdapter {
     const destLabel = input.draft.destinationLabel || input.snapshot.destinationLabel;
 
     const defaultDerivalKladr = process.env.DELLIN_DEFAULT_DERIVAL_KLADR?.trim();
+    const [originPrimaryCode, destCode] = await Promise.all([
+      this.resolveKladrCode(base, appKey, kladrSearchVariants(originLabel), requestId),
+      this.resolveKladrCode(base, appKey, kladrSearchVariants(destLabel), requestId),
+    ]);
     const originCode =
-      (await this.resolveKladrCode(base, appKey, kladrSearchVariants(originLabel), requestId)) ??
-      defaultDerivalKladr ??
-      (await this.resolveKladrCode(base, appKey, ['Москва'], requestId));
-
-    const destCode = await this.resolveKladrCode(base, appKey, kladrSearchVariants(destLabel), requestId);
+      originPrimaryCode ?? defaultDerivalKladr ?? (await this.resolveKladrCode(base, appKey, ['Москва'], requestId));
 
     if (!originCode || !destCode) {
       this.logger.warn(
@@ -835,8 +852,8 @@ export class DellinAdapter implements CarrierAdapter {
       { key: 'terminal-door', label: 'Терминал → дверь', derivalDoor: false, arrivalDoor: true },
     ] as const;
 
-    const quotes: CarrierQuote[] = [];
-    for (const variant of variants) {
+    const quoteResults = await Promise.all(
+      variants.map(async (variant): Promise<CarrierQuote | null> => {
       const calcBody: Record<string, unknown> = {
         appkey: appKey,
         derivalPoint: originCode,
@@ -852,25 +869,25 @@ export class DellinAdapter implements CarrierAdapter {
         calcBody.width = Number(widM.toFixed(3));
         calcBody.height = Number(hgtM.toFixed(3));
       }
-      const res = await fetch(calcUrl, {
+      const res = await this.fetchWithTimeout(calcUrl, {
         method: 'POST',
         headers: withRequestIdHeaders({ Accept: 'application/json', 'Content-Type': 'application/json' }, traceId),
         body: JSON.stringify(calcBody),
         cache: 'no-store',
-      }).catch(() => null);
+      }, this.quoteTimeoutMs());
       if (!res?.ok) {
         this.logger.warn(
           `Dellin calculator HTTP failed: status=${res?.status ?? 'n/a'}; url=${calcUrl}; requestId=${requestId}; variant=${variant.key}`,
         );
-        continue;
+        return null;
       }
       const data = (await res.json().catch(() => null)) as Record<string, unknown> | null;
-      if (!data) continue;
+      if (!data) return null;
       const parsed = parsePublicCalculator(data);
-      if (!parsed) continue;
+      if (!parsed) return null;
       const { priceRub, etaDays, insuranceRub } = parsed;
       const insNote = insuranceRub != null ? ` · страховка ~${insuranceRub} ₽` : '';
-      quotes.push({
+      return {
         id: `${requestId}:${this.descriptor.id}:${variant.key}`,
         requestId,
         carrierId: this.descriptor.id,
@@ -888,8 +905,10 @@ export class DellinAdapter implements CarrierAdapter {
           comment: `Dellin public calculator (${variant.label})`,
         },
         score: Math.round((100000 / Math.max(priceRub, 1)) * 100) / 100,
-      });
-    }
+      };
+      }),
+    );
+    const quotes = quoteResults.filter((quote): quote is CarrierQuote => Boolean(quote));
     return quotes;
   }
 
@@ -1666,25 +1685,31 @@ export class DellinAdapter implements CarrierAdapter {
     requestId: string,
   ): Promise<string | null> {
     const url = dellinJsonUrl(base, DELLIN_PUBLIC_KLADR_PATH);
-    for (const q of variants) {
-      if (!q) continue;
-      const res = await fetch(url, {
+    const candidates = variants.filter(Boolean).slice(0, 5);
+    const results = await Promise.all(
+      candidates.map(async (q): Promise<{ q: string; code: string | null; data: unknown }> => {
+      const res = await this.fetchWithTimeout(url, {
         method: 'POST',
         headers: withRequestIdHeaders({ Accept: 'application/json', 'Content-Type': 'application/json' }, requestId),
         body: JSON.stringify({ appkey: appKey, q, limit: 8 }),
         cache: 'no-store',
-      }).catch(() => null);
+      }, this.quoteTimeoutMs());
       if (!res?.ok) {
         this.logger.warn(`Dellin kladr HTTP failed: status=${res?.status ?? 'n/a'}; q="${q.slice(0, 80)}"`);
-        continue;
+        return { q, code: null, data: null };
       }
       const data = await res.json().catch(() => null);
       const code = parseKladrFirstCode(data);
-      if (code) {
-        return code;
-      }
+      return { q, code, data };
+      }),
+    );
+    const hit = results.find((item) => item.code);
+    if (hit?.code) {
+      return hit.code;
+    }
+    for (const item of results) {
       this.logger.warn(
-        `Dellin kladr no code for q="${q.slice(0, 120)}"; requestId=${requestId}; snippet=${JSON.stringify(data).slice(0, 280)}`,
+        `Dellin kladr no code for q="${item.q.slice(0, 120)}"; requestId=${requestId}; snippet=${JSON.stringify(item.data).slice(0, 280)}`,
       );
     }
     return null;

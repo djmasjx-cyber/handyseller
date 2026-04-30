@@ -339,20 +339,22 @@ export class CdekAdapter implements CarrierAdapter {
     const base = (process.env.CDEK_API_BASE ?? 'https://api.cdek.ru').replace(/\/+$/, '');
     const orderType = getCdekOrderType();
     const cityResolveStartedAt = Date.now();
-    const fromCode = await this.resolveCityCode(
-      base,
-      token,
-      input.draft.originLabel || input.snapshot.originLabel,
-      traceId,
-      this.quoteTimeoutMs(),
-    );
-    const toCode = await this.resolveCityCode(
-      base,
-      token,
-      input.draft.destinationLabel || input.snapshot.destinationLabel,
-      traceId,
-      this.quoteTimeoutMs(),
-    );
+    const [fromCode, toCode] = await Promise.all([
+      this.resolveCityCode(
+        base,
+        token,
+        input.draft.originLabel || input.snapshot.originLabel,
+        traceId,
+        this.quoteTimeoutMs(),
+      ),
+      this.resolveCityCode(
+        base,
+        token,
+        input.draft.destinationLabel || input.snapshot.destinationLabel,
+        traceId,
+        this.quoteTimeoutMs(),
+      ),
+    ]);
     cityResolveMs = Math.max(0, Date.now() - cityResolveStartedAt);
     if (!fromCode || !toCode) {
       this.logger.warn(
@@ -442,8 +444,9 @@ export class CdekAdapter implements CarrierAdapter {
     requestId?: string | null,
     timeoutMs = 2500,
   ): Promise<number | null> {
-    const candidates = cdekCityCandidates(label);
-    for (const city of candidates) {
+    const candidates = cdekCityCandidates(label).slice(0, 5);
+    const results = await Promise.all(
+      candidates.map(async (city): Promise<number | null> => {
       const url = new URL('/v2/location/cities', base);
       url.searchParams.set('country_codes', 'RU');
       url.searchParams.set('city', city);
@@ -452,12 +455,13 @@ export class CdekAdapter implements CarrierAdapter {
         headers: withRequestIdHeaders({ Authorization: `Bearer ${token}`, Accept: 'application/json' }, requestId),
         cache: 'no-store',
       }, timeoutMs);
-      if (!res?.ok) continue;
+      if (!res?.ok) return null;
       const data = (await res.json().catch(() => [])) as unknown;
       const row = Array.isArray(data) && data.length ? (data[0] as CdekCity) : null;
-      if (row && typeof row.code === 'number' && Number.isFinite(row.code)) return row.code;
-    }
-    return null;
+      return row && typeof row.code === 'number' && Number.isFinite(row.code) ? row.code : null;
+      }),
+    );
+    return results.find((code): code is number => typeof code === 'number') ?? null;
   }
 
   async listPickupPoints(

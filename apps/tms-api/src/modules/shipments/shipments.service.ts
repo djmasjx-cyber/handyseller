@@ -838,6 +838,11 @@ export class ShipmentsService implements OnModuleInit {
     return (Number.isFinite(raw) ? Math.max(10, raw) : 120) * 1000;
   }
 
+  private adapterQuoteTimeoutMs(): number {
+    const raw = Number.parseInt(process.env.TMS_ADAPTER_QUOTE_TIMEOUT_MS ?? '4500', 10);
+    return Number.isFinite(raw) ? Math.max(800, raw) : 4500;
+  }
+
   private breakerFailureThreshold(): number {
     const raw = Number.parseInt(process.env.TMS_CARRIER_BREAKER_FAILURES ?? '3', 10);
     return Number.isFinite(raw) ? Math.max(1, raw) : 3;
@@ -1204,13 +1209,16 @@ export class ShipmentsService implements OnModuleInit {
     const adapterStartedAt = enabledAdapters.map(() => Date.now());
     const quoteResults = await Promise.allSettled(
       enabledAdapters.map((adapter) =>
-        adapter.quote(
-          {
-            snapshot: request.snapshot,
-            draft: request.draft,
-          },
-          requestId,
-          { userId, authToken, requestId: requestTraceId ?? requestId },
+        this.withQuoteTimeout(
+          adapter.descriptor.id,
+          adapter.quote(
+            {
+              snapshot: request.snapshot,
+              draft: request.draft,
+            },
+            requestId,
+            { userId, authToken, requestId: requestTraceId ?? requestId },
+          ),
         ),
       ),
     );
@@ -1264,6 +1272,18 @@ export class ShipmentsService implements OnModuleInit {
     void this.store.saveRequest(request);
     this.quotes.set(requestId, quotes);
     return quotes;
+  }
+
+  private withQuoteTimeout(carrierId: string, promise: Promise<CarrierQuote[]>): Promise<CarrierQuote[]> {
+    const timeoutMs = this.adapterQuoteTimeoutMs();
+    let timer: NodeJS.Timeout | null = null;
+    const timeout = new Promise<CarrierQuote[]>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`quote timeout after ${timeoutMs}ms carrier=${carrierId}`)), timeoutMs);
+      timer.unref?.();
+    });
+    return Promise.race([promise, timeout]).finally(() => {
+      if (timer) clearTimeout(timer);
+    });
   }
 
   private logQuoteAudit(requestId: string, request: ShipmentRequestRecord, quotes: CarrierQuote[]): void {

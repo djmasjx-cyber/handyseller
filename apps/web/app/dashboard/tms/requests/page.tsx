@@ -306,14 +306,23 @@ export default function TmsRequestsPage() {
         const data = r.ok ? await r.json() : []
         const requests = Array.isArray(data) ? data : []
         setItems(requests)
-        const quoteEntries = await Promise.all(
+        if (!opts?.silent) {
+          setQuotesByRequest((prev) => {
+            const next: Record<string, Quote[]> = {}
+            for (const request of requests) next[request.id] = prev[request.id] ?? []
+            return next
+          })
+        }
+        void Promise.all(
           requests.map(async (request: ShipmentRequest) => {
             const res = await authFetch(`/api/tms/shipment-requests/${request.id}/quotes`, { headers })
             const quotes = await res.json().catch(() => [])
-            return [request.id, Array.isArray(quotes) ? quotes : []] as const
+            setQuotesByRequest((prev) => ({
+              ...prev,
+              [request.id]: Array.isArray(quotes) ? quotes : [],
+            }))
           }),
-        )
-        setQuotesByRequest(Object.fromEntries(quoteEntries))
+        ).catch(() => undefined)
       } catch {
         if (!opts?.silent) setError("Не удалось загрузить расчеты и тарифы")
       }
