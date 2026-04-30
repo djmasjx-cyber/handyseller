@@ -163,7 +163,7 @@ export default function ProductsPage() {
       sortDirection,
     })
     if (warehouseFilter === "local") params.set("marketplaceFilter", "WB_OZON_BOTH")
-    else if (warehouseFilter !== "local") params.set("marketplaceFilter", warehouseFilter)
+    else params.set("marketplaceFilter", warehouseFilter)
     if (searchQuery.trim()) params.set("search", searchQuery.trim())
     const res = await fetch(`/api/products/paged?${params.toString()}`, { headers: { Authorization: `Bearer ${token}` } })
     const data = await res.json().catch(() => ({}))
