@@ -125,6 +125,9 @@ export class TmsIntegrationService {
     if (carrierCode === 'CDEK') {
       await this.validateCdekCredentials(login, password);
     }
+    if (carrierCode === 'DALLI') {
+      await this.validateDalliCredentials(input.appKey?.trim() || login);
+    }
 
     const target =
       input.id != null
@@ -149,16 +152,18 @@ export class TmsIntegrationService {
     }
 
     let appKeyEncrypted: string | null = null;
-    if (carrierCode === 'DELLIN') {
+    if (carrierCode === 'DELLIN' || carrierCode === 'DALLI') {
       const fromInput = (input.appKey ?? '').trim();
       if (fromInput) {
         appKeyEncrypted = this.crypto.encrypt(fromInput);
       } else if (target?.appKey) {
         appKeyEncrypted = target.appKey;
-      } else {
+      } else if (carrierCode === 'DELLIN') {
         throw new BadRequestException(
           'Для Деловых Линий укажите ключ приложения (appKey) из раздела интеграций личного кабинета.',
         );
+      } else {
+        appKeyEncrypted = null;
       }
     }
 
@@ -167,7 +172,7 @@ export class TmsIntegrationService {
       serviceType,
       accountLabel: input.accountLabel?.trim() || null,
       contractLabel: input.contractLabel?.trim() || null,
-      appKey: carrierCode === 'DELLIN' ? appKeyEncrypted : null,
+      appKey: carrierCode === 'DELLIN' || carrierCode === 'DALLI' ? appKeyEncrypted : null,
       login: this.crypto.encrypt(login),
       password: this.crypto.encrypt(password),
       isDefault: input.isDefault ?? true,
@@ -218,6 +223,9 @@ export class TmsIntegrationService {
       } else if (connection.carrierCode === 'DELLIN') {
         const appKey = connection.appKey ? this.crypto.decrypt(connection.appKey) : null;
         await this.validateDellinCredentials(appKey, login, password);
+      } else if (connection.carrierCode === 'DALLI') {
+        const token = connection.appKey ? this.crypto.decrypt(connection.appKey) : login;
+        await this.validateDalliCredentials(token);
       }
     } catch (e) {
       lastError = e instanceof Error ? e.message : String(e);
@@ -524,6 +532,32 @@ export class TmsIntegrationService {
           ? `Деловые Линии: ошибка авторизации (${details}).`
           : 'Деловые Линии: login/password не прошли проверку.',
       );
+    }
+  }
+
+  private async validateDalliCredentials(tokenLike: string | null | undefined): Promise<void> {
+    const token = (tokenLike ?? '').trim();
+    if (!token) {
+      throw new BadRequestException('Для Dalli-Service укажите API token (в поле appKey или login).');
+    }
+    const base = (process.env.DALLI_API_BASE ?? 'https://api.dalli-service.com/v1').replace(/\/+$/, '');
+    const payload = `<?xml version="1.0" encoding="UTF-8"?>
+<services>
+  <auth token="${token.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')}"/>
+</services>`;
+    const res = await fetch(`${base}/do`, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/xml, text/xml;q=0.9, */*;q=0.8',
+        'Content-Type': 'application/xml; charset=utf-8',
+      },
+      body: payload,
+    }).catch((error) => {
+      throw new BadRequestException(`Не удалось связаться с API Dalli-Service: ${String(error)}`);
+    });
+    const text = await res.text().catch(() => '');
+    if (!res.ok || !/<services\b/i.test(text) || /error=/i.test(text)) {
+      throw new BadRequestException('Dalli-Service: API token не прошел проверку.');
     }
   }
 

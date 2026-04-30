@@ -2,7 +2,7 @@ export type ServiceFlag = 'EXPRESS' | 'HAZMAT' | 'CONSOLIDATED' | 'AIR' | 'OVERS
 
 export type CarrierMode = 'ROAD' | 'AIR' | 'COURIER' | 'PICKUP' | 'FLEET';
 
-export type CarrierCode = 'MAJOR_EXPRESS' | 'DELLIN' | 'CDEK';
+export type CarrierCode = 'MAJOR_EXPRESS' | 'DELLIN' | 'CDEK' | 'DALLI';
 
 export type CarrierServiceType = 'EXPRESS' | 'LTL';
 

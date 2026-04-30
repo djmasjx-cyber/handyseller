@@ -22,6 +22,7 @@ import { buildMockCarrierAdapters } from './adapters/mock-carrier.adapters';
 import { MajorExpressAdapter } from './adapters/major-express.adapter';
 import { DellinAdapter } from './adapters/dellin.adapter';
 import { CdekAdapter } from './adapters/cdek.adapter';
+import { DalliAdapter } from './adapters/dalli.adapter';
 import type { CarrierAdapter } from './adapters/base-carrier.adapter';
 import { TmsStoreService } from './storage/tms-store.service';
 import { ObjectStorageService } from './storage/object-storage.service';
@@ -276,7 +277,7 @@ export class ShipmentsService implements OnModuleInit {
   }
 
   private static buildCarrierAdapters(): CarrierAdapter[] {
-    const real: CarrierAdapter[] = [new MajorExpressAdapter(), new DellinAdapter(), new CdekAdapter()];
+    const real: CarrierAdapter[] = [new MajorExpressAdapter(), new DellinAdapter(), new CdekAdapter(), new DalliAdapter()];
     const includeMocks =
       process.env.TMS_INCLUDE_MOCK_CARRIERS === '1' ||
       process.env.TMS_INCLUDE_MOCK_CARRIERS === 'true' ||
