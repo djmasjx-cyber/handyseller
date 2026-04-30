@@ -18,6 +18,7 @@ import { SyncQueueService } from './sync-queue/sync-queue.service';
 import { SyncQueueProcessor } from './sync-queue/sync-queue.processor';
 import { SYNC_QUEUE_NAME } from './sync-queue/sync-queue.constants';
 import { MarketplaceTokenRotationCron } from './marketplace-token-rotation.cron';
+import { WbMappingHealthCron } from './wb-mapping-health.cron';
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { MarketplaceTokenRotationCron } from './marketplace-token-rotation.cron'
     SyncQueueService,
     SyncQueueProcessor,
     MarketplaceTokenRotationCron,
+    WbMappingHealthCron,
   ],
   exports: [MarketplacesService, MarketplaceAdapterFactory, ProductMappingService, WbColorService, SyncQueueService],
 })
