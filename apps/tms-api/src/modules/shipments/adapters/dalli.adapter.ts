@@ -68,7 +68,7 @@ export class DalliAdapter implements CarrierAdapter {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), timeoutMs ?? this.quoteTimeoutMs());
     try {
-      const res = await fetch(`${this.endpointBase()}/do`, {
+      const res = await fetch(`${this.endpointBase()}/`, {
         method: 'POST',
         headers: {
           Accept: 'application/xml, text/xml;q=0.9, */*;q=0.8',
