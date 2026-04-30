@@ -545,7 +545,7 @@ export class TmsIntegrationService {
 <services>
   <auth token="${token.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')}"/>
 </services>`;
-    const res = await fetch(`${base}/do`, {
+    const res = await fetch(`${base}/`, {
       method: 'POST',
       headers: {
         Accept: 'application/xml, text/xml;q=0.9, */*;q=0.8',
