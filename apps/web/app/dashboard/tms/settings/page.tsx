@@ -18,7 +18,7 @@ function formatApiError(data: unknown): string {
 
 type CarrierConnection = {
   id: string
-  carrierCode: "MAJOR_EXPRESS" | "DELLIN" | "CDEK"
+  carrierCode: "MAJOR_EXPRESS" | "DELLIN" | "CDEK" | "DALLI"
   serviceType: "EXPRESS" | "LTL"
   accountLabel: string | null
   contractLabel: string | null
@@ -46,7 +46,7 @@ export default function TmsSettingsPage() {
   const [items, setItems] = useState<CarrierConnection[]>([])
   const [accountLabel, setAccountLabel] = useState("")
   const [contractLabel, setContractLabel] = useState("")
-  const [carrierCode, setCarrierCode] = useState<"MAJOR_EXPRESS" | "DELLIN" | "CDEK">("MAJOR_EXPRESS")
+  const [carrierCode, setCarrierCode] = useState<"MAJOR_EXPRESS" | "DELLIN" | "CDEK" | "DALLI">("MAJOR_EXPRESS")
   const [serviceType, setServiceType] = useState<"EXPRESS" | "LTL">("EXPRESS")
   const [login, setLogin] = useState("")
   const [password, setPassword] = useState("")
@@ -149,7 +149,7 @@ export default function TmsSettingsPage() {
           serviceType: carrierCode === "MAJOR_EXPRESS" ? serviceType : "EXPRESS",
           accountLabel,
           contractLabel,
-          ...(carrierCode === "DELLIN" && appKey.trim() ? { appKey: appKey.trim() } : {}),
+          ...((carrierCode === "DELLIN" || carrierCode === "DALLI") && appKey.trim() ? { appKey: appKey.trim() } : {}),
           login,
           password,
           isDefault: true,
@@ -299,7 +299,7 @@ estimate -> pickup-points -> select-and-confirm`
               id="carrierCode"
               value={carrierCode}
               onChange={(e) => {
-                setCarrierCode(e.target.value as "MAJOR_EXPRESS" | "DELLIN" | "CDEK")
+                setCarrierCode(e.target.value as "MAJOR_EXPRESS" | "DELLIN" | "CDEK" | "DALLI")
                 setServiceType("EXPRESS")
                 setAppKey("")
               }}
@@ -308,6 +308,7 @@ estimate -> pickup-points -> select-and-confirm`
               <option value="MAJOR_EXPRESS">Major Express</option>
               <option value="DELLIN">Деловые Линии</option>
               <option value="CDEK">CDEK</option>
+              <option value="DALLI">Dalli-Service</option>
             </select>
           </div>
           <div className="space-y-2">
@@ -349,6 +350,8 @@ estimate -> pickup-points -> select-and-confirm`
               placeholder={
                 carrierCode === "DELLIN"
                   ? "Телефон или логин из ЛК Деловых Линий"
+                  : carrierCode === "DALLI"
+                    ? "Логин ЛК Dalli (опционально, можно оставить служебный)"
                   : carrierCode === "CDEK"
                     ? "client_id CDEK API"
                     : "Логин Major Express"
@@ -358,19 +361,21 @@ estimate -> pickup-points -> select-and-confirm`
               <p className="text-xs text-muted-foreground">Для CDEK укажите `client_id` API.</p>
             ) : null}
           </div>
-          {carrierCode === "DELLIN" ? (
+          {carrierCode === "DELLIN" || carrierCode === "DALLI" ? (
             <div className="space-y-2 md:col-span-2">
-              <Label htmlFor="appKey">Ключ приложения (appKey)</Label>
+              <Label htmlFor="appKey">{carrierCode === "DALLI" ? "API token Dalli" : "Ключ приложения (appKey)"}</Label>
               <Input
               key={`appkey-${credentialsFormVersion}`}
                 id="appKey"
                 value={appKey}
                 onChange={(e) => setAppKey(e.target.value)}
-                placeholder="Из раздела «Интеграция» в личном кабинете Деловых Линий"
+                placeholder={carrierCode === "DALLI" ? "Из раздела «Учетная запись» в ЛК Dalli" : "Из раздела «Интеграция» в личном кабинете Деловых Линий"}
                 autoComplete="off"
               />
               <p className="text-xs text-muted-foreground">
-                Ключ привязан к вашему договору с Деловыми Линиями и хранится в HandySeller в зашифрованном виде.
+                {carrierCode === "DALLI"
+                  ? "Токен привязан к вашему кабинету Dalli и хранится в HandySeller в зашифрованном виде."
+                  : "Ключ привязан к вашему договору с Деловыми Линиями и хранится в HandySeller в зашифрованном виде."}
               </p>
             </div>
           ) : null}
@@ -386,6 +391,8 @@ estimate -> pickup-points -> select-and-confirm`
               placeholder={
                 carrierCode === "DELLIN"
                   ? "Пароль от ЛК Деловых Линий"
+                  : carrierCode === "DALLI"
+                    ? "Пароль ЛК Dalli (или служебный пароль)"
                   : carrierCode === "CDEK"
                     ? "client_secret CDEK API"
                     : "Пароль Major Express"
@@ -575,7 +582,7 @@ estimate -> pickup-points -> select-and-confirm`
             <div key={item.id} className="rounded-lg border p-4 space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <p className="font-medium">{item.accountLabel || (item.carrierCode === "DELLIN" ? "Деловые Линии" : item.carrierCode === "CDEK" ? "CDEK" : "Major Express")}</p>
+                  <p className="font-medium">{item.accountLabel || (item.carrierCode === "DELLIN" ? "Деловые Линии" : item.carrierCode === "CDEK" ? "CDEK" : item.carrierCode === "DALLI" ? "Dalli-Service" : "Major Express")}</p>
                   <p className="text-sm text-muted-foreground">
                     {item.contractLabel || "Без названия договора"} · {item.loginPreview || "логин скрыт"}
                   </p>
