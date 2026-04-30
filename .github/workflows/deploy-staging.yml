@@ -131,7 +131,15 @@ jobs:
 
       - name: Prepare SSH key and known_hosts
         run: |
-          echo "${{ secrets.VM_SSH_KEY }}" | base64 -d > deploy_key.pem
+          KEY_RAW="${{ secrets.VM_SSH_KEY }}"
+          # Support both formats in secret:
+          # 1) base64-encoded PEM
+          # 2) raw PEM text
+          if printf '%s' "$KEY_RAW" | base64 -d > deploy_key.pem 2>/dev/null; then
+            :
+          else
+            printf '%s\n' "$KEY_RAW" > deploy_key.pem
+          fi
           chmod 600 deploy_key.pem
           mkdir -p ~/.ssh
           ssh-keyscan -H "${{ secrets.VM_HOST }}" >> ~/.ssh/known_hosts
