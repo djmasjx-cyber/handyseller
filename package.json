@@ -41,6 +41,7 @@
     "smoke:tms:nightly": "bash scripts/tms-nightly-smoke.sh",
     "smoke:tms:demo": "bash scripts/tms-demo-checkout-smoke.sh",
     "smoke:tms:registry": "bash scripts/tms-registry-smoke.sh",
+    "smoke:wb:mapping": "bash scripts/wb-mapping-smoke.sh",
     "slo:tms:check": "bash scripts/tms-slo-alert-check.sh"
   },
   "engines": {

@@ -10,6 +10,7 @@ import type { ProductData } from './adapters/base-marketplace.adapter';
 import { productToCanonical, canonicalToProductData } from './canonical';
 import { SyncQueueService } from './sync-queue/sync-queue.service';
 import { WbColorService } from './wb-color.service';
+import { WbMappingHealthCron } from './wb-mapping-health.cron';
 
 @Controller('marketplaces')
 @UseGuards(JwtAuthGuard)
@@ -19,6 +20,7 @@ export class MarketplacesController {
     private readonly productsService: ProductsService,
     private readonly syncQueueService: SyncQueueService,
     private readonly wbColorService: WbColorService,
+    private readonly wbMappingHealthCron: WbMappingHealthCron,
   ) {}
 
   @Get()
@@ -276,6 +278,12 @@ export class MarketplacesController {
     return this.marketplacesService.getLinkedProductsStats(userId);
   }
 
+  /** Аудит WB-связок: дубли, непривязанные товары, legacy SKU без маппинга */
+  @Get('wb-mapping-audit')
+  async getWbMappingAudit(@CurrentUser('userId') userId: string) {
+    return this.marketplacesService.getWbMappingAudit(userId);
+  }
+
   /** Синхронизация логистики и комиссий по выкупленным заказам (WB reportDetailByPeriod, Ozon finance/transaction/list) */
   @Post('order-costs/sync')
   async syncOrderCosts(
@@ -496,6 +504,54 @@ export class MarketplacesController {
     return this.marketplacesService.refreshOzonMapping(userId, productId);
   }
 
+  /** Обновить связку с WB по текущему артикулу (vendorCode) */
+  @Post('wb-refresh-mapping/:productId')
+  async refreshWbMapping(
+    @CurrentUser('userId') userId: string,
+    @Param('productId') productId: string,
+  ) {
+    return this.marketplacesService.refreshWbMapping(userId, productId);
+  }
+
+  /** Массовое восстановление WB-связок для непривязанных товаров */
+  @Post('wb-mapping-repair')
+  async repairWbMappings(
+    @CurrentUser('userId') userId: string,
+    @Body() body?: { limit?: number; dryRun?: boolean },
+    @Query('async') asyncMode?: string,
+  ) {
+    const isAsyncRequested = asyncMode === '1' || asyncMode === 'true';
+    if (isAsyncRequested) {
+      return this.syncQueueService.addWbRepairJob(userId, {
+        limit: body?.limit,
+        dryRun: body?.dryRun,
+      });
+    }
+    return this.marketplacesService.repairWbMappings(userId, {
+      limit: body?.limit,
+      dryRun: body?.dryRun,
+    });
+  }
+
+  /** Ручной health-check WB-связок для текущего пользователя (без ожидания cron) */
+  @Post('wb-mapping-health/run')
+  async runWbMappingHealth(
+    @CurrentUser('userId') userId: string,
+    @Body() body?: {
+      withDryRunRepairPreview?: boolean;
+      withApplyRepair?: boolean;
+      repairLimit?: number;
+      sendTelegram?: boolean;
+    },
+  ) {
+    return this.wbMappingHealthCron.runManualCheckForUser(userId, {
+      withDryRunRepairPreview: body?.withDryRunRepairPreview,
+      withApplyRepair: body?.withApplyRepair,
+      repairLimit: body?.repairLimit,
+      sendTelegram: body?.sendTelegram,
+    });
+  }
+
   /** Загрузить штрих-код с Ozon и сохранить. Только с маркета — вручную нельзя. */
   @Post('ozon-barcode/:productId/load')
   async loadOzonBarcode(
@@ -557,8 +613,9 @@ export class MarketplacesController {
   ) {
     const marketplace = body?.marketplace ?? 'WILDBERRIES';
     const isAsyncRequested = asyncMode === '1' || asyncMode === 'true';
-    // Ozon import can include thousands of products and often exceeds gateway timeout.
-    const shouldRunAsync = isAsyncRequested || marketplace === 'OZON';
+    // Ozon/WB imports can include thousands of products and often exceed gateway timeout.
+    // Keep WB API calls unchanged in adapter layer; only move execution to background queue.
+    const shouldRunAsync = isAsyncRequested || marketplace === 'OZON' || marketplace === 'WILDBERRIES';
     try {
       if (shouldRunAsync) {
         return this.syncQueueService.addImportJob(userId, marketplace);
