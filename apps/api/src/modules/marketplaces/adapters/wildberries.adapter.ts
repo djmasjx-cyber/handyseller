@@ -2268,15 +2268,33 @@ export class WildberriesAdapter extends BaseMarketplaceAdapter {
       const sort = { ascending: true };
 
       do {
-        const cardsRes = await firstValueFrom(
-          this.httpService.post(
-            `${this.CONTENT_API}/content/v2/get/cards/list`,
-            {
-              settings: { cursor, sort, filter: { withPhoto: -1 } },
-            },
-            { headers: { ...this.authHeader(), 'Content-Type': 'application/json' }, timeout: 15000 },
-          ),
-        );
+        let cardsRes:
+          | {
+              data?: Record<string, unknown>;
+            }
+          | undefined;
+        let rateLimitRetries = 0;
+        while (!cardsRes) {
+          try {
+            cardsRes = await firstValueFrom(
+              this.httpService.post(
+                `${this.CONTENT_API}/content/v2/get/cards/list`,
+                {
+                  settings: { cursor, sort, filter: { withPhoto: -1 } },
+                },
+                { headers: { ...this.authHeader(), 'Content-Type': 'application/json' }, timeout: 15000 },
+              ),
+            );
+          } catch (err) {
+            const status = (err as { response?: { status?: number } })?.response?.status;
+            if (status !== 429 || rateLimitRetries >= 8) throw err;
+            const headers = (err as { response?: { headers?: Record<string, string | number> } })?.response?.headers ?? {};
+            const retrySecRaw = Number(headers['x-ratelimit-retry'] ?? headers['x-ratelimit-reset'] ?? 2);
+            const retryMs = Math.max(1000, Math.min(15000, (Number.isFinite(retrySecRaw) ? retrySecRaw : 2) * 1000));
+            rateLimitRetries++;
+            await new Promise((r) => setTimeout(r, retryMs));
+          }
+        }
         const data = cardsRes?.data;
         if (data && typeof data === 'object' && (data as { error?: boolean }).error) {
           const errMsg = (data as { errorText?: string }).errorText ?? 'Ошибка WB API';
