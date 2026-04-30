@@ -136,8 +136,10 @@ export default function ProductsPage() {
   const [searchQuery, setSearchQuery] = useState("") // Поиск по артикулу или наименованию
   type ProductsSortKey = "stockFbs" | "stockFbo" | "reservedFbs" | "reservedFbo" | "cost"
   type SortDirection = "asc" | "desc"
+  type WarehouseFilter = "local" | "WILDBERRIES" | "OZON" | "YANDEX" | "AVITO"
   const [sortKey, setSortKey] = useState<ProductsSortKey>("stockFbs")
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc")
+  const [warehouseFilter, setWarehouseFilter] = useState<WarehouseFilter>("local")
 
   const token = typeof window !== "undefined" ? localStorage.getItem("accessToken") : null
 
@@ -265,8 +267,6 @@ export default function ProductsPage() {
   const atProductLimit = limits ? productsTotal >= limits.maxProducts : false
 
   // Селектор склада: local | WILDBERRIES | OZON | YANDEX | AVITO — горизонтальные вкладки
-  type WarehouseFilter = "local" | "WILDBERRIES" | "OZON" | "YANDEX" | "AVITO"
-  const [warehouseFilter, setWarehouseFilter] = useState<WarehouseFilter>("local")
 
   // Отмена редактирования при переключении с Мой склад + загрузка остатков FBO
   useEffect(() => {
