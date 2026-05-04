@@ -302,7 +302,7 @@ function normalizeTransferLine(line: WmsBiTransferOrderLineRecord): WmsBiTransfe
   };
 }
 
-/** Сводка в одном запросе без загрузки всех строк (только batch/период/тип). */
+/** Сводка / SQL-агрегаты без полного скана строк в Node (только batch/период/тип). */
 function summaryFiltersSqlOnly(filters: WmsBiTransferFilters): boolean {
   if (filters.receiverWarehouse?.trim()) return false;
   if (filters.senderWarehouse?.trim()) return false;
@@ -315,6 +315,38 @@ function summaryFiltersSqlOnly(filters: WmsBiTransferFilters): boolean {
   if (filters.retailMin != null || filters.retailMax != null) return false;
   if (filters.costMin != null || filters.costMax != null) return false;
   return true;
+}
+
+function buildTransferAnalyticsWhere(userId: string, filters: WmsBiTransferFilters): { whereSql: string; params: unknown[] } {
+  const params: unknown[] = [userId];
+  const conds = ['user_id = $1'];
+  if (filters.batchId?.trim()) {
+    params.push(filters.batchId.trim());
+    conds.push(`batch_id = $${params.length}`);
+  }
+  if (filters.from) {
+    params.push(filters.from);
+    conds.push(`order_date >= $${params.length}::timestamptz`);
+  }
+  if (filters.to) {
+    params.push(filters.to);
+    conds.push(`order_date <= $${params.length}::timestamptz`);
+  }
+  if (filters.kind === 'REPLENISHMENT' || filters.kind === 'TOURIST') {
+    params.push(filters.kind);
+    conds.push(`kind = $${params.length}`);
+  }
+  return { whereSql: conds.join(' AND '), params };
+}
+
+function clampLimit(value: number | undefined, fallback: number, min: number, max: number): number {
+  const v = value == null || !Number.isFinite(value) ? fallback : value;
+  return Math.min(max, Math.max(min, Math.floor(v)));
+}
+
+function clampOffset(value: number | undefined, max: number): number {
+  const v = value == null || !Number.isFinite(value) ? 0 : value;
+  return Math.min(max, Math.max(0, Math.floor(v)));
 }
 
 function numFromDb(value: unknown): number {
@@ -339,6 +371,10 @@ type RelationalLineRow = {
   order_date: Date;
   sender_warehouse: string;
   receiver_warehouse: string;
+  sender_warehouse_type: string | null;
+  sender_op: string | null;
+  receiver_warehouse_type: string | null;
+  receiver_op: string | null;
   item_name: string;
   item_article: string | null;
   item_code: string;
@@ -378,10 +414,10 @@ function relationalRowToLine(row: RelationalLineRow): WmsBiTransferOrderLineReco
     retailPrice: row.retail_price == null ? null : numFromDb(row.retail_price),
     costPrice: row.cost_price == null ? null : numFromDb(row.cost_price),
     counterparty: row.counterparty?.trim() ? row.counterparty.trim() : null,
-    senderWarehouseType: '',
-    senderOp: '',
-    receiverWarehouseType: '',
-    receiverOp: '',
+    senderWarehouseType: row.sender_warehouse_type?.trim() ?? '',
+    senderOp: row.sender_op?.trim() ?? '',
+    receiverWarehouseType: row.receiver_warehouse_type?.trim() ?? '',
+    receiverOp: row.receiver_op?.trim() ?? '',
   };
   return normalizeTransferLine(line);
 }
@@ -463,6 +499,49 @@ export class WmsAnalyticsService implements OnModuleInit {
       CREATE INDEX IF NOT EXISTS ix_wms_bi_transfer_kind ON wms_bi_transfer_order_line(user_id, kind);
       CREATE INDEX IF NOT EXISTS ix_wms_bi_transfer_user_batch ON wms_bi_transfer_order_line(user_id, batch_id);
     `);
+    await this.pool.query(`
+      ALTER TABLE wms_bi_transfer_order_line ADD COLUMN IF NOT EXISTS sender_warehouse_type TEXT NOT NULL DEFAULT '';
+      ALTER TABLE wms_bi_transfer_order_line ADD COLUMN IF NOT EXISTS sender_op TEXT NOT NULL DEFAULT '';
+      ALTER TABLE wms_bi_transfer_order_line ADD COLUMN IF NOT EXISTS receiver_warehouse_type TEXT NOT NULL DEFAULT '';
+      ALTER TABLE wms_bi_transfer_order_line ADD COLUMN IF NOT EXISTS receiver_op TEXT NOT NULL DEFAULT '';
+    `);
+    await this.pool.query(`
+      CREATE INDEX IF NOT EXISTS ix_wms_bi_transfer_user_receiver_op ON wms_bi_transfer_order_line(user_id, receiver_op);
+      CREATE INDEX IF NOT EXISTS ix_wms_bi_transfer_user_sender_op ON wms_bi_transfer_order_line(user_id, sender_op);
+      CREATE INDEX IF NOT EXISTS ix_wms_bi_transfer_tourist_route ON wms_bi_transfer_order_line(user_id, kind, receiver_op, sender_op, item_code);
+    `);
+    await this.backfillDenormWarehouseDimensions();
+  }
+
+  /** Заполняет denorm-колонки ОП/типа склада для строк, импортированных до появления колонок. */
+  private async backfillDenormWarehouseDimensions(): Promise<void> {
+    if (!this.pool) return;
+    const CHUNK = 3000;
+    const MAX_CHUNKS = 80;
+    for (let i = 0; i < MAX_CHUNKS; i += 1) {
+      const res = await this.pool.query<{ id: string; sender_warehouse: string; receiver_warehouse: string }>(
+        `SELECT id, sender_warehouse, receiver_warehouse
+         FROM wms_bi_transfer_order_line
+         WHERE sender_op = '' OR receiver_op = '' OR sender_warehouse_type = '' OR receiver_warehouse_type = ''
+         LIMIT $1`,
+        [CHUNK],
+      );
+      if (res.rows.length === 0) return;
+      for (const row of res.rows) {
+        const s = parseWarehouseDimension(row.sender_warehouse);
+        const r = parseWarehouseDimension(row.receiver_warehouse);
+        await this.pool.query(
+          `UPDATE wms_bi_transfer_order_line
+           SET sender_warehouse_type = $2, sender_op = $3, receiver_warehouse_type = $4, receiver_op = $5
+           WHERE id = $1`,
+          [row.id, s.warehouseType, s.op, r.warehouseType, r.op],
+        );
+      }
+      if (res.rows.length < CHUNK) return;
+    }
+    this.logger.warn(
+      `WMS BI: warehouse dimension backfill stopped after ${MAX_CHUNKS * CHUNK} rows; remaining rows use JS parse on read.`,
+    );
   }
 
   async importTransferOrders(userId: string, input: WmsBiTransferImportInput): Promise<WmsBiTransferImportResult> {
@@ -614,25 +693,7 @@ export class WmsAnalyticsService implements OnModuleInit {
   }
 
   private async getTransferSummarySql(userId: string, filters: WmsBiTransferFilters): Promise<WmsBiTransferSummary> {
-    const params: unknown[] = [userId];
-    const conds = ['user_id = $1'];
-    if (filters.batchId?.trim()) {
-      params.push(filters.batchId.trim());
-      conds.push(`batch_id = $${params.length}`);
-    }
-    if (filters.from) {
-      params.push(filters.from);
-      conds.push(`order_date >= $${params.length}::timestamptz`);
-    }
-    if (filters.to) {
-      params.push(filters.to);
-      conds.push(`order_date <= $${params.length}::timestamptz`);
-    }
-    if (filters.kind === 'REPLENISHMENT' || filters.kind === 'TOURIST') {
-      params.push(filters.kind);
-      conds.push(`kind = $${params.length}`);
-    }
-    const where = conds.join(' AND ');
+    const { whereSql: where, params } = buildTransferAnalyticsWhere(userId, filters);
     const sql = `
       SELECT
         COUNT(*)::bigint AS rows_total,
@@ -698,6 +759,10 @@ export class WmsAnalyticsService implements OnModuleInit {
    * (согласовано с сводками при выбранной партии).
    */
   async getTransferOptions(userId: string, batchId?: string | null): Promise<WmsBiTransferFilterOptions> {
+    const narrow: WmsBiTransferFilters = batchId?.trim() ? { batchId: batchId.trim() } : {};
+    if (this.pool && summaryFiltersSqlOnly(narrow)) {
+      return this.getTransferOptionsSql(userId, narrow);
+    }
     const scope = batchId?.trim() || undefined;
     const lines = await this.listLines(userId, scope);
     return {
@@ -712,14 +777,177 @@ export class WmsAnalyticsService implements OnModuleInit {
     };
   }
 
+  private async getTransferOptionsSql(userId: string, filters: WmsBiTransferFilters): Promise<WmsBiTransferFilterOptions> {
+    const { whereSql, params } = buildTransferAnalyticsWhere(userId, filters);
+    const [recvTypes, sendTypes, recvOps, sendOps, cps] = await Promise.all([
+      this.pool!.query<{ v: string }>(
+        `SELECT DISTINCT receiver_warehouse_type AS v FROM wms_bi_transfer_order_line WHERE ${whereSql} AND COALESCE(receiver_warehouse_type, '') <> '' ORDER BY 1`,
+        params,
+      ),
+      this.pool!.query<{ v: string }>(
+        `SELECT DISTINCT sender_warehouse_type AS v FROM wms_bi_transfer_order_line WHERE ${whereSql} AND COALESCE(sender_warehouse_type, '') <> '' ORDER BY 1`,
+        params,
+      ),
+      this.pool!.query<{ v: string }>(
+        `SELECT DISTINCT receiver_op AS v FROM wms_bi_transfer_order_line WHERE ${whereSql} AND COALESCE(receiver_op, '') <> '' ORDER BY 1`,
+        params,
+      ),
+      this.pool!.query<{ v: string }>(
+        `SELECT DISTINCT sender_op AS v FROM wms_bi_transfer_order_line WHERE ${whereSql} AND COALESCE(sender_op, '') <> '' ORDER BY 1`,
+        params,
+      ),
+      this.pool!.query<{ v: string | null }>(
+        `SELECT DISTINCT trim(COALESCE(payload->>'counterparty','')) AS v FROM wms_bi_transfer_order_line WHERE ${whereSql}`,
+        params,
+      ),
+    ]);
+    const warehouseTypes = uniqueSorted([
+      ...recvTypes.rows.map((r) => r.v),
+      ...sendTypes.rows.map((r) => r.v),
+    ]);
+    return {
+      warehouseTypes,
+      receiverOps: uniqueSorted(recvOps.rows.map((r) => r.v)),
+      senderOps: uniqueSorted(sendOps.rows.map((r) => r.v)),
+      counterparties: uniqueSortedCounterparties(cps.rows.map((r) => (r.v ?? '').trim())),
+    };
+  }
+
+  private async getTransfersByOpSql(userId: string, filters: WmsBiTransferFilters): Promise<WmsBiTransferByOpRow[]> {
+    const { whereSql, params } = buildTransferAnalyticsWhere(userId, filters);
+    const limit = clampLimit(filters.byOpLimit, 500, 1, 2000);
+    const offset = clampOffset(filters.byOpOffset, 500_000);
+    const limParam = params.length + 1;
+    const offParam = params.length + 2;
+    const sql = `
+      WITH g AS (
+        SELECT
+          receiver_op,
+          MIN(receiver_warehouse) AS receiver_warehouse,
+          MIN(receiver_warehouse_type) AS receiver_warehouse_type,
+          COUNT(*)::bigint AS rows_n,
+          COUNT(DISTINCT order_number)::bigint AS orders_n,
+          COUNT(*) FILTER (WHERE kind = 'REPLENISHMENT')::bigint AS replenishment_rows,
+          COUNT(*) FILTER (WHERE kind = 'TOURIST')::bigint AS tourist_rows,
+          COALESCE(SUM(price), 0)::float8 AS value_total,
+          COALESCE(SUM(price) FILTER (WHERE kind = 'TOURIST'), 0)::float8 AS tourist_value,
+          MIN((order_date AT TIME ZONE 'UTC')::date)::text AS first_d,
+          MAX((order_date AT TIME ZONE 'UTC')::date)::text AS last_d
+        FROM wms_bi_transfer_order_line
+        WHERE ${whereSql}
+        GROUP BY receiver_op
+      )
+      SELECT * FROM g
+      ORDER BY tourist_rows DESC, value_total DESC
+      LIMIT $${limParam} OFFSET $${offParam}
+    `;
+    const res = await this.pool!.query<{
+      receiver_op: string;
+      receiver_warehouse: string;
+      receiver_warehouse_type: string;
+      rows_n: string;
+      orders_n: string;
+      replenishment_rows: string;
+      tourist_rows: string;
+      value_total: string;
+      tourist_value: string;
+      first_d: string | null;
+      last_d: string | null;
+    }>(sql, [...params, limit, offset]);
+    return res.rows.map((r) => ({
+      receiverWarehouse: r.receiver_warehouse,
+      receiverWarehouseType: r.receiver_warehouse_type,
+      receiverOp: r.receiver_op,
+      rows: Number(r.rows_n),
+      orders: Number(r.orders_n),
+      replenishmentRows: Number(r.replenishment_rows),
+      touristRows: Number(r.tourist_rows),
+      valueTotal: numFromDb(r.value_total),
+      touristValue: numFromDb(r.tourist_value),
+      firstDate: r.first_d ?? null,
+      lastDate: r.last_d ?? null,
+    }));
+  }
+
+  private async getTouristsSql(userId: string, filters: WmsBiTransferFilters): Promise<WmsBiTouristRow[]> {
+    const { whereSql, params } = buildTransferAnalyticsWhere(userId, filters);
+    const limit = clampLimit(filters.touristsLimit, 300, 1, 2000);
+    const offset = clampOffset(filters.touristsOffset, 500_000);
+    const limParam = params.length + 1;
+    const offParam = params.length + 2;
+    const sql = `
+      SELECT
+        receiver_op,
+        MIN(receiver_warehouse) AS receiver_warehouse,
+        MIN(receiver_warehouse_type) AS receiver_warehouse_type,
+        sender_op,
+        MIN(sender_warehouse) AS sender_warehouse,
+        MIN(sender_warehouse_type) AS sender_warehouse_type,
+        item_code,
+        MAX(item_name) AS item_name,
+        MAX(item_article) AS item_article,
+        COUNT(*)::bigint AS rows_n,
+        COUNT(DISTINCT order_number)::bigint AS orders_n,
+        COALESCE(SUM(price), 0)::float8 AS value_total,
+        MIN((order_date AT TIME ZONE 'UTC')::date)::text AS first_d,
+        MAX((order_date AT TIME ZONE 'UTC')::date)::text AS last_d
+      FROM wms_bi_transfer_order_line
+      WHERE ${whereSql}
+      GROUP BY receiver_op, sender_op, item_code
+      ORDER BY value_total DESC, rows_n DESC
+      LIMIT $${limParam} OFFSET $${offParam}
+    `;
+    const res = await this.pool!.query<{
+      receiver_op: string;
+      receiver_warehouse: string;
+      receiver_warehouse_type: string;
+      sender_op: string;
+      sender_warehouse: string;
+      sender_warehouse_type: string;
+      item_code: string;
+      item_name: string;
+      item_article: string | null;
+      rows_n: string;
+      orders_n: string;
+      value_total: string;
+      first_d: string | null;
+      last_d: string | null;
+    }>(sql, [...params, limit, offset]);
+    return res.rows.map((r) => ({
+      receiverWarehouse: r.receiver_warehouse,
+      receiverWarehouseType: r.receiver_warehouse_type,
+      receiverOp: r.receiver_op,
+      senderWarehouse: r.sender_warehouse,
+      senderWarehouseType: r.sender_warehouse_type,
+      senderOp: r.sender_op,
+      itemCode: r.item_code,
+      itemArticle: r.item_article,
+      itemName: r.item_name,
+      rows: Number(r.rows_n),
+      orders: Number(r.orders_n),
+      valueTotal: numFromDb(r.value_total),
+      firstDate: r.first_d ?? null,
+      lastDate: r.last_d ?? null,
+    }));
+  }
+
   async getTransfersByOp(userId: string, filters: WmsBiTransferFilters): Promise<WmsBiTransferByOpRow[]> {
+    if (this.pool && summaryFiltersSqlOnly(filters)) {
+      try {
+        return await this.getTransfersByOpSql(userId, filters);
+      } catch (err) {
+        this.logger.warn(`getTransfersByOpSql fallback: ${(err as Error).message}`);
+      }
+    }
     const groups = new Map<string, WmsBiTransferOrderLineRecord[]>();
     for (const line of await this.filteredLines(userId, filters)) {
       const group = groups.get(line.receiverOp) ?? [];
       group.push(line);
       groups.set(line.receiverOp, group);
     }
-    return [...groups.entries()]
+    const limit = clampLimit(filters.byOpLimit, 500, 1, 2000);
+    const offset = clampOffset(filters.byOpOffset, 500_000);
+    const sorted = [...groups.entries()]
       .map(([receiverOp, lines]) => {
         const first = lines[0];
         return {
@@ -737,17 +965,28 @@ export class WmsAnalyticsService implements OnModuleInit {
         };
       })
       .sort((a, b) => b.touristRows - a.touristRows || b.valueTotal - a.valueTotal);
+    return sorted.slice(offset, offset + limit);
   }
 
   async getTourists(userId: string, filters: WmsBiTransferFilters): Promise<WmsBiTouristRow[]> {
+    const merged = { ...filters, kind: 'TOURIST' as const };
+    if (this.pool && summaryFiltersSqlOnly(merged)) {
+      try {
+        return await this.getTouristsSql(userId, merged);
+      } catch (err) {
+        this.logger.warn(`getTouristsSql fallback: ${(err as Error).message}`);
+      }
+    }
     const groups = new Map<string, WmsBiTransferOrderLineRecord[]>();
-    for (const line of await this.filteredLines(userId, { ...filters, kind: 'TOURIST' })) {
+    for (const line of await this.filteredLines(userId, merged)) {
       const key = [line.receiverOp, line.senderOp, line.itemCode].join('\t');
       const group = groups.get(key) ?? [];
       group.push(line);
       groups.set(key, group);
     }
-    return [...groups.values()]
+    const limit = clampLimit(filters.touristsLimit, 300, 1, 2000);
+    const offset = clampOffset(filters.touristsOffset, 500_000);
+    const sorted = [...groups.values()]
       .map((lines) => {
         const first = lines[0];
         return {
@@ -767,8 +1006,8 @@ export class WmsAnalyticsService implements OnModuleInit {
           lastDate: maxDate(lines),
         };
       })
-      .sort((a, b) => b.valueTotal - a.valueTotal || b.rows - a.rows)
-      .slice(0, 250);
+      .sort((a, b) => b.valueTotal - a.valueTotal || b.rows - a.rows);
+    return sorted.slice(offset, offset + limit);
   }
 
   async getReplenishmentRisks(userId: string, filters: WmsBiTransferFilters): Promise<WmsBiReplenishmentRiskRow[]> {
@@ -811,13 +1050,15 @@ export class WmsAnalyticsService implements OnModuleInit {
       }
       flush(null);
     }
+    const lim = clampLimit(filters.risksLimit, 250, 1, 2000);
+    const off = clampOffset(filters.risksOffset, 500_000);
     return risks
       .sort(
         (a, b) =>
           b.touristValueUntilNextReplenishment - a.touristValueUntilNextReplenishment ||
           b.touristRowsUntilNextReplenishment - a.touristRowsUntilNextReplenishment,
       )
-      .slice(0, 250);
+      .slice(off, off + lim);
   }
 
   private rowToTransferLineInput(
@@ -968,7 +1209,7 @@ export class WmsAnalyticsService implements OnModuleInit {
     for (const part of chunks(lines, 300)) {
       const values: unknown[] = [];
       const placeholders = part.map((line, rowIndex) => {
-        const base = rowIndex * 19;
+        const base = rowIndex * 23;
         values.push(
           line.id,
           line.userId,
@@ -979,6 +1220,10 @@ export class WmsAnalyticsService implements OnModuleInit {
           line.orderDate,
           line.senderWarehouse,
           line.receiverWarehouse,
+          line.senderWarehouseType,
+          line.senderOp,
+          line.receiverWarehouseType,
+          line.receiverOp,
           line.itemName,
           line.itemArticle,
           line.itemCode,
@@ -990,11 +1235,12 @@ export class WmsAnalyticsService implements OnModuleInit {
           line.createdAt,
           JSON.stringify(line),
         );
-        return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, $${base + 9}, $${base + 10}, $${base + 11}, $${base + 12}, $${base + 13}, $${base + 14}, $${base + 15}, $${base + 16}, $${base + 17}, $${base + 18}, $${base + 19}::jsonb)`;
+        return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, $${base + 9}, $${base + 10}, $${base + 11}, $${base + 12}, $${base + 13}, $${base + 14}, $${base + 15}, $${base + 16}, $${base + 17}, $${base + 18}, $${base + 19}, $${base + 20}, $${base + 21}, $${base + 22}, $${base + 23}::jsonb)`;
       });
       await client.query(
         `INSERT INTO wms_bi_transfer_order_line
          (id, user_id, batch_id, row_number, order_ref, order_number, order_date, sender_warehouse, receiver_warehouse,
+          sender_warehouse_type, sender_op, receiver_warehouse_type, receiver_op,
           item_name, item_article, item_code, purpose, base_document, is_retail_price, price, kind, created_at, payload)
          VALUES ${placeholders.join(', ')}`,
         values,
@@ -1025,7 +1271,9 @@ export class WmsAnalyticsService implements OnModuleInit {
       const sql = `
         SELECT
           id, user_id, batch_id, row_number, order_ref, order_number, order_date,
-          sender_warehouse, receiver_warehouse, item_name, item_article, item_code,
+          sender_warehouse, receiver_warehouse,
+          sender_warehouse_type, sender_op, receiver_warehouse_type, receiver_op,
+          item_name, item_article, item_code,
           purpose, base_document, is_retail_price, price, kind, created_at,
           COALESCE((NULLIF(trim(COALESCE(payload->>'quantity', '')), ''))::double precision, 0) AS quantity,
           CASE
