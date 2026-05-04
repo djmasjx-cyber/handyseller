@@ -432,15 +432,6 @@ function numFromDb(value: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-/** Список уникальных номеров заказов для UI (колонка «Номер» в Excel). */
-function formatDistinctOrderNumbers(source: string[] | null | undefined): string {
-  if (!source?.length) return '';
-  const sorted = [...new Set(source.map((s) => String(s ?? '').trim()).filter(Boolean))].sort((a, b) =>
-    a.localeCompare(b, 'ru', { numeric: true, sensitivity: 'base' }),
-  );
-  return sorted.join(', ');
-}
-
 function isoDate(d: unknown): string {
   if (d instanceof Date && Number.isFinite(d.getTime())) return d.toISOString();
   return String(d ?? '');
@@ -991,45 +982,41 @@ export class WmsAnalyticsService implements OnModuleInit {
     const offParam = params.length + 2;
     const sql = `
       SELECT
-        receiver_op,
-        MIN(receiver_warehouse) AS receiver_warehouse,
-        MIN(receiver_warehouse_type) AS receiver_warehouse_type,
-        sender_op,
-        MIN(sender_warehouse) AS sender_warehouse,
-        MIN(sender_warehouse_type) AS sender_warehouse_type,
-        item_code,
-        MAX(item_name) AS item_name,
-        MAX(item_article) AS item_article,
-        COUNT(*)::bigint AS rows_n,
-        COUNT(DISTINCT order_number)::bigint AS orders_n,
-        COALESCE(SUM(price), 0)::float8 AS value_total,
-        MIN((order_date AT TIME ZONE 'UTC')::date)::text AS first_d,
-        MAX((order_date AT TIME ZONE 'UTC')::date)::text AS last_d,
-        array_agg(DISTINCT order_number) AS order_nums
-      FROM wms_bi_transfer_order_line
+        t.order_number,
+        t.receiver_warehouse,
+        t.receiver_warehouse_type,
+        t.receiver_op,
+        t.sender_warehouse,
+        t.sender_warehouse_type,
+        t.sender_op,
+        t.item_code,
+        t.item_name,
+        t.item_article,
+        t.price,
+        t.order_date,
+        SUM(t.price) OVER (PARTITION BY t.user_id, t.order_number) AS order_sum
+      FROM wms_bi_transfer_order_line t
       WHERE ${whereSql}
-      GROUP BY receiver_op, sender_op, item_code
-      ORDER BY value_total DESC, rows_n DESC
+      ORDER BY t.order_number ASC, t.item_code ASC, t.sender_op ASC
       LIMIT $${limParam} OFFSET $${offParam}
     `;
     const res = await this.pool!.query<{
-      receiver_op: string;
+      order_number: string;
       receiver_warehouse: string;
       receiver_warehouse_type: string;
-      sender_op: string;
+      receiver_op: string;
       sender_warehouse: string;
       sender_warehouse_type: string;
+      sender_op: string;
       item_code: string;
       item_name: string;
       item_article: string | null;
-      rows_n: string;
-      orders_n: string;
-      value_total: string;
-      first_d: string | null;
-      last_d: string | null;
-      order_nums: string[] | null;
+      price: string;
+      order_date: Date;
+      order_sum: string;
     }>(sql, [...params, limit, offset]);
     return res.rows.map((r) => ({
+      orderNumber: r.order_number,
       receiverWarehouse: r.receiver_warehouse,
       receiverWarehouseType: r.receiver_warehouse_type,
       receiverOp: r.receiver_op,
@@ -1039,12 +1026,9 @@ export class WmsAnalyticsService implements OnModuleInit {
       itemCode: r.item_code,
       itemArticle: r.item_article,
       itemName: r.item_name,
-      orderNumbers: formatDistinctOrderNumbers(r.order_nums),
-      rows: Number(r.rows_n),
-      orders: Number(r.orders_n),
-      valueTotal: numFromDb(r.value_total),
-      firstDate: r.first_d ?? null,
-      lastDate: r.last_d ?? null,
+      lineValue: numFromDb(r.price),
+      orderSum: numFromDb(r.order_sum),
+      orderDate: isoDate(r.order_date),
     }));
   }
 
@@ -1094,37 +1078,36 @@ export class WmsAnalyticsService implements OnModuleInit {
         this.logger.warn(`getTouristsSql fallback: ${(err as Error).message}`);
       }
     }
-    const groups = new Map<string, WmsBiTransferOrderLineRecord[]>();
-    for (const line of await this.filteredLines(userId, merged)) {
-      const key = [line.receiverOp, line.senderOp, line.itemCode].join('\t');
-      const group = groups.get(key) ?? [];
-      group.push(line);
-      groups.set(key, group);
+    const touristLines = (await this.filteredLines(userId, merged)).filter((l) => l.kind === 'TOURIST');
+    const orderSumMap = new Map<string, number>();
+    for (const line of touristLines) {
+      const on = line.orderNumber;
+      orderSumMap.set(on, (orderSumMap.get(on) ?? 0) + line.price);
     }
     const limit = clampBiTableLimit(filters.touristsLimit);
     const offset = clampOffset(filters.touristsOffset, 500_000);
-    const sorted = [...groups.values()]
-      .map((lines) => {
-        const first = lines[0];
-        return {
-          receiverWarehouse: first.receiverWarehouse,
-          receiverWarehouseType: first.receiverWarehouseType,
-          receiverOp: first.receiverOp,
-          senderWarehouse: first.senderWarehouse,
-          senderWarehouseType: first.senderWarehouseType,
-          senderOp: first.senderOp,
-          itemCode: first.itemCode,
-          itemArticle: first.itemArticle,
-          itemName: first.itemName,
-          orderNumbers: formatDistinctOrderNumbers(lines.map((l) => l.orderNumber)),
-          rows: lines.length,
-          orders: new Set(lines.map((l) => l.orderNumber)).size,
-          valueTotal: sum(lines.map((l) => l.price)),
-          firstDate: minDate(lines),
-          lastDate: maxDate(lines),
-        };
-      })
-      .sort((a, b) => b.valueTotal - a.valueTotal || b.rows - a.rows);
+    const sorted = [...touristLines].sort((a, b) => {
+      const c1 = a.orderNumber.localeCompare(b.orderNumber, 'ru', { numeric: true, sensitivity: 'base' });
+      if (c1 !== 0) return c1;
+      const c2 = a.itemCode.localeCompare(b.itemCode, 'ru');
+      if (c2 !== 0) return c2;
+      return a.senderOp.localeCompare(b.senderOp, 'ru');
+    })
+      .map((line) => ({
+        orderNumber: line.orderNumber,
+        receiverWarehouse: line.receiverWarehouse,
+        receiverWarehouseType: line.receiverWarehouseType,
+        receiverOp: line.receiverOp,
+        senderWarehouse: line.senderWarehouse,
+        senderWarehouseType: line.senderWarehouseType,
+        senderOp: line.senderOp,
+        itemCode: line.itemCode,
+        itemArticle: line.itemArticle,
+        itemName: line.itemName,
+        lineValue: line.price,
+        orderSum: orderSumMap.get(line.orderNumber) ?? line.price,
+        orderDate: line.orderDate,
+      }));
     return sorted.slice(offset, offset + limit);
   }
 
