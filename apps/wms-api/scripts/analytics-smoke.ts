@@ -57,9 +57,8 @@ async function main() {
   assert.equal(options.receiverOps.includes('ЛОНМАДИ ЕЛИНО'), true);
 
   const tourists = await service.getTourists('test-user', {});
-  assert.equal(tourists.some((row) => row.itemCode === 'CODE-X' && row.valueTotal === 30), true);
   assert.equal(
-    tourists.some((row) => row.itemCode === 'CODE-X' && row.orderNumbers.includes('MOV-3')),
+    tourists.some((row) => row.itemCode === 'CODE-X' && row.lineValue === 30 && row.orderNumber === 'MOV-3'),
     true,
   );
 

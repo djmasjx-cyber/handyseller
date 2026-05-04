@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Label } from "@handyseller/ui"
-import { FileUp, Layers, RefreshCw, Trash2 } from "lucide-react"
+import { ArrowDown, ArrowUp, ArrowUpDown, FileUp, Layers, RefreshCw, Trash2 } from "lucide-react"
 import { WmsSubnav } from "@/components/wms/wms-subnav"
 import { authFetch } from "@/lib/auth-fetch"
 import { AUTH_STORAGE_KEYS } from "@/lib/auth-storage"
@@ -48,6 +48,7 @@ type ByOpRow = {
 }
 
 type TouristRow = {
+  orderNumber: string
   receiverWarehouse: string
   receiverWarehouseType: string
   receiverOp: string
@@ -57,14 +58,12 @@ type TouristRow = {
   itemCode: string
   itemArticle: string | null
   itemName: string
-  /** Номера заказов из колонки «Номер» в файле */
-  orderNumbers: string
-  rows: number
-  orders: number
-  valueTotal: number
-  firstDate: string | null
-  lastDate: string | null
+  lineValue: number
+  orderSum: number
+  orderDate: string
 }
+
+type TouristSortKey = "default" | "period" | "orderSum"
 
 type RiskRow = {
   receiverWarehouse: string
@@ -269,6 +268,10 @@ export default function WmsTransferAnalyticsPage() {
     risksOffset: 0,
   })
   const [itemPickerOpen, setItemPickerOpen] = useState(false)
+  const [touristSort, setTouristSort] = useState<{ key: TouristSortKey; dir: "asc" | "desc" }>({
+    key: "default",
+    dir: "asc",
+  })
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -276,6 +279,28 @@ export default function WmsTransferAnalyticsPage() {
 
   const query = useMemo(() => queryFromFilters(filters), [filters])
   const catalogQuery = useMemo(() => queryFromFiltersExcludingItem(filters), [filters])
+
+  const touristsSorted = useMemo(() => {
+    const rows = tourists.slice()
+    if (touristSort.key === "default") return rows
+    const dir = touristSort.dir === "asc" ? 1 : -1
+    if (touristSort.key === "period") {
+      rows.sort((a, b) => dir * a.orderDate.localeCompare(b.orderDate))
+      return rows
+    }
+    rows.sort((a, b) => {
+      const d = dir * (a.orderSum - b.orderSum)
+      if (d !== 0) return d
+      return a.orderNumber.localeCompare(b.orderNumber, "ru", { numeric: true, sensitivity: "base" })
+    })
+    return rows
+  }, [tourists, touristSort])
+
+  const toggleTouristSort = (key: "period" | "orderSum") => {
+    setTouristSort((prev) =>
+      prev.key === key ? { key, dir: prev.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" },
+    )
+  }
 
   const load = useCallback(async () => {
     if (!token) return
@@ -740,28 +765,109 @@ export default function WmsTransferAnalyticsPage() {
 
       <Card className="flex min-h-0 flex-col">
         <CardHeader className="shrink-0 space-y-1.5 pb-3">
-          <CardTitle>Туристы по маршрутам и товарам</CardTitle>
-          <CardDescription>Главная витрина для поиска товаров, которые путешествуют между ОП.</CardDescription>
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <CardTitle>Туристы по маршрутам и товарам</CardTitle>
+              <CardDescription>
+                Позиции по заказам: строки одного заказа рядом. По умолчанию сортировка по номеру заказа; столбцы «Период» и
+                «Сумма» (по заказу) можно отсортировать.
+              </CardDescription>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="shrink-0"
+              disabled={touristSort.key === "default"}
+              onClick={() => setTouristSort({ key: "default", dir: "asc" })}
+            >
+              По номеру заказа
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="min-h-0 flex-1 pt-0">
-          <SimpleTable
-            scrollClassName={ANALYTICS_TABLE_SCROLL}
-            tableClassName="min-w-[960px]"
-            headers={["№ заказа", "Получатель", "Отправитель", "Склад", "Товар", "Строк", "Заказов", "Сумма", "Период"]}
-            rows={tourists.map((row) => [
-              row.orderNumbers?.trim() ? row.orderNumbers : "—",
-              row.receiverOp,
-              row.senderOp,
-              row.receiverWarehouseType === row.senderWarehouseType
-                ? row.receiverWarehouseType
-                : `${row.senderWarehouseType} → ${row.receiverWarehouseType}`,
-              row.itemArticle ? `${row.itemArticle} · ${row.itemName}` : row.itemName,
-              numberRu.format(row.rows),
-              numberRu.format(row.orders),
-              money(row.valueTotal),
-              `${dateRu(row.firstDate)} — ${dateRu(row.lastDate)}`,
-            ])}
-          />
+          <div className={ANALYTICS_TABLE_SCROLL}>
+            <table className="w-full min-w-[1040px] text-left text-sm">
+              <thead className="sticky top-0 z-[1] border-b bg-background/95 text-muted-foreground backdrop-blur supports-[backdrop-filter]:bg-background/80">
+                <tr>
+                  <th className="whitespace-nowrap px-3 py-2 font-medium">№ заказа</th>
+                  <th className="whitespace-nowrap px-3 py-2 font-medium">Получатель</th>
+                  <th className="whitespace-nowrap px-3 py-2 font-medium">Отправитель</th>
+                  <th className="whitespace-nowrap px-3 py-2 font-medium">Склад</th>
+                  <th className="whitespace-nowrap px-3 py-2 font-medium">Товар</th>
+                  <th className="whitespace-nowrap px-3 py-2 font-medium">Строк</th>
+                  <th className="whitespace-nowrap px-3 py-2 font-medium">Заказов</th>
+                  <th className="whitespace-nowrap px-3 py-2 font-medium">Стоимость</th>
+                  <th className="whitespace-nowrap px-3 py-2 font-medium">
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 rounded hover:bg-muted"
+                      onClick={() => toggleTouristSort("period")}
+                    >
+                      Период
+                      {touristSort.key === "period" ? (
+                        touristSort.dir === "asc" ? (
+                          <ArrowUp className="h-3.5 w-3.5" />
+                        ) : (
+                          <ArrowDown className="h-3.5 w-3.5" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="h-3.5 w-3.5 opacity-40" />
+                      )}
+                    </button>
+                  </th>
+                  <th className="whitespace-nowrap px-3 py-2 font-medium">
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 rounded hover:bg-muted"
+                      onClick={() => toggleTouristSort("orderSum")}
+                    >
+                      Сумма
+                      {touristSort.key === "orderSum" ? (
+                        touristSort.dir === "asc" ? (
+                          <ArrowUp className="h-3.5 w-3.5" />
+                        ) : (
+                          <ArrowDown className="h-3.5 w-3.5" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="h-3.5 w-3.5 opacity-40" />
+                      )}
+                    </button>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {touristsSorted.length === 0 ? (
+                  <tr>
+                    <td colSpan={10} className="p-4 text-muted-foreground">
+                      Данных пока нет. Загрузите файл или измените фильтры.
+                    </td>
+                  </tr>
+                ) : (
+                  touristsSorted.map((row, idx) => (
+                    <tr key={`${row.orderNumber}-${row.itemCode}-${idx}`} className="border-b last:border-0">
+                      <td className="px-3 py-2 align-top font-medium">{row.orderNumber || "—"}</td>
+                      <td className="px-3 py-2 align-top">{row.receiverOp}</td>
+                      <td className="px-3 py-2 align-top">{row.senderOp}</td>
+                      <td className="max-w-[min(28rem,44vw)] px-3 py-2 align-top break-words">
+                        {row.receiverWarehouseType === row.senderWarehouseType
+                          ? row.receiverWarehouseType
+                          : `${row.senderWarehouseType} → ${row.receiverWarehouseType}`}
+                      </td>
+                      <td className="max-w-[min(28rem,44vw)] px-3 py-2 align-top break-words">
+                        {row.itemArticle ? `${row.itemArticle} · ${row.itemName}` : row.itemName}
+                      </td>
+                      <td className="px-3 py-2 align-top tabular-nums">1</td>
+                      <td className="px-3 py-2 align-top tabular-nums">1</td>
+                      <td className="px-3 py-2 align-top tabular-nums">{money(row.lineValue)}</td>
+                      <td className="px-3 py-2 align-top whitespace-nowrap">{dateRu(row.orderDate)}</td>
+                      <td className="px-3 py-2 align-top tabular-nums font-medium">{money(row.orderSum)}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </CardContent>
       </Card>
     </main>

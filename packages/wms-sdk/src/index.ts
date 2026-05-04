@@ -323,7 +323,9 @@ export interface WmsBiTransferByOpRow {
   lastDate: string | null;
 }
 
+/** Одна строка туриста (позиция заказа); строки одного заказа идут подряд при сортировке по умолчанию. */
 export interface WmsBiTouristRow {
+  orderNumber: string;
   receiverWarehouse: string;
   receiverWarehouseType: string;
   receiverOp: string;
@@ -333,13 +335,12 @@ export interface WmsBiTouristRow {
   itemCode: string;
   itemArticle: string | null;
   itemName: string;
-  /** Уникальные номера заказов из колонки «Номер» в файле, через запятую */
-  orderNumbers: string;
-  rows: number;
-  orders: number;
-  valueTotal: number;
-  firstDate: string | null;
-  lastDate: string | null;
+  /** Стоимость строки (поле «Цена»). */
+  lineValue: number;
+  /** Сумма по заказу (все туристские строки с этим номером в выборке). */
+  orderSum: number;
+  /** Дата заказа (ISO) для колонки «Период» и сортировки. */
+  orderDate: string;
 }
 
 export interface WmsBiReplenishmentRiskRow {
