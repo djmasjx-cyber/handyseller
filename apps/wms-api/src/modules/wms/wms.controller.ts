@@ -239,8 +239,18 @@ export class WmsController {
 
   @Get('v1/analytics/transfers/tourists')
   @WmsAccess('read')
-  tourists(@CurrentUser('userId') userId: string, @Query() query: Record<string, string | string[] | undefined>) {
-    return this.analytics.getTourists(userId, this.transferFilters(query));
+  touristOrders(@CurrentUser('userId') userId: string, @Query() query: Record<string, string | string[] | undefined>) {
+    return this.analytics.getTouristOrders(userId, this.transferFilters(query));
+  }
+
+  @Get('v1/analytics/transfers/tourists/order-detail')
+  @WmsAccess('read')
+  touristOrderDetail(@CurrentUser('userId') userId: string, @Query() query: Record<string, string | string[] | undefined>) {
+    const orderNumber = this.firstQueryValue(query.orderNumber)?.trim() ?? '';
+    if (!orderNumber) {
+      throw new BadRequestException('Укажите orderNumber (номер заказа).');
+    }
+    return this.analytics.getTouristOrderDetail(userId, orderNumber, this.transferFilters(query));
   }
 
   @Get('v1/analytics/transfers/replenishment-risks')

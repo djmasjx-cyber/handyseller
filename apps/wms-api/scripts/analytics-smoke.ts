@@ -56,11 +56,11 @@ async function main() {
   assert.equal(options.warehouseTypes.includes('Склад Техники'), true);
   assert.equal(options.receiverOps.includes('ЛОНМАДИ ЕЛИНО'), true);
 
-  const tourists = await service.getTourists('test-user', {});
-  assert.equal(
-    tourists.some((row) => row.itemCode === 'CODE-X' && row.lineValue === 30 && row.orderNumber === 'MOV-3'),
-    true,
-  );
+  const touristOrders = await service.getTouristOrders('test-user', {});
+  const mov3 = touristOrders.find((o) => o.orderNumber === 'MOV-3');
+  assert.equal(mov3 != null && mov3.orderTotal === 30, true);
+  const detail = await service.getTouristOrderDetail('test-user', 'MOV-3', {});
+  assert.equal(detail.lines.some((l) => l.itemCode === 'CODE-X' && l.sum === 30), true);
 
   const freq = await service.getItemFrequency('test-user', {});
   const fx = freq.find((r) => r.itemCode === 'CODE-X');
