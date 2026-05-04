@@ -58,6 +58,10 @@ async function main() {
 
   const tourists = await service.getTourists('test-user', {});
   assert.equal(tourists.some((row) => row.itemCode === 'CODE-X' && row.valueTotal === 30), true);
+  assert.equal(
+    tourists.some((row) => row.itemCode === 'CODE-X' && row.orderNumbers.includes('MOV-3')),
+    true,
+  );
 
   const risks = await service.getReplenishmentRisks('test-user', {});
   assert.equal(risks.length, 1);
