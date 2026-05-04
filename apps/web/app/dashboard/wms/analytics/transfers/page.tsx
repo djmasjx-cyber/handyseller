@@ -306,6 +306,13 @@ function canonicalQueryString(qs: string): string {
   return out.toString()
 }
 
+/** Query без служебных для других экранов ключей (напр. orderNumber на карточке заказа). */
+function filterSearchFromLocationSearch(search: string): string {
+  const u = new URLSearchParams(search)
+  u.delete("orderNumber")
+  return u.toString()
+}
+
 function readFileAsBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -338,8 +345,12 @@ function WmsTransferAnalyticsPageContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const pathname = usePathname() ?? "/dashboard/wms/analytics/transfers"
-  /** Дедупликация replace: до прихода searchParams из роутера возможны повторные вызовы с тем же href. */
-  const lastReplacedHref = useRef<string | null>(null)
+  /**
+   * Синхронизация URL ↔ фильтры без гонок:
+   * - После router.replace Next присылает тот же query; без маркера снова parse → setFilters → replace → цикл.
+   * - pendingOwnCanonical: каноническая строка query, которую мы только что отправили в replace; один layout-проход игнорируем.
+   */
+  const pendingOwnCanonical = useRef<string | null>(null)
 
   const [summary, setSummary] = useState<Summary>(emptySummary)
   const [imports, setImports] = useState<ImportBatch[]>([])
@@ -352,16 +363,25 @@ function WmsTransferAnalyticsPageContent() {
   const [byOp, setByOp] = useState<ByOpRow[]>([])
   const [tourists, setTourists] = useState<TouristOrderRow[]>([])
   const [risks, setRisks] = useState<RiskRow[]>([])
-  const [filters, setFilters] = useState<Filters>(getDefaultFilters)
+  const [filters, setFilters] = useState<Filters>(() => {
+    if (typeof window === "undefined") return getDefaultFilters()
+    return parseFiltersFromSearchParams(
+      new URLSearchParams(filterSearchFromLocationSearch(window.location.search)),
+    )
+  })
 
   const searchParamsString = searchParams.toString()
-  const searchKey = useMemo(() => {
-    const u = new URLSearchParams(searchParamsString)
-    u.delete("orderNumber")
-    return u.toString()
-  }, [searchParamsString])
+  const searchKey = useMemo(
+    () => filterSearchFromLocationSearch(searchParamsString),
+    [searchParamsString],
+  )
 
   useLayoutEffect(() => {
+    const cs = canonicalQueryString(searchKey)
+    if (pendingOwnCanonical.current != null && cs === pendingOwnCanonical.current) {
+      pendingOwnCanonical.current = null
+      return
+    }
     const u = new URLSearchParams(searchKey)
     const parsed = parseFiltersFromSearchParams(u)
     setFilters((prev) => {
@@ -374,14 +394,19 @@ function WmsTransferAnalyticsPageContent() {
 
   useEffect(() => {
     const want = filtersQueryKey(filters)
-    if (canonicalQueryString(want) === canonicalQueryString(searchKey)) {
-      lastReplacedHref.current = null
-      return
-    }
-    const href = want ? `${pathname}?${want}` : pathname
-    if (lastReplacedHref.current === href) return
-    lastReplacedHref.current = href
-    router.replace(href, { scroll: false })
+    const cw = canonicalQueryString(want)
+    const cs = canonicalQueryString(searchKey)
+    if (cw === cs) return
+    const t = window.setTimeout(() => {
+      const w = filtersQueryKey(filters)
+      const cwn = canonicalQueryString(w)
+      const csn = canonicalQueryString(searchKey)
+      if (cwn === csn) return
+      pendingOwnCanonical.current = cwn
+      const href = w ? `${pathname}?${w}` : pathname
+      router.replace(href, { scroll: false })
+    }, 160)
+    return () => window.clearTimeout(t)
   }, [filters, pathname, router, searchKey])
   const [itemPickerOpen, setItemPickerOpen] = useState(false)
   const [touristSort, setTouristSort] = useState<{ key: TouristSortKey; dir: "asc" | "desc" }>({
