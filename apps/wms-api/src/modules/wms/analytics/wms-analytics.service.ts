@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { classifyTransferOrderLine } from '@handyseller/wms-domain';
 import type {
   WmsBiImportBatchRecord,
@@ -468,12 +468,73 @@ export class WmsAnalyticsService implements OnModuleInit {
     return [...this.batches.values()].filter((b) => b.userId === userId).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
+  /**
+   * Удаляет партию импорта и все связанные строки (сырые и нормализованные) для пользователя.
+   */
+  async deleteImportBatch(userId: string, batchId: string): Promise<{ deleted: true }> {
+    const id = batchId.trim();
+    if (!id) {
+      throw new BadRequestException('Не указан идентификатор партии.');
+    }
+
+    if (this.pool) {
+      const exists = await this.pool.query<{ id: string }>(
+        'SELECT id FROM wms_bi_import_batch WHERE id = $1 AND user_id = $2',
+        [id, userId],
+      );
+      if (exists.rowCount === 0) {
+        throw new NotFoundException('Партия не найдена.');
+      }
+      const client = await this.pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query('DELETE FROM wms_bi_transfer_order_line WHERE user_id = $1 AND batch_id = $2', [userId, id]);
+        await client.query('DELETE FROM wms_bi_raw_row WHERE user_id = $1 AND batch_id = $2', [userId, id]);
+        await client.query('DELETE FROM wms_bi_import_batch WHERE user_id = $1 AND id = $2', [userId, id]);
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
+      return { deleted: true };
+    }
+
+    const batch = this.batches.get(id);
+    if (!batch || batch.userId !== userId) {
+      throw new NotFoundException('Партия не найдена.');
+    }
+    this.batches.delete(id);
+    for (let i = this.rawRows.length - 1; i >= 0; i -= 1) {
+      const row = this.rawRows[i];
+      if (row.batchId === id && row.userId === userId) {
+        this.rawRows.splice(i, 1);
+      }
+    }
+    for (let i = this.transferLines.length - 1; i >= 0; i -= 1) {
+      const line = this.transferLines[i];
+      if (line.batchId === id && line.userId === userId) {
+        this.transferLines.splice(i, 1);
+      }
+    }
+    return { deleted: true };
+  }
+
   async getTransferSummary(userId: string, filters: WmsBiTransferFilters): Promise<WmsBiTransferSummary> {
     return this.buildSummary(await this.filteredLines(userId, filters));
   }
 
-  async getTransferOptions(userId: string): Promise<WmsBiTransferFilterOptions> {
-    const lines = await this.listLines(userId);
+  /**
+   * Варианты для фильтров. Если передан batchId — только по строкам этой партии
+   * (согласовано с сводками при выбранной партии).
+   */
+  async getTransferOptions(userId: string, batchId?: string | null): Promise<WmsBiTransferFilterOptions> {
+    let lines = await this.listLines(userId);
+    const scope = batchId?.trim();
+    if (scope) {
+      lines = lines.filter((line) => line.batchId === scope);
+    }
     return {
       warehouseTypes: uniqueSorted(
         lines.flatMap((line) => [line.senderWarehouseType, line.receiverWarehouseType]).filter(Boolean),

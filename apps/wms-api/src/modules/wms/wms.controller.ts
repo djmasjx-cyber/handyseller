@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Param, Patch, Post, Query, StreamableFile, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query, StreamableFile, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { WmsAccess } from '../auth/wms-access.metadata';
@@ -213,6 +213,12 @@ export class WmsController {
     return this.analytics.listImports(userId);
   }
 
+  @Delete('v1/analytics/imports/:batchId')
+  @WmsAccess('write')
+  deleteAnalyticsImport(@CurrentUser('userId') userId: string, @Param('batchId') batchId: string) {
+    return this.analytics.deleteImportBatch(userId, batchId);
+  }
+
   @Get('v1/analytics/transfers/summary')
   @WmsAccess('read')
   transferSummary(@CurrentUser('userId') userId: string, @Query() query: Record<string, string | string[] | undefined>) {
@@ -221,8 +227,8 @@ export class WmsController {
 
   @Get('v1/analytics/transfers/options')
   @WmsAccess('read')
-  transferOptions(@CurrentUser('userId') userId: string) {
-    return this.analytics.getTransferOptions(userId);
+  transferOptions(@CurrentUser('userId') userId: string, @Query() query: Record<string, string | string[] | undefined>) {
+    return this.analytics.getTransferOptions(userId, this.transferFilters(query).batchId);
   }
 
   @Get('v1/analytics/transfers/by-op')

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Label } from "@handyseller/ui"
-import { FileUp, RefreshCw } from "lucide-react"
+import { FileUp, RefreshCw, Trash2 } from "lucide-react"
 import { WmsSubnav } from "@/components/wms/wms-subnav"
 import { authFetch } from "@/lib/auth-fetch"
 import { AUTH_STORAGE_KEYS } from "@/lib/auth-storage"
@@ -235,7 +235,7 @@ export default function WmsTransferAnalyticsPage() {
       const [summaryRes, importsRes, optionsRes, byOpRes, touristsRes, risksRes] = await Promise.all([
         authFetch(`/api/wms/v1/analytics/transfers/summary${query}`, { headers }),
         authFetch("/api/wms/v1/analytics/imports", { headers }),
-        authFetch("/api/wms/v1/analytics/transfers/options", { headers }),
+        authFetch(`/api/wms/v1/analytics/transfers/options${query}`, { headers }),
         authFetch(`/api/wms/v1/analytics/transfers/by-op${query}`, { headers }),
         authFetch(`/api/wms/v1/analytics/transfers/tourists${query}`, { headers }),
         authFetch(`/api/wms/v1/analytics/transfers/replenishment-risks${query}`, { headers }),
@@ -310,6 +310,38 @@ export default function WmsTransferAnalyticsPage() {
 
   const setRangeFilter = (key: "qtyMin" | "qtyMax" | "retailMin" | "retailMax" | "costMin" | "costMax", value: string) => {
     setFilters((prev) => ({ ...prev, [key]: value }))
+  }
+
+  const deleteSelectedBatch = async () => {
+    if (!token || !filters.batchId) return
+    const ok = window.confirm(
+      "Удалить выбранную партию из базы вместе со всеми строками этой загрузки? Действие необратимо.",
+    )
+    if (!ok) return
+    setError(null)
+    setSuccess(null)
+    try {
+      const res = await authFetch(`/api/wms/v1/analytics/imports/${encodeURIComponent(filters.batchId)}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const text = await res.text()
+      let data: unknown = text
+      try {
+        data = text ? JSON.parse(text) : {}
+      } catch {
+        data = text
+      }
+      if (!res.ok) {
+        setError(formatHttpError(data, "Не удалось удалить партию."))
+        return
+      }
+      setFilters((prev) => ({ ...prev, batchId: "" }))
+      setSuccess("Партия удалена.")
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Ошибка удаления.")
+    }
   }
 
   return (
@@ -474,7 +506,23 @@ export default function WmsTransferAnalyticsPage() {
                   </option>
                 ))}
               </select>
+              <p className="max-w-md text-xs text-muted-foreground">
+                «Все партии» — суммируются все загрузки. Если выбрана одна партия, сводки и таблицы считаются только по ней;
+                значения в фильтрах (ОП, склады, контрагенты) тоже только по этой партии.
+              </p>
             </div>
+            {filters.batchId ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="border-destructive/40 text-destructive hover:bg-destructive/10"
+                onClick={() => void deleteSelectedBatch()}
+                disabled={loading}
+              >
+                <Trash2 className="mr-2 h-4 w-4" />
+                Удалить партию
+              </Button>
+            ) : null}
             <Button type="button" variant="outline" onClick={() => void load()} disabled={loading}>
               <RefreshCw className="mr-2 h-4 w-4" />
               Обновить
