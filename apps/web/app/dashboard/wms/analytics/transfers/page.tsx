@@ -1,7 +1,8 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Label } from "@handyseller/ui"
 import { ArrowDown, ArrowUp, ArrowUpDown, FileUp, Layers, RefreshCw, Trash2 } from "lucide-react"
 import { WmsSubnav } from "@/components/wms/wms-subnav"
@@ -209,6 +210,83 @@ function queryFromFiltersExcludingItem(filters: Filters): string {
   return queryFromFilters({ ...filters, item: "", itemCodes: [] })
 }
 
+function getDefaultFilters(): Filters {
+  return {
+    from: "",
+    to: "",
+    receiverOps: [],
+    senderOps: [],
+    warehouseTypes: [],
+    counterparties: [],
+    qtyMin: "",
+    qtyMax: "",
+    retailMin: "",
+    retailMax: "",
+    costMin: "",
+    costMax: "",
+    item: "",
+    itemCodes: [],
+    kind: "",
+    batchId: "",
+    byOpLimit: 50_000,
+    byOpOffset: 0,
+    touristsLimit: 50_000,
+    touristsOffset: 0,
+    risksLimit: 50_000,
+    risksOffset: 0,
+  }
+}
+
+function clampTableInt(raw: string | null, min: number, max: number, fallback: number): number {
+  if (raw == null || raw === "") return fallback
+  const n = Number.parseInt(raw, 10)
+  if (!Number.isFinite(n)) return fallback
+  return Math.min(max, Math.max(min, n))
+}
+
+/** Восстановление фильтров из адресной строки (тот же формат, что queryFromFilters). */
+function parseFiltersFromSearchParams(sp: URLSearchParams): Filters {
+  const d = getDefaultFilters()
+  const from = sp.get("from")
+  if (from) d.from = from
+  const to = sp.get("to")
+  if (to) d.to = to
+  const splitList = (key: string) => {
+    const raw = sp.get(key)
+    if (!raw) return []
+    return raw
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+  }
+  d.receiverOps = splitList("receiverOps")
+  d.senderOps = splitList("senderOps")
+  d.warehouseTypes = splitList("warehouseTypes")
+  d.counterparties = splitList("counterparties").map((c) => (c === COUNTERPARTY_EMPTY_PARAM ? "" : c))
+  d.itemCodes = splitList("itemCodes")
+  d.qtyMin = sp.get("qtyMin") ?? ""
+  d.qtyMax = sp.get("qtyMax") ?? ""
+  d.retailMin = sp.get("retailMin") ?? ""
+  d.retailMax = sp.get("retailMax") ?? ""
+  d.costMin = sp.get("costMin") ?? ""
+  d.costMax = sp.get("costMax") ?? ""
+  d.item = sp.get("item") ?? ""
+  const kind = sp.get("kind")
+  if (kind === "REPLENISHMENT" || kind === "TOURIST") d.kind = kind
+  d.batchId = sp.get("batchId") ?? ""
+  d.byOpLimit = clampTableInt(sp.get("byOpLimit"), 1, 100_000, d.byOpLimit)
+  d.byOpOffset = clampTableInt(sp.get("byOpOffset"), 0, 2_000_000, d.byOpOffset)
+  d.touristsLimit = clampTableInt(sp.get("touristsLimit"), 1, 100_000, d.touristsLimit)
+  d.touristsOffset = clampTableInt(sp.get("touristsOffset"), 0, 2_000_000, d.touristsOffset)
+  d.risksLimit = clampTableInt(sp.get("risksLimit"), 1, 100_000, d.risksLimit)
+  d.risksOffset = clampTableInt(sp.get("risksOffset"), 0, 2_000_000, d.risksOffset)
+  return d
+}
+
+function filtersQueryKey(filters: Filters): string {
+  return queryFromFilters(filters).slice(1)
+}
+
 function readFileAsBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -236,8 +314,12 @@ function formatHttpError(data: unknown, fallback: string): string {
   return fallback
 }
 
-export default function WmsTransferAnalyticsPage() {
+function WmsTransferAnalyticsPageContent() {
   const token = typeof window !== "undefined" ? localStorage.getItem(AUTH_STORAGE_KEYS.accessToken) : null
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const pathname = usePathname() ?? "/dashboard/wms/analytics/transfers"
+
   const [summary, setSummary] = useState<Summary>(emptySummary)
   const [imports, setImports] = useState<ImportBatch[]>([])
   const [options, setOptions] = useState<FilterOptions>({
@@ -249,30 +331,29 @@ export default function WmsTransferAnalyticsPage() {
   const [byOp, setByOp] = useState<ByOpRow[]>([])
   const [tourists, setTourists] = useState<TouristOrderRow[]>([])
   const [risks, setRisks] = useState<RiskRow[]>([])
-  const [filters, setFilters] = useState<Filters>({
-    from: "",
-    to: "",
-    receiverOps: [],
-    senderOps: [],
-    warehouseTypes: [],
-    counterparties: [],
-    qtyMin: "",
-    qtyMax: "",
-    retailMin: "",
-    retailMax: "",
-    costMin: "",
-    costMax: "",
-    item: "",
-    itemCodes: [],
-    kind: "",
-    batchId: "",
-    byOpLimit: 50_000,
-    byOpOffset: 0,
-    touristsLimit: 50_000,
-    touristsOffset: 0,
-    risksLimit: 50_000,
-    risksOffset: 0,
-  })
+  const [filters, setFilters] = useState<Filters>(getDefaultFilters)
+
+  const searchKey = useMemo(() => {
+    const u = new URLSearchParams(searchParams.toString())
+    u.delete("orderNumber")
+    return u.toString()
+  }, [searchParams])
+
+  useLayoutEffect(() => {
+    const u = new URLSearchParams(searchKey)
+    const parsed = parseFiltersFromSearchParams(u)
+    setFilters((prev) => {
+      if (filtersQueryKey(prev) === filtersQueryKey(parsed)) return prev
+      return parsed
+    })
+  }, [searchKey])
+
+  useEffect(() => {
+    const want = filtersQueryKey(filters)
+    if (want === searchKey) return
+    const href = want ? `${pathname}?${want}` : pathname
+    router.replace(href, { scroll: false })
+  }, [filters, pathname, router, searchKey])
   const [itemPickerOpen, setItemPickerOpen] = useState(false)
   const [touristSort, setTouristSort] = useState<{ key: TouristSortKey; dir: "asc" | "desc" }>({
     key: "default",
@@ -879,6 +960,21 @@ export default function WmsTransferAnalyticsPage() {
         </CardContent>
       </Card>
     </main>
+  )
+}
+
+export default function WmsTransferAnalyticsPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="space-y-6 p-6">
+          <p className="text-sm text-muted-foreground">WMS / BI</p>
+          <p className="text-muted-foreground">Загрузка аналитики…</p>
+        </main>
+      }
+    >
+      <WmsTransferAnalyticsPageContent />
+    </Suspense>
   )
 }
 
