@@ -214,6 +214,14 @@ export interface WmsBiTransferOrderLineRecord {
   purpose: string | null;
   baseDocument: string | null;
   isRetailPrice: boolean | null;
+  /** Количество (шт.) */
+  quantity: number;
+  /** Розничная цена за единицу, ₽ (целые рубли, округление вверх при импорте). */
+  retailPrice: number | null;
+  /** Себестоимость за единицу, ₽ (целые рубли, округление вверх при импорте). */
+  costPrice: number | null;
+  /** Контрагент (из файла). */
+  counterparty: string | null;
   price: number;
   kind: WmsBiTransferOrderKind;
   createdAt: string;
@@ -232,6 +240,10 @@ export interface WmsBiTransferOrderLineInput {
   purpose?: string | null;
   baseDocument?: string | null;
   isRetailPrice?: boolean | null;
+  quantity?: number | null;
+  retailPrice?: number | null;
+  costPrice?: number | null;
+  counterparty?: string | null;
   price?: number | null;
 }
 
@@ -246,12 +258,21 @@ export interface WmsBiTransferFilters {
   item?: string;
   kind?: WmsBiTransferOrderKind;
   batchId?: string;
+  /** Мультивыбор контрагентов (точное совпадение строки из файла). */
+  counterparties?: string[];
+  qtyMin?: number;
+  qtyMax?: number;
+  retailMin?: number;
+  retailMax?: number;
+  costMin?: number;
+  costMax?: number;
 }
 
 export interface WmsBiTransferFilterOptions {
   warehouseTypes: string[];
   receiverOps: string[];
   senderOps: string[];
+  counterparties: string[];
 }
 
 export interface WmsBiTransferSummary {

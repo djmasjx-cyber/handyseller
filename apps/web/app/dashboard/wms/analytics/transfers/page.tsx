@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Label } from "@handyseller/ui"
-import { FileUp, RefreshCw } from "lucide-react"
+import { FileUp, RefreshCw, Trash2 } from "lucide-react"
 import { WmsSubnav } from "@/components/wms/wms-subnav"
 import { authFetch } from "@/lib/auth-fetch"
 import { AUTH_STORAGE_KEYS } from "@/lib/auth-storage"
@@ -84,6 +84,13 @@ type Filters = {
   receiverOps: string[]
   senderOps: string[]
   warehouseTypes: string[]
+  counterparties: string[]
+  qtyMin: string
+  qtyMax: string
+  retailMin: string
+  retailMax: string
+  costMin: string
+  costMax: string
   item: string
   kind: "" | TransferKind
   batchId: string
@@ -93,6 +100,7 @@ type FilterOptions = {
   warehouseTypes: string[]
   receiverOps: string[]
   senderOps: string[]
+  counterparties: string[]
 }
 
 const emptySummary: Summary = {
@@ -121,9 +129,29 @@ function dateShort(value: string | null): string {
   return value.slice(0, 10)
 }
 
+/** Дата в формате дд.мм.гггг (разделитель — точка). */
+function dateRu(value: string | null): string {
+  if (!value) return "—"
+  const ymd = value.slice(0, 10)
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd)
+  if (!m) return ymd.replace(/-/g, ".")
+  return `${m[3]}.${m[2]}.${m[1]}`
+}
+
+const COUNTERPARTY_EMPTY_PARAM = "__EMPTY__"
+
 function queryFromFilters(filters: Filters): string {
   const qs = new URLSearchParams()
   for (const [key, value] of Object.entries(filters)) {
+    if (key === "counterparties" && Array.isArray(value)) {
+      if (value.length) {
+        qs.set(
+          key,
+          value.map((c) => (c === "" ? COUNTERPARTY_EMPTY_PARAM : c)).join(","),
+        )
+      }
+      continue
+    }
     if (Array.isArray(value)) {
       if (value.length) qs.set(key, value.join(","))
     } else if (value) {
@@ -165,7 +193,12 @@ export default function WmsTransferAnalyticsPage() {
   const token = typeof window !== "undefined" ? localStorage.getItem(AUTH_STORAGE_KEYS.accessToken) : null
   const [summary, setSummary] = useState<Summary>(emptySummary)
   const [imports, setImports] = useState<ImportBatch[]>([])
-  const [options, setOptions] = useState<FilterOptions>({ warehouseTypes: [], receiverOps: [], senderOps: [] })
+  const [options, setOptions] = useState<FilterOptions>({
+    warehouseTypes: [],
+    receiverOps: [],
+    senderOps: [],
+    counterparties: [],
+  })
   const [byOp, setByOp] = useState<ByOpRow[]>([])
   const [tourists, setTourists] = useState<TouristRow[]>([])
   const [risks, setRisks] = useState<RiskRow[]>([])
@@ -175,6 +208,13 @@ export default function WmsTransferAnalyticsPage() {
     receiverOps: [],
     senderOps: [],
     warehouseTypes: [],
+    counterparties: [],
+    qtyMin: "",
+    qtyMax: "",
+    retailMin: "",
+    retailMax: "",
+    costMin: "",
+    costMax: "",
     item: "",
     kind: "",
     batchId: "",
@@ -195,7 +235,7 @@ export default function WmsTransferAnalyticsPage() {
       const [summaryRes, importsRes, optionsRes, byOpRes, touristsRes, risksRes] = await Promise.all([
         authFetch(`/api/wms/v1/analytics/transfers/summary${query}`, { headers }),
         authFetch("/api/wms/v1/analytics/imports", { headers }),
-        authFetch("/api/wms/v1/analytics/transfers/options", { headers }),
+        authFetch(`/api/wms/v1/analytics/transfers/options${query}`, { headers }),
         authFetch(`/api/wms/v1/analytics/transfers/by-op${query}`, { headers }),
         authFetch(`/api/wms/v1/analytics/transfers/tourists${query}`, { headers }),
         authFetch(`/api/wms/v1/analytics/transfers/replenishment-risks${query}`, { headers }),
@@ -203,7 +243,11 @@ export default function WmsTransferAnalyticsPage() {
       if (!summaryRes.ok) throw new Error("Не удалось загрузить сводку аналитики.")
       setSummary((await summaryRes.json()) as Summary)
       setImports(importsRes.ok ? ((await importsRes.json()) as ImportBatch[]) : [])
-      setOptions(optionsRes.ok ? ((await optionsRes.json()) as FilterOptions) : { warehouseTypes: [], receiverOps: [], senderOps: [] })
+      setOptions(
+        optionsRes.ok
+          ? ((await optionsRes.json()) as FilterOptions)
+          : { warehouseTypes: [], receiverOps: [], senderOps: [], counterparties: [] },
+      )
       setByOp(byOpRes.ok ? ((await byOpRes.json()) as ByOpRow[]) : [])
       setTourists(touristsRes.ok ? ((await touristsRes.json()) as TouristRow[]) : [])
       setRisks(risksRes.ok ? ((await risksRes.json()) as RiskRow[]) : [])
@@ -260,8 +304,44 @@ export default function WmsTransferAnalyticsPage() {
     setFilters((prev) => ({ ...prev, [key]: value }))
   }
 
-  const setListFilter = (key: "receiverOps" | "senderOps" | "warehouseTypes", value: string[]) => {
+  const setListFilter = (key: "receiverOps" | "senderOps" | "warehouseTypes" | "counterparties", value: string[]) => {
     setFilters((prev) => ({ ...prev, [key]: value }))
+  }
+
+  const setRangeFilter = (key: "qtyMin" | "qtyMax" | "retailMin" | "retailMax" | "costMin" | "costMax", value: string) => {
+    setFilters((prev) => ({ ...prev, [key]: value }))
+  }
+
+  const deleteSelectedBatch = async () => {
+    if (!token || !filters.batchId) return
+    const ok = window.confirm(
+      "Удалить выбранную партию из базы вместе со всеми строками этой загрузки? Действие необратимо.",
+    )
+    if (!ok) return
+    setError(null)
+    setSuccess(null)
+    try {
+      const res = await authFetch(`/api/wms/v1/analytics/imports/${encodeURIComponent(filters.batchId)}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const text = await res.text()
+      let data: unknown = text
+      try {
+        data = text ? JSON.parse(text) : {}
+      } catch {
+        data = text
+      }
+      if (!res.ok) {
+        setError(formatHttpError(data, "Не удалось удалить партию."))
+        return
+      }
+      setFilters((prev) => ({ ...prev, batchId: "" }))
+      setSuccess("Партия удалена.")
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Ошибка удаления.")
+    }
   }
 
   return (
@@ -326,9 +406,75 @@ export default function WmsTransferAnalyticsPage() {
               value={filters.senderOps}
               onChange={(value) => setListFilter("senderOps", value)}
             />
+            <CheckSelect
+              id="counterparties"
+              label="Контрагент"
+              options={options.counterparties}
+              value={filters.counterparties}
+              onChange={(value) => setListFilter("counterparties", value)}
+              formatOptionLabel={(v) => (v === "" ? "(не указан)" : v)}
+            />
             <div className="space-y-1">
               <Label htmlFor="item">Товар / артикул</Label>
               <Input id="item" value={filters.item} onChange={(e) => setFilter("item", e.target.value)} />
+            </div>
+          </div>
+          <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+            <div className="space-y-1">
+              <Label htmlFor="qtyMin">Количество от</Label>
+              <Input
+                id="qtyMin"
+                inputMode="decimal"
+                placeholder="напр. 1"
+                value={filters.qtyMin}
+                onChange={(e) => setRangeFilter("qtyMin", e.target.value)}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="qtyMax">Количество до</Label>
+              <Input
+                id="qtyMax"
+                inputMode="decimal"
+                placeholder="напр. 100"
+                value={filters.qtyMax}
+                onChange={(e) => setRangeFilter("qtyMax", e.target.value)}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="retailMin">Розничная цена от, ₽</Label>
+              <Input
+                id="retailMin"
+                inputMode="decimal"
+                value={filters.retailMin}
+                onChange={(e) => setRangeFilter("retailMin", e.target.value)}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="retailMax">Розничная цена до, ₽</Label>
+              <Input
+                id="retailMax"
+                inputMode="decimal"
+                value={filters.retailMax}
+                onChange={(e) => setRangeFilter("retailMax", e.target.value)}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="costMin">Себестоимость от, ₽</Label>
+              <Input
+                id="costMin"
+                inputMode="decimal"
+                value={filters.costMin}
+                onChange={(e) => setRangeFilter("costMin", e.target.value)}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="costMax">Себестоимость до, ₽</Label>
+              <Input
+                id="costMax"
+                inputMode="decimal"
+                value={filters.costMax}
+                onChange={(e) => setRangeFilter("costMax", e.target.value)}
+              />
             </div>
           </div>
           <div className="flex flex-wrap items-end gap-3">
@@ -360,7 +506,23 @@ export default function WmsTransferAnalyticsPage() {
                   </option>
                 ))}
               </select>
+              <p className="max-w-md text-xs text-muted-foreground">
+                «Все партии» — суммируются все загрузки. Если выбрана одна партия, сводки и таблицы считаются только по ней;
+                значения в фильтрах (ОП, склады, контрагенты) тоже только по этой партии.
+              </p>
             </div>
+            {filters.batchId ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="border-destructive/40 text-destructive hover:bg-destructive/10"
+                onClick={() => void deleteSelectedBatch()}
+                disabled={loading}
+              >
+                <Trash2 className="mr-2 h-4 w-4" />
+                Удалить партию
+              </Button>
+            ) : null}
             <Button type="button" variant="outline" onClick={() => void load()} disabled={loading}>
               <RefreshCw className="mr-2 h-4 w-4" />
               Обновить
@@ -377,15 +539,17 @@ export default function WmsTransferAnalyticsPage() {
         <Stat title="Строк" value={numberRu.format(summary.rowsTotal)} hint={`${numberRu.format(summary.ordersTotal)} заказов`} />
         <Stat title="Пополнения" value={numberRu.format(summary.replenishmentRows)} hint={money(summary.replenishmentValue)} />
         <Stat title="Туристы" value={numberRu.format(summary.touristRows)} hint={money(summary.touristValue)} accent />
-        <Stat title="Сумма" value={money(summary.valueTotal)} hint="по полю Цена" />
-        <Stat title="Период" value={`${dateShort(summary.minDate)} — ${dateShort(summary.maxDate)}`} hint={loading ? "загрузка..." : "по фильтру"} />
+        <Stat title="Сумма" value={money(summary.valueTotal)} hint="по полю «Цена», целые ₽ (вверх при импорте)" />
+        <Stat title="Период" value={`${dateRu(summary.minDate)} — ${dateRu(summary.maxDate)}`} hint={loading ? "загрузка..." : "по фильтру"} />
       </section>
 
       <section className="grid gap-4 xl:grid-cols-2">
         <Card>
           <CardHeader>
             <CardTitle>Частота по ОП</CardTitle>
-            <CardDescription>Кто чаще всего заказывает перемещения и сколько из них туристы.</CardDescription>
+            <CardDescription>
+              ОП-получатели: кто чаще всего принимает перемещения и сколько из строк приходятся на туристов.
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <SimpleTable
@@ -441,7 +605,7 @@ export default function WmsTransferAnalyticsPage() {
               numberRu.format(row.rows),
               numberRu.format(row.orders),
               money(row.valueTotal),
-              `${dateShort(row.firstDate)} — ${dateShort(row.lastDate)}`,
+              `${dateRu(row.firstDate)} — ${dateRu(row.lastDate)}`,
             ])}
           />
         </CardContent>
@@ -471,12 +635,14 @@ function CheckSelect({
   options,
   value,
   onChange,
+  formatOptionLabel,
 }: {
   id: string
   label: string
   options: string[]
   value: string[]
   onChange: (value: string[]) => void
+  formatOptionLabel?: (option: string) => string
 }) {
   const [open, setOpen] = useState(false)
   const selected = new Set(value)
@@ -522,8 +688,8 @@ function CheckSelect({
                     onChange={() => toggle(option)}
                     className="h-4 w-4 rounded border-input"
                   />
-                  <span className="truncate" title={option}>
-                    {option}
+                  <span className="truncate" title={option || "(не указан)"}>
+                    {formatOptionLabel ? formatOptionLabel(option) : option}
                   </span>
                 </label>
               ))}

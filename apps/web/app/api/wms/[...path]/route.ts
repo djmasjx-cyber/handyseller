@@ -76,3 +76,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
   return proxy(req, (await params).path)
 }
+
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
+  return proxy(req, (await params).path)
+}
