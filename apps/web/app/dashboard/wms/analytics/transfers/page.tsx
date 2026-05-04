@@ -57,6 +57,8 @@ type TouristRow = {
   itemCode: string
   itemArticle: string | null
   itemName: string
+  /** Номера заказов из колонки «Номер» в файле */
+  orderNumbers: string
   rows: number
   orders: number
   valueTotal: number
@@ -146,6 +148,10 @@ function dateRu(value: string | null): string {
 }
 
 const COUNTERPARTY_EMPTY_PARAM = "__EMPTY__"
+
+/** Область таблицы: общая высота как у «Частота по ОП», скролл влево/вправо и вниз при переполнении. */
+const ANALYTICS_TABLE_SCROLL =
+  "max-h-[min(22rem,52vh)] overflow-x-auto overflow-y-auto rounded-md border border-border/60 bg-muted/15"
 
 function queryFromFilters(filters: Filters): string {
   const qs = new URLSearchParams()
@@ -592,7 +598,7 @@ export default function WmsTransferAnalyticsPage() {
         </CardContent>
       </Card>
 
-      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+      <section className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5">
         <Stat title="Строк" value={numberRu.format(summary.rowsTotal)} hint={`${numberRu.format(summary.ordersTotal)} заказов`} />
         <Stat title="Пополнения" value={numberRu.format(summary.replenishmentRows)} hint={money(summary.replenishmentValue)} />
         <Stat title="Туристы" value={numberRu.format(summary.touristRows)} hint={money(summary.touristValue)} accent />
@@ -600,16 +606,18 @@ export default function WmsTransferAnalyticsPage() {
         <Stat title="Период" value={`${dateRu(summary.minDate)} — ${dateRu(summary.maxDate)}`} hint={loading ? "загрузка..." : "по фильтру"} />
       </section>
 
-      <section className="grid gap-4 xl:grid-cols-2">
-        <Card>
-          <CardHeader>
+      <section className="grid gap-4 xl:grid-cols-2 xl:items-stretch">
+        <Card className="flex min-h-0 flex-col">
+          <CardHeader className="shrink-0 space-y-1.5 pb-3">
             <CardTitle>Частота по ОП</CardTitle>
             <CardDescription>
               ОП-получатели: кто чаще всего принимает перемещения и сколько из строк приходятся на туристов.
             </CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="min-h-0 flex-1 pt-0">
             <SimpleTable
+              scrollClassName={ANALYTICS_TABLE_SCROLL}
+              tableClassName="min-w-[720px]"
               headers={["Получатель", "Склад", "Строк", "Заказов", "Туристы", "Сумма туристов"]}
               rows={byOp.map((row) => [
                 row.receiverOp,
@@ -623,13 +631,15 @@ export default function WmsTransferAnalyticsPage() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
+        <Card className="flex min-h-0 flex-col">
+          <CardHeader className="shrink-0 space-y-1.5 pb-3">
             <CardTitle>Риск пополнения</CardTitle>
             <CardDescription>Товар был в пополнении, но до следующего пополнения ОП снова заказывал его туристом.</CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="min-h-0 flex-1 pt-0">
             <SimpleTable
+              scrollClassName={ANALYTICS_TABLE_SCROLL}
+              tableClassName="min-w-[720px]"
               headers={["Получатель", "Склад", "Товар", "После пополнения", "Туристов", "Сумма"]}
               rows={risks.map((row) => [
                 row.receiverOp,
@@ -644,15 +654,18 @@ export default function WmsTransferAnalyticsPage() {
         </Card>
       </section>
 
-      <Card>
-        <CardHeader>
+      <Card className="flex min-h-0 flex-col">
+        <CardHeader className="shrink-0 space-y-1.5 pb-3">
           <CardTitle>Туристы по маршрутам и товарам</CardTitle>
           <CardDescription>Главная витрина для поиска товаров, которые путешествуют между ОП.</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="min-h-0 flex-1 pt-0">
           <SimpleTable
-            headers={["Получатель", "Отправитель", "Склад", "Товар", "Строк", "Заказов", "Сумма", "Период"]}
+            scrollClassName={ANALYTICS_TABLE_SCROLL}
+            tableClassName="min-w-[960px]"
+            headers={["№ заказа", "Получатель", "Отправитель", "Склад", "Товар", "Строк", "Заказов", "Сумма", "Период"]}
             rows={tourists.map((row) => [
+              row.orderNumbers?.trim() ? row.orderNumbers : "—",
               row.receiverOp,
               row.senderOp,
               row.receiverWarehouseType === row.senderWarehouseType
@@ -673,7 +686,7 @@ export default function WmsTransferAnalyticsPage() {
 
 function Stat({ title, value, hint, accent }: { title: string; value: string; hint: string; accent?: boolean }) {
   return (
-    <Card className={accent ? "border-primary/30 bg-primary/5" : undefined}>
+    <Card className={`flex h-full min-h-[7.5rem] flex-col ${accent ? "border-primary/30 bg-primary/5" : ""}`}>
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between gap-2">
           <CardDescription>{title}</CardDescription>
@@ -758,17 +771,30 @@ function CheckSelect({
   )
 }
 
-function SimpleTable({ headers, rows }: { headers: string[]; rows: string[][] }) {
+function SimpleTable({
+  headers,
+  rows,
+  scrollClassName,
+  tableClassName,
+}: {
+  headers: string[]
+  rows: string[][]
+  /** Обёртка со скроллом (по умолчанию только overflow-auto). */
+  scrollClassName?: string
+  /** Минимальная ширина таблицы для горизонтального скролла, например min-w-[720px]. */
+  tableClassName?: string
+}) {
   if (rows.length === 0) {
     return <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">Данных пока нет. Загрузите файл или измените фильтры.</p>
   }
+  const tw = tableClassName ?? "min-w-[720px]"
   return (
-    <div className="overflow-auto">
-      <table className="w-full min-w-[720px] text-left text-sm">
-        <thead className="border-b text-muted-foreground">
+    <div className={scrollClassName ?? "overflow-auto"}>
+      <table className={`w-full text-left text-sm ${tw}`}>
+        <thead className="sticky top-0 z-[1] border-b bg-background/95 text-muted-foreground backdrop-blur supports-[backdrop-filter]:bg-background/80">
           <tr>
             {headers.map((h) => (
-              <th key={h} className="px-3 py-2 font-medium">
+              <th key={h} className="whitespace-nowrap px-3 py-2 font-medium">
                 {h}
               </th>
             ))}
@@ -778,7 +804,7 @@ function SimpleTable({ headers, rows }: { headers: string[]; rows: string[][] })
           {rows.map((row, idx) => (
             <tr key={`${row[0]}-${idx}`} className="border-b last:border-0">
               {row.map((cell, cellIdx) => (
-                <td key={`${cellIdx}-${cell}`} className="max-w-[360px] px-3 py-2 align-top">
+                <td key={`c${cellIdx}-r${idx}`} className="max-w-[min(28rem,44vw)] px-3 py-2 align-top break-words">
                   <span className={cellIdx === 0 ? "font-medium" : undefined}>{cell}</span>
                 </td>
               ))}

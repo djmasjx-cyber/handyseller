@@ -322,6 +322,8 @@ export interface WmsBiTouristRow {
   itemCode: string;
   itemArticle: string | null;
   itemName: string;
+  /** Уникальные номера заказов из колонки «Номер» в файле, через запятую */
+  orderNumbers: string;
   rows: number;
   orders: number;
   valueTotal: number;

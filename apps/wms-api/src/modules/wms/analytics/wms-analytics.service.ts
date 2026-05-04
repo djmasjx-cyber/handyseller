@@ -356,6 +356,15 @@ function numFromDb(value: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+/** Список уникальных номеров заказов для UI (колонка «Номер» в Excel). */
+function formatDistinctOrderNumbers(source: string[] | null | undefined): string {
+  if (!source?.length) return '';
+  const sorted = [...new Set(source.map((s) => String(s ?? '').trim()).filter(Boolean))].sort((a, b) =>
+    a.localeCompare(b, 'ru', { numeric: true, sensitivity: 'base' }),
+  );
+  return sorted.join(', ');
+}
+
 function isoDate(d: unknown): string {
   if (d instanceof Date && Number.isFinite(d.getTime())) return d.toISOString();
   return String(d ?? '');
@@ -911,7 +920,8 @@ export class WmsAnalyticsService implements OnModuleInit {
         COUNT(DISTINCT order_number)::bigint AS orders_n,
         COALESCE(SUM(price), 0)::float8 AS value_total,
         MIN((order_date AT TIME ZONE 'UTC')::date)::text AS first_d,
-        MAX((order_date AT TIME ZONE 'UTC')::date)::text AS last_d
+        MAX((order_date AT TIME ZONE 'UTC')::date)::text AS last_d,
+        array_agg(DISTINCT order_number) AS order_nums
       FROM wms_bi_transfer_order_line
       WHERE ${whereSql}
       GROUP BY receiver_op, sender_op, item_code
@@ -933,6 +943,7 @@ export class WmsAnalyticsService implements OnModuleInit {
       value_total: string;
       first_d: string | null;
       last_d: string | null;
+      order_nums: string[] | null;
     }>(sql, [...params, limit, offset]);
     return res.rows.map((r) => ({
       receiverWarehouse: r.receiver_warehouse,
@@ -944,6 +955,7 @@ export class WmsAnalyticsService implements OnModuleInit {
       itemCode: r.item_code,
       itemArticle: r.item_article,
       itemName: r.item_name,
+      orderNumbers: formatDistinctOrderNumbers(r.order_nums),
       rows: Number(r.rows_n),
       orders: Number(r.orders_n),
       valueTotal: numFromDb(r.value_total),
@@ -1020,6 +1032,7 @@ export class WmsAnalyticsService implements OnModuleInit {
           itemCode: first.itemCode,
           itemArticle: first.itemArticle,
           itemName: first.itemName,
+          orderNumbers: formatDistinctOrderNumbers(lines.map((l) => l.orderNumber)),
           rows: lines.length,
           orders: new Set(lines.map((l) => l.orderNumber)).size,
           valueTotal: sum(lines.map((l) => l.price)),
