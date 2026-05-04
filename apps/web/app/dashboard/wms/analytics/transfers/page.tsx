@@ -240,8 +240,23 @@ export default function WmsTransferAnalyticsPage() {
         authFetch(`/api/wms/v1/analytics/transfers/tourists${query}`, { headers }),
         authFetch(`/api/wms/v1/analytics/transfers/replenishment-risks${query}`, { headers }),
       ])
-      if (!summaryRes.ok) throw new Error("Не удалось загрузить сводку аналитики.")
-      setSummary((await summaryRes.json()) as Summary)
+      const summaryText = await summaryRes.text()
+      if (!summaryRes.ok) {
+        let detail = summaryText.trim().slice(0, 400)
+        try {
+          const j = JSON.parse(summaryText) as { message?: unknown }
+          if (typeof j.message === "string" && j.message.trim()) detail = j.message.trim()
+          else if (Array.isArray(j.message)) detail = j.message.map(String).join("; ")
+        } catch {
+          /* keep text */
+        }
+        throw new Error(
+          detail
+            ? `Не удалось загрузить сводку аналитики (HTTP ${summaryRes.status}): ${detail}`
+            : `Не удалось загрузить сводку аналитики (HTTP ${summaryRes.status}).`,
+        )
+      }
+      setSummary(JSON.parse(summaryText) as Summary)
       setImports(importsRes.ok ? ((await importsRes.json()) as ImportBatch[]) : [])
       setOptions(
         optionsRes.ok
@@ -363,7 +378,10 @@ export default function WmsTransferAnalyticsPage() {
       <Card>
         <CardHeader>
           <CardTitle>Импорт и фильтры</CardTitle>
-          <CardDescription>Загрузите Excel `Заказы на перемещения.xlsx` или отфильтруйте уже загруженные партии.</CardDescription>
+          <CardDescription>
+            Загрузите Excel «Заказы на перемещения.xlsx» или отфильтруйте партии. Для больших объёмов выберите конкретную
+            партию — сводка и фильтры считаются быстрее; при «Все партии» без узких фильтров нагрузка выше.
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
