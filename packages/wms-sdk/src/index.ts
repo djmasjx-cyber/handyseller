@@ -323,24 +323,37 @@ export interface WmsBiTransferByOpRow {
   lastDate: string | null;
 }
 
-/** Одна строка туриста (позиция заказа); строки одного заказа идут подряд при сортировке по умолчанию. */
-export interface WmsBiTouristRow {
+/** Строка сводки: один заказ (туристы), для таблицы на уровне заказа. */
+export interface WmsBiTouristOrderSummary {
   orderNumber: string;
-  receiverWarehouse: string;
-  receiverWarehouseType: string;
-  receiverOp: string;
-  senderWarehouse: string;
-  senderWarehouseType: string;
   senderOp: string;
-  itemCode: string;
-  itemArticle: string | null;
-  itemName: string;
-  /** Стоимость строки (поле «Цена»). */
-  lineValue: number;
-  /** Сумма по заказу (все туристские строки с этим номером в выборке). */
-  orderSum: number;
-  /** Дата заказа (ISO) для колонки «Период» и сортировки. */
+  receiverOp: string;
+  /** Тип/представление склада у получателя. */
+  receiverWarehouseType: string;
+  /** Число наименований (уникальных НоменклатураКод) в заказе. */
+  productCount: number;
+  /** Стоимость заказа: сумма поля «Цена» по всем туристским строкам. */
+  orderTotal: number;
   orderDate: string;
+}
+
+/** Позиция в детализации заказа (по коду объединены строки Excel). */
+export interface WmsBiTouristOrderDetailLine {
+  itemCode: string;
+  itemName: string;
+  quantity: number;
+  /** Стоимость единицы, ₽. */
+  unitPrice: number;
+  /** Сумма = кол-во × стоимость единицы. */
+  sum: number;
+}
+
+export interface WmsBiTouristOrderDetail {
+  orderNumber: string;
+  senderOp: string;
+  receiverOp: string;
+  orderDate: string;
+  lines: WmsBiTouristOrderDetailLine[];
 }
 
 export interface WmsBiReplenishmentRiskRow {

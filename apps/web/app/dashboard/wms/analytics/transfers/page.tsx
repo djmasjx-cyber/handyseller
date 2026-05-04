@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import Link from "next/link"
 import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Label } from "@handyseller/ui"
 import { ArrowDown, ArrowUp, ArrowUpDown, FileUp, Layers, RefreshCw, Trash2 } from "lucide-react"
 import { WmsSubnav } from "@/components/wms/wms-subnav"
@@ -47,19 +48,14 @@ type ByOpRow = {
   lastDate: string | null
 }
 
-type TouristRow = {
+/** Одна строка = один туристский заказ (сводка для руководителя). */
+type TouristOrderRow = {
   orderNumber: string
-  receiverWarehouse: string
-  receiverWarehouseType: string
-  receiverOp: string
-  senderWarehouse: string
-  senderWarehouseType: string
   senderOp: string
-  itemCode: string
-  itemArticle: string | null
-  itemName: string
-  lineValue: number
-  orderSum: number
+  receiverOp: string
+  receiverWarehouseType: string
+  productCount: number
+  orderTotal: number
   orderDate: string
 }
 
@@ -198,6 +194,16 @@ function queryFromFilters(filters: Filters): string {
   return raw ? `?${raw}` : ""
 }
 
+/** Ссылка на страницу состава заказа с теми же фильтрами. */
+function orderDetailHref(filters: Filters, orderNumber: string): string {
+  const base = queryFromFilters(filters)
+  const search = base.startsWith("?") ? base.slice(1) : ""
+  const u = new URLSearchParams(search)
+  u.set("orderNumber", orderNumber)
+  const q = u.toString()
+  return q ? `/dashboard/wms/analytics/transfers/order?${q}` : `/dashboard/wms/analytics/transfers/order?orderNumber=${encodeURIComponent(orderNumber)}`
+}
+
 /** Запрос каталога номенклатуры: те же фильтры, но без отбора по товару. */
 function queryFromFiltersExcludingItem(filters: Filters): string {
   return queryFromFilters({ ...filters, item: "", itemCodes: [] })
@@ -241,7 +247,7 @@ export default function WmsTransferAnalyticsPage() {
     counterparties: [],
   })
   const [byOp, setByOp] = useState<ByOpRow[]>([])
-  const [tourists, setTourists] = useState<TouristRow[]>([])
+  const [tourists, setTourists] = useState<TouristOrderRow[]>([])
   const [risks, setRisks] = useState<RiskRow[]>([])
   const [filters, setFilters] = useState<Filters>({
     from: "",
@@ -282,14 +288,19 @@ export default function WmsTransferAnalyticsPage() {
 
   const touristsSorted = useMemo(() => {
     const rows = tourists.slice()
-    if (touristSort.key === "default") return rows
+    if (touristSort.key === "default") {
+      rows.sort((a, b) =>
+        a.orderNumber.localeCompare(b.orderNumber, "ru", { numeric: true, sensitivity: "base" }),
+      )
+      return rows
+    }
     const dir = touristSort.dir === "asc" ? 1 : -1
     if (touristSort.key === "period") {
       rows.sort((a, b) => dir * a.orderDate.localeCompare(b.orderDate))
       return rows
     }
     rows.sort((a, b) => {
-      const d = dir * (a.orderSum - b.orderSum)
+      const d = dir * (a.orderTotal - b.orderTotal)
       if (d !== 0) return d
       return a.orderNumber.localeCompare(b.orderNumber, "ru", { numeric: true, sensitivity: "base" })
     })
@@ -340,7 +351,7 @@ export default function WmsTransferAnalyticsPage() {
           : { warehouseTypes: [], receiverOps: [], senderOps: [], counterparties: [] },
       )
       setByOp(byOpRes.ok ? ((await byOpRes.json()) as ByOpRow[]) : [])
-      setTourists(touristsRes.ok ? ((await touristsRes.json()) as TouristRow[]) : [])
+      setTourists(touristsRes.ok ? ((await touristsRes.json()) as TouristOrderRow[]) : [])
       setRisks(risksRes.ok ? ((await risksRes.json()) as RiskRow[]) : [])
     } catch (err) {
       setError(err instanceof Error ? err.message : "Ошибка загрузки аналитики.")
@@ -769,8 +780,8 @@ export default function WmsTransferAnalyticsPage() {
             <div>
               <CardTitle>Туристы по маршрутам и товарам</CardTitle>
               <CardDescription>
-                Позиции по заказам: строки одного заказа рядом. По умолчанию сортировка по номеру заказа; столбцы «Период» и
-                «Сумма» (по заказу) можно отсортировать.
+                Сводка по заказам: одна строка на заказ. Состав заказа — по клику на номер. Сортировка по дате и стоимости
+                заказа.
               </CardDescription>
             </div>
             <Button
@@ -787,25 +798,22 @@ export default function WmsTransferAnalyticsPage() {
         </CardHeader>
         <CardContent className="min-h-0 flex-1 pt-0">
           <div className={ANALYTICS_TABLE_SCROLL}>
-            <table className="w-full min-w-[1040px] text-left text-sm">
+            <table className="w-full min-w-[920px] text-left text-sm">
               <thead className="sticky top-0 z-[1] border-b bg-background/95 text-muted-foreground backdrop-blur supports-[backdrop-filter]:bg-background/80">
                 <tr>
                   <th className="whitespace-nowrap px-3 py-2 font-medium">№ заказа</th>
-                  <th className="whitespace-nowrap px-3 py-2 font-medium">Получатель</th>
                   <th className="whitespace-nowrap px-3 py-2 font-medium">Отправитель</th>
+                  <th className="whitespace-nowrap px-3 py-2 font-medium">Получатель</th>
                   <th className="whitespace-nowrap px-3 py-2 font-medium">Склад</th>
-                  <th className="whitespace-nowrap px-3 py-2 font-medium">Товар</th>
-                  <th className="whitespace-nowrap px-3 py-2 font-medium">Строк</th>
-                  <th className="whitespace-nowrap px-3 py-2 font-medium">Заказов</th>
-                  <th className="whitespace-nowrap px-3 py-2 font-medium">Стоимость</th>
+                  <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Товаров</th>
                   <th className="whitespace-nowrap px-3 py-2 font-medium">
                     <button
                       type="button"
                       className="inline-flex items-center gap-1 rounded hover:bg-muted"
-                      onClick={() => toggleTouristSort("period")}
+                      onClick={() => toggleTouristSort("orderSum")}
                     >
-                      Период
-                      {touristSort.key === "period" ? (
+                      Стоимость
+                      {touristSort.key === "orderSum" ? (
                         touristSort.dir === "asc" ? (
                           <ArrowUp className="h-3.5 w-3.5" />
                         ) : (
@@ -820,10 +828,10 @@ export default function WmsTransferAnalyticsPage() {
                     <button
                       type="button"
                       className="inline-flex items-center gap-1 rounded hover:bg-muted"
-                      onClick={() => toggleTouristSort("orderSum")}
+                      onClick={() => toggleTouristSort("period")}
                     >
-                      Сумма
-                      {touristSort.key === "orderSum" ? (
+                      Дата
+                      {touristSort.key === "period" ? (
                         touristSort.dir === "asc" ? (
                           <ArrowUp className="h-3.5 w-3.5" />
                         ) : (
@@ -839,29 +847,29 @@ export default function WmsTransferAnalyticsPage() {
               <tbody>
                 {touristsSorted.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="p-4 text-muted-foreground">
+                    <td colSpan={7} className="p-4 text-muted-foreground">
                       Данных пока нет. Загрузите файл или измените фильтры.
                     </td>
                   </tr>
                 ) : (
-                  touristsSorted.map((row, idx) => (
-                    <tr key={`${row.orderNumber}-${row.itemCode}-${idx}`} className="border-b last:border-0">
-                      <td className="px-3 py-2 align-top font-medium">{row.orderNumber || "—"}</td>
-                      <td className="px-3 py-2 align-top">{row.receiverOp}</td>
-                      <td className="px-3 py-2 align-top">{row.senderOp}</td>
-                      <td className="max-w-[min(28rem,44vw)] px-3 py-2 align-top break-words">
-                        {row.receiverWarehouseType === row.senderWarehouseType
-                          ? row.receiverWarehouseType
-                          : `${row.senderWarehouseType} → ${row.receiverWarehouseType}`}
+                  touristsSorted.map((row) => (
+                    <tr key={row.orderNumber} className="border-b last:border-0">
+                      <td className="px-3 py-2 align-top">
+                        <Link
+                          href={orderDetailHref(filters, row.orderNumber)}
+                          className="font-medium text-primary underline-offset-4 hover:underline"
+                        >
+                          {row.orderNumber || "—"}
+                        </Link>
                       </td>
+                      <td className="px-3 py-2 align-top">{row.senderOp || "—"}</td>
+                      <td className="px-3 py-2 align-top">{row.receiverOp || "—"}</td>
                       <td className="max-w-[min(28rem,44vw)] px-3 py-2 align-top break-words">
-                        {row.itemArticle ? `${row.itemArticle} · ${row.itemName}` : row.itemName}
+                        {row.receiverWarehouseType || "—"}
                       </td>
-                      <td className="px-3 py-2 align-top tabular-nums">1</td>
-                      <td className="px-3 py-2 align-top tabular-nums">1</td>
-                      <td className="px-3 py-2 align-top tabular-nums">{money(row.lineValue)}</td>
+                      <td className="px-3 py-2 align-top text-right tabular-nums">{numberRu.format(row.productCount)}</td>
+                      <td className="px-3 py-2 align-top tabular-nums font-medium">{money(row.orderTotal)}</td>
                       <td className="px-3 py-2 align-top whitespace-nowrap">{dateRu(row.orderDate)}</td>
-                      <td className="px-3 py-2 align-top tabular-nums font-medium">{money(row.orderSum)}</td>
                     </tr>
                   ))
                 )}
