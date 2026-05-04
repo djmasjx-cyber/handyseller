@@ -256,7 +256,21 @@ export class WmsController {
       item: this.firstQueryValue(query.item)?.trim() || undefined,
       batchId: this.firstQueryValue(query.batchId)?.trim() || undefined,
       kind: kind === 'REPLENISHMENT' || kind === 'TOURIST' ? kind : undefined,
+      counterparties: this.listQueryValues(query.counterparties)?.map((v) => (v === '__EMPTY__' ? '' : v)),
+      qtyMin: this.optionalFiniteNumber(query.qtyMin),
+      qtyMax: this.optionalFiniteNumber(query.qtyMax),
+      retailMin: this.optionalFiniteNumber(query.retailMin),
+      retailMax: this.optionalFiniteNumber(query.retailMax),
+      costMin: this.optionalFiniteNumber(query.costMin),
+      costMax: this.optionalFiniteNumber(query.costMax),
     };
+  }
+
+  private optionalFiniteNumber(value: string | string[] | undefined): number | undefined {
+    const raw = this.firstQueryValue(value)?.trim().replace(',', '.');
+    if (!raw) return undefined;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : undefined;
   }
 
   private firstQueryValue(value: string | string[] | undefined): string | undefined {

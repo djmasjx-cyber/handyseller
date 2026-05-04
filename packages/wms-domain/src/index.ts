@@ -49,6 +49,10 @@ export function rankPutawayLocations(locations: WmsLocationRecord[]): WmsLocatio
     .sort((a, b) => a.path.localeCompare(b.path));
 }
 
+/**
+ * Пополнение, если заполнено **хотя бы одно** из полей «Назначение» или «Документ основание».
+ * Турист — только когда **оба** пустые (после trim).
+ */
 export function classifyTransferOrderLine(input: {
   purpose?: string | null;
   baseDocument?: string | null;

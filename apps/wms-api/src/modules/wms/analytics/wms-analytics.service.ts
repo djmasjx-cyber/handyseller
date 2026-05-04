@@ -52,6 +52,11 @@ const HEADER_ALIASES: Record<string, string> = {
   эторозничнаяцена: 'ЭтоРозничнаяЦена',
   'это розничная цена': 'ЭтоРозничнаяЦена',
   цена: 'Цена',
+  количество: 'Количество',
+  розничнаяцена: 'РозничнаяЦена',
+  'розничная цена': 'РозничнаяЦена',
+  себестоимость: 'Себестоимость',
+  контрогент: 'Контрогент',
 };
 
 const WAREHOUSE_TYPE_PREFIXES = [
@@ -116,7 +121,26 @@ function nullableString(value: unknown): string | null {
   return cleaned ? cleaned : null;
 }
 
-function parsePrice(value: unknown): number {
+/** Парсит число из ячейки Excel (пробелы, запятая как десятичный разделитель). */
+function parseMoneyRaw(value: unknown): number {
+  const cleaned = String(value ?? '')
+    .replace(/\s/g, '')
+    .replace(',', '.');
+  const parsed = Number(cleaned);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+/**
+ * Денежные поля в файле могут содержать копейки после запятой; для аналитики приводим к целым рублям
+ * с округлением вверх (по модулю для отрицательных значений — вниз по модулю).
+ */
+function ceilRubles(value: unknown): number {
+  const raw = parseMoneyRaw(value);
+  if (!Number.isFinite(raw) || raw === 0) return 0;
+  return raw > 0 ? Math.ceil(raw - 1e-9) : -Math.ceil(-raw - 1e-9);
+}
+
+function parseQuantity(value: unknown): number {
   const cleaned = String(value ?? '')
     .replace(/\s/g, '')
     .replace(',', '.');
@@ -220,6 +244,24 @@ function matchesFilters(line: WmsBiTransferOrderLineRecord, filters: WmsBiTransf
   ) {
     return false;
   }
+  if (filters.counterparties?.length) {
+    const cp = normalized.counterparty?.trim() ?? '';
+    if (!filters.counterparties.includes(cp)) return false;
+  }
+  if (filters.qtyMin != null && normalized.quantity < filters.qtyMin) return false;
+  if (filters.qtyMax != null && normalized.quantity > filters.qtyMax) return false;
+  if (filters.retailMin != null) {
+    if (normalized.retailPrice == null || normalized.retailPrice < filters.retailMin) return false;
+  }
+  if (filters.retailMax != null) {
+    if (normalized.retailPrice == null || normalized.retailPrice > filters.retailMax) return false;
+  }
+  if (filters.costMin != null) {
+    if (normalized.costPrice == null || normalized.costPrice < filters.costMin) return false;
+  }
+  if (filters.costMax != null) {
+    if (normalized.costPrice == null || normalized.costPrice > filters.costMax) return false;
+  }
   if (filters.item) {
     const q = filters.item.toLowerCase();
     if (
@@ -233,15 +275,30 @@ function matchesFilters(line: WmsBiTransferOrderLineRecord, filters: WmsBiTransf
   return true;
 }
 
+function optionalMoneyFromLine(value: unknown): number | null {
+  if (value == null || value === '') return null;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  const s = cleanString(value);
+  if (!s) return null;
+  const n = parseMoneyRaw(value);
+  return Number.isFinite(n) ? n : null;
+}
+
 function normalizeTransferLine(line: WmsBiTransferOrderLineRecord): WmsBiTransferOrderLineRecord {
   const sender = parseWarehouseDimension(line.senderWarehouse);
   const receiver = parseWarehouseDimension(line.receiverWarehouse);
+  const qty = (line as { quantity?: unknown }).quantity;
+  const cp = (line as { counterparty?: unknown }).counterparty;
   return {
     ...line,
     senderWarehouseType: line.senderWarehouseType || sender.warehouseType,
     senderOp: line.senderOp || sender.op,
     receiverWarehouseType: line.receiverWarehouseType || receiver.warehouseType,
     receiverOp: line.receiverOp || receiver.op,
+    quantity: typeof qty === 'number' && Number.isFinite(qty) ? qty : parseQuantity(qty),
+    retailPrice: optionalMoneyFromLine((line as { retailPrice?: unknown }).retailPrice),
+    costPrice: optionalMoneyFromLine((line as { costPrice?: unknown }).costPrice),
+    counterparty: typeof cp === 'string' && cp.trim() ? cp.trim() : null,
   };
 }
 
@@ -423,6 +480,9 @@ export class WmsAnalyticsService implements OnModuleInit {
       ),
       receiverOps: uniqueSorted(lines.map((line) => line.receiverOp).filter(Boolean)),
       senderOps: uniqueSorted(lines.map((line) => line.senderOp).filter(Boolean)),
+      counterparties: uniqueSortedCounterparties(
+        lines.map((line) => normalizeTransferLine(line).counterparty ?? ''),
+      ),
     };
   }
 
@@ -553,7 +613,11 @@ export class WmsAnalyticsService implements OnModuleInit {
       purpose: nullableString(row['Назначение']),
       baseDocument: nullableString(row['ДокументОснование']),
       isRetailPrice: parseBooleanRu(row['ЭтоРозничнаяЦена']),
-      price: parsePrice(row['Цена']),
+      quantity: parseQuantity(row['Количество']),
+      retailPrice: cleanString(row['РозничнаяЦена']) ? ceilRubles(row['РозничнаяЦена']) : null,
+      costPrice: cleanString(row['Себестоимость']) ? ceilRubles(row['Себестоимость']) : null,
+      counterparty: nullableString(row['Контрогент']),
+      price: ceilRubles(row['Цена']),
     };
     if (!input.orderNumber) errors.push('Не заполнен номер заказа.');
     if (!input.orderDate) errors.push('Не удалось распознать дату заказа.');
@@ -596,6 +660,10 @@ export class WmsAnalyticsService implements OnModuleInit {
       purpose: input.purpose?.trim() || null,
       baseDocument: input.baseDocument?.trim() || null,
       isRetailPrice: input.isRetailPrice ?? null,
+      quantity: input.quantity ?? 0,
+      retailPrice: input.retailPrice ?? null,
+      costPrice: input.costPrice ?? null,
+      counterparty: input.counterparty?.trim() || null,
       price: input.price ?? 0,
       kind,
       createdAt,
@@ -744,11 +812,21 @@ export class WmsAnalyticsService implements OnModuleInit {
 }
 
 function sum(values: number[]): number {
-  return Math.round(values.reduce((acc, v) => acc + v, 0) * 100) / 100;
+  return values.reduce((acc, v) => acc + (Number.isFinite(v) ? v : 0), 0);
 }
 
 function uniqueSorted(values: string[]): string[] {
   return [...new Set(values.map((v) => v.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ru'));
+}
+
+/** Уникальные контрагенты; пустая строка — строки без контрагента (для фильтра). */
+function uniqueSortedCounterparties(values: string[]): string[] {
+  const set = new Set(values.map((v) => v.trim()));
+  return [...set].sort((a, b) => {
+    if (a === '' && b !== '') return 1;
+    if (b === '' && a !== '') return -1;
+    return a.localeCompare(b, 'ru');
+  });
 }
 
 function minDate(lines: WmsBiTransferOrderLineRecord[]): string | null {
