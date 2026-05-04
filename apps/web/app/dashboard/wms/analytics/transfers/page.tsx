@@ -287,6 +287,25 @@ function filtersQueryKey(filters: Filters): string {
   return queryFromFilters(filters).slice(1)
 }
 
+/**
+ * Одинаковые параметры в разном порядке дают разные строки у URLSearchParams и у queryFromFilters.
+ * Без канонизации получается цикл: replace → новый порядок в адресе → снова replace.
+ */
+function canonicalQueryString(qs: string): string {
+  if (!qs || qs === "") return ""
+  const u = new URLSearchParams(qs)
+  const pairs = [...u.entries()].sort((a, b) => {
+    const cmp = a[0].localeCompare(b[0])
+    if (cmp !== 0) return cmp
+    return String(a[1]).localeCompare(String(b[1]))
+  })
+  const out = new URLSearchParams()
+  for (const [k, v] of pairs) {
+    out.append(k, v)
+  }
+  return out.toString()
+}
+
 function readFileAsBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -350,7 +369,7 @@ function WmsTransferAnalyticsPageContent() {
 
   useEffect(() => {
     const want = filtersQueryKey(filters)
-    if (want === searchKey) return
+    if (canonicalQueryString(want) === canonicalQueryString(searchKey)) return
     const href = want ? `${pathname}?${want}` : pathname
     router.replace(href, { scroll: false })
   }, [filters, pathname, router, searchKey])
