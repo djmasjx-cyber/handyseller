@@ -63,6 +63,10 @@ async function main() {
     true,
   );
 
+  const freq = await service.getItemFrequency('test-user', {});
+  const fx = freq.find((r) => r.itemCode === 'CODE-X');
+  assert.equal(fx != null && fx.rowCount >= 3, true);
+
   const risks = await service.getReplenishmentRisks('test-user', {});
   assert.equal(risks.length, 1);
   assert.equal(risks[0].receiverOp, 'ЛОНМАДИ ЕЛИНО');

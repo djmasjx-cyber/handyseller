@@ -5,6 +5,7 @@ import type {
   WmsBiRawRowRecord,
   WmsBiReplenishmentRiskRow,
   WmsBiTouristRow,
+  WmsBiItemFrequencyRow,
   WmsBiTransferByOpRow,
   WmsBiTransferFilterOptions,
   WmsBiTransferFilters,
@@ -21,6 +22,10 @@ import * as XLSX from 'xlsx';
 
 type JsonRow<T> = { payload: T };
 type DbClient = Pick<Pool, 'query'>;
+
+/** Верхняя граница строк в таблицах BI (агрегаты в SQL, не сырые строки Excel). */
+const BI_TABLE_ROW_CAP = 100_000;
+const BI_TABLE_ROW_DEFAULT = 50_000;
 
 const REQUIRED_COLUMNS = [
   'Ссылка',
@@ -262,7 +267,9 @@ function matchesFilters(line: WmsBiTransferOrderLineRecord, filters: WmsBiTransf
   if (filters.costMax != null) {
     if (normalized.costPrice == null || normalized.costPrice > filters.costMax) return false;
   }
-  if (filters.item) {
+  if (filters.itemCodes?.length) {
+    if (!filters.itemCodes.includes(line.itemCode)) return false;
+  } else if (filters.item) {
     const q = filters.item.toLowerCase();
     if (
       !line.itemName.toLowerCase().includes(q) &&
@@ -302,24 +309,9 @@ function normalizeTransferLine(line: WmsBiTransferOrderLineRecord): WmsBiTransfe
   };
 }
 
-/** Сводка / SQL-агрегаты без полного скана строк в Node (только batch/период/тип). */
-function summaryFiltersSqlOnly(filters: WmsBiTransferFilters): boolean {
-  if (filters.receiverWarehouse?.trim()) return false;
-  if (filters.senderWarehouse?.trim()) return false;
-  if (filters.receiverOps?.length) return false;
-  if (filters.senderOps?.length) return false;
-  if (filters.warehouseTypes?.length) return false;
-  if (filters.item?.trim()) return false;
-  if (filters.counterparties?.length) return false;
-  if (filters.qtyMin != null || filters.qtyMax != null) return false;
-  if (filters.retailMin != null || filters.retailMax != null) return false;
-  if (filters.costMin != null || filters.costMax != null) return false;
-  return true;
-}
-
 function buildTransferAnalyticsWhere(userId: string, filters: WmsBiTransferFilters): { whereSql: string; params: unknown[] } {
   const params: unknown[] = [userId];
-  const conds = ['user_id = $1'];
+  const conds: string[] = ['user_id = $1'];
   if (filters.batchId?.trim()) {
     params.push(filters.batchId.trim());
     conds.push(`batch_id = $${params.length}`);
@@ -336,12 +328,96 @@ function buildTransferAnalyticsWhere(userId: string, filters: WmsBiTransferFilte
     params.push(filters.kind);
     conds.push(`kind = $${params.length}`);
   }
+  if (filters.receiverWarehouse?.trim()) {
+    params.push(`%${filters.receiverWarehouse.trim().toLowerCase()}%`);
+    conds.push(`LOWER(receiver_op) LIKE $${params.length}`);
+  }
+  if (filters.senderWarehouse?.trim()) {
+    params.push(`%${filters.senderWarehouse.trim().toLowerCase()}%`);
+    conds.push(`LOWER(sender_op) LIKE $${params.length}`);
+  }
+  if (filters.receiverOps?.length) {
+    params.push(filters.receiverOps);
+    conds.push(`receiver_op = ANY($${params.length}::text[])`);
+  }
+  if (filters.senderOps?.length) {
+    params.push(filters.senderOps);
+    conds.push(`sender_op = ANY($${params.length}::text[])`);
+  }
+  if (filters.warehouseTypes?.length) {
+    params.push(filters.warehouseTypes);
+    const idx = params.length;
+    conds.push(
+      `(receiver_warehouse_type = ANY($${idx}::text[]) OR sender_warehouse_type = ANY($${idx}::text[]))`,
+    );
+  }
+  if (filters.counterparties?.length) {
+    const ors: string[] = [];
+    for (const cp of filters.counterparties) {
+      if (cp === '') {
+        ors.push(`(trim(COALESCE(payload->>'counterparty', '')) = '')`);
+      } else {
+        params.push(cp);
+        ors.push(`trim(COALESCE(payload->>'counterparty', '')) = $${params.length}`);
+      }
+    }
+    conds.push(`(${ors.join(' OR ')})`);
+  }
+
+  const qtyExpr =
+    'COALESCE((NULLIF(trim(COALESCE(payload->>\'quantity\', \'\')), \'\'))::double precision, 0)';
+  if (filters.qtyMin != null) {
+    params.push(filters.qtyMin);
+    conds.push(`${qtyExpr} >= $${params.length}`);
+  }
+  if (filters.qtyMax != null) {
+    params.push(filters.qtyMax);
+    conds.push(`${qtyExpr} <= $${params.length}`);
+  }
+
+  const retailExpr =
+    '(CASE WHEN NULLIF(trim(COALESCE(payload->>\'retailPrice\', \'\')), \'\') IS NULL THEN NULL ELSE (NULLIF(trim(COALESCE(payload->>\'retailPrice\', \'\')), \'\'))::double precision END)';
+  if (filters.retailMin != null) {
+    params.push(filters.retailMin);
+    conds.push(`${retailExpr} IS NOT NULL AND ${retailExpr} >= $${params.length}`);
+  }
+  if (filters.retailMax != null) {
+    params.push(filters.retailMax);
+    conds.push(`${retailExpr} IS NOT NULL AND ${retailExpr} <= $${params.length}`);
+  }
+
+  const costExpr =
+    '(CASE WHEN NULLIF(trim(COALESCE(payload->>\'costPrice\', \'\')), \'\') IS NULL THEN NULL ELSE (NULLIF(trim(COALESCE(payload->>\'costPrice\', \'\')), \'\'))::double precision END)';
+  if (filters.costMin != null) {
+    params.push(filters.costMin);
+    conds.push(`${costExpr} IS NOT NULL AND ${costExpr} >= $${params.length}`);
+  }
+  if (filters.costMax != null) {
+    params.push(filters.costMax);
+    conds.push(`${costExpr} IS NOT NULL AND ${costExpr} <= $${params.length}`);
+  }
+
+  if (filters.itemCodes?.length) {
+    params.push(filters.itemCodes);
+    conds.push(`item_code = ANY($${params.length}::text[])`);
+  } else if (filters.item?.trim()) {
+    params.push(`%${filters.item.trim().toLowerCase()}%`);
+    const p = params.length;
+    conds.push(
+      `(LOWER(item_name) LIKE $${p} OR LOWER(item_code) LIKE $${p} OR LOWER(COALESCE(item_article, '')) LIKE $${p})`,
+    );
+  }
+
   return { whereSql: conds.join(' AND '), params };
 }
 
 function clampLimit(value: number | undefined, fallback: number, min: number, max: number): number {
   const v = value == null || !Number.isFinite(value) ? fallback : value;
   return Math.min(max, Math.max(min, Math.floor(v)));
+}
+
+function clampBiTableLimit(value: number | undefined): number {
+  return clampLimit(value, BI_TABLE_ROW_DEFAULT, 1, BI_TABLE_ROW_CAP);
 }
 
 function clampOffset(value: number | undefined, max: number): number {
@@ -716,8 +792,12 @@ export class WmsAnalyticsService implements OnModuleInit {
   }
 
   async getTransferSummary(userId: string, filters: WmsBiTransferFilters): Promise<WmsBiTransferSummary> {
-    if (this.pool && summaryFiltersSqlOnly(filters)) {
-      return this.getTransferSummarySql(userId, filters);
+    if (this.pool) {
+      try {
+        return await this.getTransferSummarySql(userId, filters);
+      } catch (err) {
+        this.logger.warn(`getTransferSummarySql fallback: ${(err as Error).message}`);
+      }
     }
     return this.buildSummary(await this.filteredLines(userId, filters));
   }
@@ -790,8 +870,12 @@ export class WmsAnalyticsService implements OnModuleInit {
    */
   async getTransferOptions(userId: string, batchId?: string | null): Promise<WmsBiTransferFilterOptions> {
     const narrow: WmsBiTransferFilters = batchId?.trim() ? { batchId: batchId.trim() } : {};
-    if (this.pool && summaryFiltersSqlOnly(narrow)) {
-      return this.getTransferOptionsSql(userId, narrow);
+    if (this.pool) {
+      try {
+        return await this.getTransferOptionsSql(userId, narrow);
+      } catch (err) {
+        this.logger.warn(`getTransferOptionsSql fallback: ${(err as Error).message}`);
+      }
     }
     const scope = batchId?.trim() || undefined;
     const lines = await this.listLines(userId, scope);
@@ -845,7 +929,7 @@ export class WmsAnalyticsService implements OnModuleInit {
 
   private async getTransfersByOpSql(userId: string, filters: WmsBiTransferFilters): Promise<WmsBiTransferByOpRow[]> {
     const { whereSql, params } = buildTransferAnalyticsWhere(userId, filters);
-    const limit = clampLimit(filters.byOpLimit, 500, 1, 2000);
+    const limit = clampBiTableLimit(filters.byOpLimit);
     const offset = clampOffset(filters.byOpOffset, 500_000);
     const limParam = params.length + 1;
     const offParam = params.length + 2;
@@ -901,7 +985,7 @@ export class WmsAnalyticsService implements OnModuleInit {
 
   private async getTouristsSql(userId: string, filters: WmsBiTransferFilters): Promise<WmsBiTouristRow[]> {
     const { whereSql, params } = buildTransferAnalyticsWhere(userId, filters);
-    const limit = clampLimit(filters.touristsLimit, 300, 1, 2000);
+    const limit = clampBiTableLimit(filters.touristsLimit);
     const offset = clampOffset(filters.touristsOffset, 500_000);
     const limParam = params.length + 1;
     const offParam = params.length + 2;
@@ -965,7 +1049,7 @@ export class WmsAnalyticsService implements OnModuleInit {
   }
 
   async getTransfersByOp(userId: string, filters: WmsBiTransferFilters): Promise<WmsBiTransferByOpRow[]> {
-    if (this.pool && summaryFiltersSqlOnly(filters)) {
+    if (this.pool) {
       try {
         return await this.getTransfersByOpSql(userId, filters);
       } catch (err) {
@@ -978,7 +1062,7 @@ export class WmsAnalyticsService implements OnModuleInit {
       group.push(line);
       groups.set(line.receiverOp, group);
     }
-    const limit = clampLimit(filters.byOpLimit, 500, 1, 2000);
+    const limit = clampBiTableLimit(filters.byOpLimit);
     const offset = clampOffset(filters.byOpOffset, 500_000);
     const sorted = [...groups.entries()]
       .map(([receiverOp, lines]) => {
@@ -1003,7 +1087,7 @@ export class WmsAnalyticsService implements OnModuleInit {
 
   async getTourists(userId: string, filters: WmsBiTransferFilters): Promise<WmsBiTouristRow[]> {
     const merged = { ...filters, kind: 'TOURIST' as const };
-    if (this.pool && summaryFiltersSqlOnly(merged)) {
+    if (this.pool) {
       try {
         return await this.getTouristsSql(userId, merged);
       } catch (err) {
@@ -1017,7 +1101,7 @@ export class WmsAnalyticsService implements OnModuleInit {
       group.push(line);
       groups.set(key, group);
     }
-    const limit = clampLimit(filters.touristsLimit, 300, 1, 2000);
+    const limit = clampBiTableLimit(filters.touristsLimit);
     const offset = clampOffset(filters.touristsOffset, 500_000);
     const sorted = [...groups.values()]
       .map((lines) => {
@@ -1042,6 +1126,61 @@ export class WmsAnalyticsService implements OnModuleInit {
       })
       .sort((a, b) => b.valueTotal - a.valueTotal || b.rows - a.rows);
     return sorted.slice(offset, offset + limit);
+  }
+
+  /**
+   * Частоты номенклатуры по полю НоменклатураКод (без фильтров по товару — чтобы построить каталог для выбора).
+   */
+  async getItemFrequency(userId: string, filters: WmsBiTransferFilters): Promise<WmsBiItemFrequencyRow[]> {
+    const noItem: WmsBiTransferFilters = { ...filters, item: undefined, itemCodes: undefined };
+    if (!this.pool) {
+      const lines = await this.filteredLines(userId, noItem);
+      const map = new Map<string, { article: string | null; name: string; count: number }>();
+      for (const line of lines) {
+        const prev = map.get(line.itemCode);
+        if (!prev) {
+          map.set(line.itemCode, {
+            article: line.itemArticle,
+            name: line.itemName,
+            count: 1,
+          });
+        } else {
+          prev.count += 1;
+        }
+      }
+      return [...map.entries()]
+        .map(([itemCode, v]) => ({
+          itemCode,
+          itemArticle: v.article,
+          itemName: v.name,
+          rowCount: v.count,
+        }))
+        .sort((a, b) => b.rowCount - a.rowCount || a.itemCode.localeCompare(b.itemCode, 'ru'));
+    }
+    const { whereSql, params } = buildTransferAnalyticsWhere(userId, noItem);
+    const sql = `
+      SELECT
+        item_code,
+        MAX(item_article) AS item_article,
+        MAX(item_name) AS item_name,
+        COUNT(*)::bigint AS rows_n
+      FROM wms_bi_transfer_order_line
+      WHERE ${whereSql}
+      GROUP BY item_code
+      ORDER BY COUNT(*) DESC, item_code ASC
+    `;
+    const res = await this.pool!.query<{
+      item_code: string;
+      item_article: string | null;
+      item_name: string;
+      rows_n: string;
+    }>(sql, params);
+    return res.rows.map((r) => ({
+      itemCode: r.item_code,
+      itemArticle: r.item_article,
+      itemName: r.item_name,
+      rowCount: Number(r.rows_n),
+    }));
   }
 
   async getReplenishmentRisks(userId: string, filters: WmsBiTransferFilters): Promise<WmsBiReplenishmentRiskRow[]> {
@@ -1084,7 +1223,7 @@ export class WmsAnalyticsService implements OnModuleInit {
       }
       flush(null);
     }
-    const lim = clampLimit(filters.risksLimit, 250, 1, 2000);
+    const lim = clampBiTableLimit(filters.risksLimit);
     const off = clampOffset(filters.risksOffset, 500_000);
     return risks
       .sort(

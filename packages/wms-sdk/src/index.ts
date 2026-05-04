@@ -255,7 +255,10 @@ export interface WmsBiTransferFilters {
   receiverOps?: string[];
   senderOps?: string[];
   warehouseTypes?: string[];
+  /** Подстрочный поиск по названию / коду / артикулу (если не задан itemCodes). */
   item?: string;
+  /** Фильтр по точным кодам номенклатуры (мультивыбор из каталога). */
+  itemCodes?: string[];
   kind?: WmsBiTransferOrderKind;
   batchId?: string;
   /** Мультивыбор контрагентов (точное совпадение строки из файла). */
@@ -282,6 +285,14 @@ export interface WmsBiTransferFilterOptions {
   receiverOps: string[];
   senderOps: string[];
   counterparties: string[];
+}
+
+/** Агрегация строк по полю НоменклатураКод (частота перемещений). */
+export interface WmsBiItemFrequencyRow {
+  itemCode: string;
+  itemArticle: string | null;
+  itemName: string;
+  rowCount: number;
 }
 
 export interface WmsBiTransferSummary {
