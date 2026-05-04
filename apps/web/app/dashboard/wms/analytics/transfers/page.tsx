@@ -1,8 +1,8 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Label } from "@handyseller/ui"
-import { FileUp, RefreshCw, Trash2 } from "lucide-react"
+import { FileUp, Layers, RefreshCw, Trash2 } from "lucide-react"
 import { WmsSubnav } from "@/components/wms/wms-subnav"
 import { authFetch } from "@/lib/auth-fetch"
 import { AUTH_STORAGE_KEYS } from "@/lib/auth-storage"
@@ -94,9 +94,11 @@ type Filters = {
   costMin: string
   costMax: string
   item: string
+  /** Точные коды номенклатуры (из каталога). */
+  itemCodes: string[]
   kind: "" | TransferKind
   batchId: string
-  /** Лимиты строк таблиц на сервере (пагинация). */
+  /** Макс. строк в каждой агрегированной таблице (сервер, до 100 000). */
   byOpLimit: number
   byOpOffset: number
   touristsLimit: number
@@ -110,6 +112,13 @@ type FilterOptions = {
   receiverOps: string[]
   senderOps: string[]
   counterparties: string[]
+}
+
+type ItemFrequencyRow = {
+  itemCode: string
+  itemArticle: string | null
+  itemName: string
+  rowCount: number
 }
 
 const emptySummary: Summary = {
@@ -176,6 +185,10 @@ function queryFromFilters(filters: Filters): string {
       }
       continue
     }
+    if (key === "itemCodes" && Array.isArray(value)) {
+      if (value.length) qs.set(key, value.join(","))
+      continue
+    }
     if (Array.isArray(value)) {
       if (value.length) qs.set(key, value.join(","))
     } else if (typeof value === "string" && value) {
@@ -184,6 +197,11 @@ function queryFromFilters(filters: Filters): string {
   }
   const raw = qs.toString()
   return raw ? `?${raw}` : ""
+}
+
+/** Запрос каталога номенклатуры: те же фильтры, но без отбора по товару. */
+function queryFromFiltersExcludingItem(filters: Filters): string {
+  return queryFromFilters({ ...filters, item: "", itemCodes: [] })
 }
 
 function readFileAsBase64(file: File): Promise<string> {
@@ -240,21 +258,24 @@ export default function WmsTransferAnalyticsPage() {
     costMin: "",
     costMax: "",
     item: "",
+    itemCodes: [],
     kind: "",
     batchId: "",
-    byOpLimit: 500,
+    byOpLimit: 50_000,
     byOpOffset: 0,
-    touristsLimit: 300,
+    touristsLimit: 50_000,
     touristsOffset: 0,
-    risksLimit: 250,
+    risksLimit: 50_000,
     risksOffset: 0,
   })
+  const [itemPickerOpen, setItemPickerOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
 
   const query = useMemo(() => queryFromFilters(filters), [filters])
+  const catalogQuery = useMemo(() => queryFromFiltersExcludingItem(filters), [filters])
 
   const load = useCallback(async () => {
     if (!token) return
@@ -355,18 +376,6 @@ export default function WmsTransferAnalyticsPage() {
 
   const setRangeFilter = (key: "qtyMin" | "qtyMax" | "retailMin" | "retailMax" | "costMin" | "costMax", value: string) => {
     setFilters((prev) => ({ ...prev, [key]: value }))
-  }
-
-  const bumpTableLimits = () => {
-    setFilters((prev) => ({
-      ...prev,
-      byOpLimit: Math.min(2000, prev.byOpLimit + 200),
-      touristsLimit: Math.min(2000, prev.touristsLimit + 200),
-      risksLimit: Math.min(2000, prev.risksLimit + 200),
-      byOpOffset: 0,
-      touristsOffset: 0,
-      risksOffset: 0,
-    }))
   }
 
   const deleteSelectedBatch = async () => {
@@ -474,9 +483,39 @@ export default function WmsTransferAnalyticsPage() {
               onChange={(value) => setListFilter("counterparties", value)}
               formatOptionLabel={(v) => (v === "" ? "(не указан)" : v)}
             />
-            <div className="space-y-1">
+            <div className="space-y-1 md:col-span-2 xl:col-span-2">
               <Label htmlFor="item">Товар / артикул</Label>
-              <Input id="item" value={filters.item} onChange={(e) => setFilter("item", e.target.value)} />
+              <div className="flex flex-wrap gap-2">
+                <Input
+                  id="item"
+                  className="max-w-md flex-1 min-w-[12rem]"
+                  value={filters.item}
+                  placeholder={filters.itemCodes.length ? "Отключено: выбраны коды из каталога" : "Подстрока по названию, коду или артикулу"}
+                  disabled={Boolean(filters.itemCodes.length)}
+                  onChange={(e) => setFilter("item", e.target.value)}
+                />
+                <Button type="button" variant="secondary" className="shrink-0" onClick={() => setItemPickerOpen(true)}>
+                  <Layers className="mr-2 h-4 w-4" />
+                  Каталог номенклатуры
+                </Button>
+                {filters.itemCodes.length ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="shrink-0"
+                    onClick={() => setFilters((p) => ({ ...p, itemCodes: [] }))}
+                  >
+                    Сбросить коды ({filters.itemCodes.length})
+                  </Button>
+                ) : null}
+              </div>
+              {filters.itemCodes.length ? (
+                <p className="text-xs text-muted-foreground">
+                  Фильтр по кодам: {filters.itemCodes.slice(0, 12).join(", ")}
+                  {filters.itemCodes.length > 12 ? ` … +${filters.itemCodes.length - 12}` : ""}
+                </p>
+              ) : null}
             </div>
           </div>
           <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
@@ -583,12 +622,38 @@ export default function WmsTransferAnalyticsPage() {
                 Удалить партию
               </Button>
             ) : null}
+            <div className="space-y-1">
+              <Label htmlFor="table-rows-cap">Строк в таблицах (после группировки в БД)</Label>
+              <select
+                id="table-rows-cap"
+                className="h-10 max-w-xs rounded-md border border-input bg-background px-3 text-sm"
+                value={filters.byOpLimit}
+                onChange={(e) => {
+                  const n = Number.parseInt(e.target.value, 10)
+                  setFilters((p) => ({
+                    ...p,
+                    byOpLimit: n,
+                    touristsLimit: n,
+                    risksLimit: n,
+                    byOpOffset: 0,
+                    touristsOffset: 0,
+                    risksOffset: 0,
+                  }))
+                }}
+              >
+                <option value={5000}>5 000</option>
+                <option value={10000}>10 000</option>
+                <option value={25000}>25 000</option>
+                <option value={50000}>50 000 (по умолчанию)</option>
+                <option value={100000}>100 000 (макс.)</option>
+              </select>
+              <p className="max-w-md text-xs text-muted-foreground">
+                Таблицы строятся агрегатами в PostgreSQL; лимит — сколько групп вернуть в каждой таблице. Сводка сверху — по всем строкам в фильтре.
+              </p>
+            </div>
             <Button type="button" variant="outline" onClick={() => void load()} disabled={loading}>
               <RefreshCw className="mr-2 h-4 w-4" />
               Обновить
-            </Button>
-            <Button type="button" variant="secondary" onClick={() => bumpTableLimits()} disabled={loading}>
-              +200 строк в таблицах
             </Button>
             <Button type="button" variant="outline" disabled={uploading}>
               <FileUp className="mr-2 h-4 w-4" />
@@ -597,6 +662,25 @@ export default function WmsTransferAnalyticsPage() {
           </div>
         </CardContent>
       </Card>
+
+      <ItemCatalogModal
+        open={itemPickerOpen}
+        onClose={() => setItemPickerOpen(false)}
+        token={token}
+        catalogQuery={catalogQuery}
+        seedCodes={filters.itemCodes}
+        onApply={(codes) => {
+          setFilters((p) => ({
+            ...p,
+            itemCodes: codes,
+            item: "",
+            byOpOffset: 0,
+            touristsOffset: 0,
+            risksOffset: 0,
+          }))
+          setItemPickerOpen(false)
+        }}
+      />
 
       <section className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5">
         <Stat title="Строк" value={numberRu.format(summary.rowsTotal)} hint={`${numberRu.format(summary.ordersTotal)} заказов`} />
@@ -684,6 +768,166 @@ export default function WmsTransferAnalyticsPage() {
   )
 }
 
+function ItemCatalogModal({
+  open,
+  onClose,
+  token,
+  catalogQuery,
+  seedCodes,
+  onApply,
+}: {
+  open: boolean
+  onClose: () => void
+  token: string | null
+  catalogQuery: string
+  seedCodes: string[]
+  onApply: (codes: string[]) => void
+}) {
+  const [rows, setRows] = useState<ItemFrequencyRow[]>([])
+  const [loading, setLoading] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const wasOpenRef = useRef(false)
+
+  useEffect(() => {
+    if (open && !wasOpenRef.current) {
+      setSelected(new Set(seedCodes))
+    }
+    wasOpenRef.current = open
+  }, [open, seedCodes])
+
+  useEffect(() => {
+    if (!open || !token) return
+    let cancelled = false
+    setLoading(true)
+    setErr(null)
+    void authFetch(`/api/wms/v1/analytics/transfers/item-frequency${catalogQuery}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(async (res) => {
+        const text = await res.text()
+        if (!res.ok) {
+          let detail = text.slice(0, 400)
+          try {
+            const j = JSON.parse(text) as { message?: unknown }
+            if (typeof j.message === "string") detail = j.message
+          } catch {
+            /* keep */
+          }
+          throw new Error(detail || `HTTP ${res.status}`)
+        }
+        return JSON.parse(text) as ItemFrequencyRow[]
+      })
+      .then((data) => {
+        if (!cancelled) setRows(data)
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setErr(e instanceof Error ? e.message : "Ошибка загрузки каталога.")
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [open, token, catalogQuery])
+
+  if (!open) return null
+
+  const toggle = (code: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(code)) next.delete(code)
+      else next.add(code)
+      return next
+    })
+  }
+
+  const selectAllLoaded = () => {
+    setSelected(new Set(rows.map((r) => r.itemCode)))
+  }
+
+  const clearSel = () => setSelected(new Set())
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="item-catalog-title"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose()
+      }}
+    >
+      <Card className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden shadow-lg">
+        <CardHeader className="shrink-0 border-b">
+          <CardTitle id="item-catalog-title">Номенклатура по текущим фильтрам</CardTitle>
+          <CardDescription>
+            Группировка по полю «НоменклатураКод», сортировка по числу строк (чаще перемещались — выше). Отметьте коды и
+            примените — дальше настройте ОП и остальные фильтры.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden pt-4">
+          {err ? <div className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-sm text-destructive">{err}</div> : null}
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" size="sm" variant="outline" onClick={selectAllLoaded} disabled={loading || !rows.length}>
+              Выбрать все в списке
+            </Button>
+            <Button type="button" size="sm" variant="outline" onClick={clearSel} disabled={loading}>
+              Снять выбор
+            </Button>
+            <span className="self-center text-sm text-muted-foreground">
+              {loading ? "Загрузка…" : `Позиций: ${numberRu.format(rows.length)} · выбрано кодов: ${selected.size}`}
+            </span>
+          </div>
+          <div className="min-h-0 flex-1 overflow-auto rounded-md border">
+            <table className="w-full min-w-[640px] text-left text-sm">
+              <thead className="sticky top-0 z-[1] border-b bg-background">
+                <tr className="text-muted-foreground">
+                  <th className="w-10 px-2 py-2" />
+                  <th className="px-2 py-2 font-medium">НоменклатураАртикул</th>
+                  <th className="px-2 py-2 font-medium">НоменклатураКод</th>
+                  <th className="px-2 py-2 font-medium">Название</th>
+                  <th className="px-2 py-2 font-medium text-right">Строк</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.itemCode} className="border-b last:border-0">
+                    <td className="px-2 py-1.5">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded border-input"
+                        checked={selected.has(r.itemCode)}
+                        onChange={() => toggle(r.itemCode)}
+                      />
+                    </td>
+                    <td className="px-2 py-1.5 align-top">{r.itemArticle ?? "—"}</td>
+                    <td className="px-2 py-1.5 align-top font-mono text-xs">{r.itemCode}</td>
+                    <td className="max-w-md px-2 py-1.5 align-top break-words">{r.itemName}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{numberRu.format(r.rowCount)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {!loading && rows.length === 0 ? (
+              <p className="p-4 text-sm text-muted-foreground">Нет строк по фильтру — измените период или партию.</p>
+            ) : null}
+          </div>
+          <div className="flex shrink-0 justify-end gap-2 border-t pt-3">
+            <Button type="button" variant="outline" onClick={onClose}>
+              Отмена
+            </Button>
+            <Button type="button" onClick={() => onApply([...selected])}>
+              Применить фильтр по кодам ({selected.size})
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
 function Stat({ title, value, hint, accent }: { title: string; value: string; hint: string; accent?: boolean }) {
   return (
     <Card className={`flex h-full min-h-[7.5rem] flex-col ${accent ? "border-primary/30 bg-primary/5" : ""}`}>
@@ -743,13 +987,22 @@ function CheckSelect({
             <p className="px-2 py-1 text-sm text-muted-foreground">Нет данных</p>
           ) : (
             <>
-              <button
-                type="button"
-                className="mb-1 w-full rounded px-2 py-1 text-left text-sm text-muted-foreground hover:bg-muted"
-                onClick={() => onChange([])}
-              >
-                Сбросить выбор
-              </button>
+              <div className="mb-2 flex flex-wrap gap-2 border-b pb-2">
+                <button
+                  type="button"
+                  className="rounded px-2 py-1 text-xs font-medium text-primary hover:underline"
+                  onClick={() => onChange([...options])}
+                >
+                  Выбрать все
+                </button>
+                <button
+                  type="button"
+                  className="rounded px-2 py-1 text-xs text-muted-foreground hover:bg-muted"
+                  onClick={() => onChange([])}
+                >
+                  Снять все
+                </button>
+              </div>
               {options.map((option) => (
                 <label key={option} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted">
                   <input

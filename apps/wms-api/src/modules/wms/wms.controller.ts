@@ -249,6 +249,12 @@ export class WmsController {
     return this.analytics.getReplenishmentRisks(userId, this.transferFilters(query));
   }
 
+  @Get('v1/analytics/transfers/item-frequency')
+  @WmsAccess('read')
+  itemFrequency(@CurrentUser('userId') userId: string, @Query() query: Record<string, string | string[] | undefined>) {
+    return this.analytics.getItemFrequency(userId, this.transferFilters(query));
+  }
+
   private transferFilters(query: Record<string, string | string[] | undefined>): WmsBiTransferFilters {
     const kind = this.firstQueryValue(query.kind)?.trim() as WmsBiTransferOrderKind | undefined;
     return {
@@ -260,6 +266,7 @@ export class WmsController {
       senderOps: this.listQueryValues(query.senderOps),
       warehouseTypes: this.listQueryValues(query.warehouseTypes),
       item: this.firstQueryValue(query.item)?.trim() || undefined,
+      itemCodes: this.listQueryValues(query.itemCodes),
       batchId: this.firstQueryValue(query.batchId)?.trim() || undefined,
       kind: kind === 'REPLENISHMENT' || kind === 'TOURIST' ? kind : undefined,
       counterparties: this.listQueryValues(query.counterparties)?.map((v) => (v === '__EMPTY__' ? '' : v)),
@@ -269,11 +276,11 @@ export class WmsController {
       retailMax: this.optionalFiniteNumber(query.retailMax),
       costMin: this.optionalFiniteNumber(query.costMin),
       costMax: this.optionalFiniteNumber(query.costMax),
-      byOpLimit: this.optionalLimitInt(query.byOpLimit, 1, 2000),
+      byOpLimit: this.optionalLimitInt(query.byOpLimit, 1, 100_000),
       byOpOffset: this.optionalLimitInt(query.byOpOffset, 0, 2_000_000),
-      touristsLimit: this.optionalLimitInt(query.touristsLimit, 1, 2000),
+      touristsLimit: this.optionalLimitInt(query.touristsLimit, 1, 100_000),
       touristsOffset: this.optionalLimitInt(query.touristsOffset, 0, 2_000_000),
-      risksLimit: this.optionalLimitInt(query.risksLimit, 1, 2000),
+      risksLimit: this.optionalLimitInt(query.risksLimit, 1, 100_000),
       risksOffset: this.optionalLimitInt(query.risksOffset, 0, 2_000_000),
     };
   }
