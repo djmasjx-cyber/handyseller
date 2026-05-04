@@ -338,6 +338,8 @@ function WmsTransferAnalyticsPageContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const pathname = usePathname() ?? "/dashboard/wms/analytics/transfers"
+  /** Дедупликация replace: до прихода searchParams из роутера возможны повторные вызовы с тем же href. */
+  const lastReplacedHref = useRef<string | null>(null)
 
   const [summary, setSummary] = useState<Summary>(emptySummary)
   const [imports, setImports] = useState<ImportBatch[]>([])
@@ -352,25 +354,33 @@ function WmsTransferAnalyticsPageContent() {
   const [risks, setRisks] = useState<RiskRow[]>([])
   const [filters, setFilters] = useState<Filters>(getDefaultFilters)
 
+  const searchParamsString = searchParams.toString()
   const searchKey = useMemo(() => {
-    const u = new URLSearchParams(searchParams.toString())
+    const u = new URLSearchParams(searchParamsString)
     u.delete("orderNumber")
     return u.toString()
-  }, [searchParams])
+  }, [searchParamsString])
 
   useLayoutEffect(() => {
     const u = new URLSearchParams(searchKey)
     const parsed = parseFiltersFromSearchParams(u)
     setFilters((prev) => {
-      if (filtersQueryKey(prev) === filtersQueryKey(parsed)) return prev
+      const prevQ = canonicalQueryString(filtersQueryKey(prev))
+      const nextQ = canonicalQueryString(filtersQueryKey(parsed))
+      if (prevQ === nextQ) return prev
       return parsed
     })
   }, [searchKey])
 
   useEffect(() => {
     const want = filtersQueryKey(filters)
-    if (canonicalQueryString(want) === canonicalQueryString(searchKey)) return
+    if (canonicalQueryString(want) === canonicalQueryString(searchKey)) {
+      lastReplacedHref.current = null
+      return
+    }
     const href = want ? `${pathname}?${want}` : pathname
+    if (lastReplacedHref.current === href) return
+    lastReplacedHref.current = href
     router.replace(href, { scroll: false })
   }, [filters, pathname, router, searchKey])
   const [itemPickerOpen, setItemPickerOpen] = useState(false)
