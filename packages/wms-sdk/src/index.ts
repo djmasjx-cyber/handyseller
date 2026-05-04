@@ -266,6 +266,15 @@ export interface WmsBiTransferFilters {
   retailMax?: number;
   costMin?: number;
   costMax?: number;
+  /** Пагинация таблицы «по ОП» (сервер обрезает после сортировки). */
+  byOpLimit?: number;
+  byOpOffset?: number;
+  /** Пагинация «туристы по маршрутам». */
+  touristsLimit?: number;
+  touristsOffset?: number;
+  /** Пагинация «риск пополнения». */
+  risksLimit?: number;
+  risksOffset?: number;
 }
 
 export interface WmsBiTransferFilterOptions {

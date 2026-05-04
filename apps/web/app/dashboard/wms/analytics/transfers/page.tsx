@@ -94,6 +94,13 @@ type Filters = {
   item: string
   kind: "" | TransferKind
   batchId: string
+  /** Лимиты строк таблиц на сервере (пагинация). */
+  byOpLimit: number
+  byOpOffset: number
+  touristsLimit: number
+  touristsOffset: number
+  risksLimit: number
+  risksOffset: number
 }
 
 type FilterOptions = {
@@ -143,6 +150,17 @@ const COUNTERPARTY_EMPTY_PARAM = "__EMPTY__"
 function queryFromFilters(filters: Filters): string {
   const qs = new URLSearchParams()
   for (const [key, value] of Object.entries(filters)) {
+    if (
+      key === "byOpLimit" ||
+      key === "byOpOffset" ||
+      key === "touristsLimit" ||
+      key === "touristsOffset" ||
+      key === "risksLimit" ||
+      key === "risksOffset"
+    ) {
+      qs.set(key, String(value as number))
+      continue
+    }
     if (key === "counterparties" && Array.isArray(value)) {
       if (value.length) {
         qs.set(
@@ -154,7 +172,7 @@ function queryFromFilters(filters: Filters): string {
     }
     if (Array.isArray(value)) {
       if (value.length) qs.set(key, value.join(","))
-    } else if (value) {
+    } else if (typeof value === "string" && value) {
       qs.set(key, value)
     }
   }
@@ -218,6 +236,12 @@ export default function WmsTransferAnalyticsPage() {
     item: "",
     kind: "",
     batchId: "",
+    byOpLimit: 500,
+    byOpOffset: 0,
+    touristsLimit: 300,
+    touristsOffset: 0,
+    risksLimit: 250,
+    risksOffset: 0,
   })
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
@@ -325,6 +349,18 @@ export default function WmsTransferAnalyticsPage() {
 
   const setRangeFilter = (key: "qtyMin" | "qtyMax" | "retailMin" | "retailMax" | "costMin" | "costMax", value: string) => {
     setFilters((prev) => ({ ...prev, [key]: value }))
+  }
+
+  const bumpTableLimits = () => {
+    setFilters((prev) => ({
+      ...prev,
+      byOpLimit: Math.min(2000, prev.byOpLimit + 200),
+      touristsLimit: Math.min(2000, prev.touristsLimit + 200),
+      risksLimit: Math.min(2000, prev.risksLimit + 200),
+      byOpOffset: 0,
+      touristsOffset: 0,
+      risksOffset: 0,
+    }))
   }
 
   const deleteSelectedBatch = async () => {
@@ -545,6 +581,9 @@ export default function WmsTransferAnalyticsPage() {
               <RefreshCw className="mr-2 h-4 w-4" />
               Обновить
             </Button>
+            <Button type="button" variant="secondary" onClick={() => bumpTableLimits()} disabled={loading}>
+              +200 строк в таблицах
+            </Button>
             <Button type="button" variant="outline" disabled={uploading}>
               <FileUp className="mr-2 h-4 w-4" />
               {uploading ? "Импорт..." : "Импорт через поле выше"}
@@ -572,7 +611,7 @@ export default function WmsTransferAnalyticsPage() {
           <CardContent>
             <SimpleTable
               headers={["Получатель", "Склад", "Строк", "Заказов", "Туристы", "Сумма туристов"]}
-              rows={byOp.slice(0, 20).map((row) => [
+              rows={byOp.map((row) => [
                 row.receiverOp,
                 row.receiverWarehouseType,
                 numberRu.format(row.rows),
@@ -592,7 +631,7 @@ export default function WmsTransferAnalyticsPage() {
           <CardContent>
             <SimpleTable
               headers={["Получатель", "Склад", "Товар", "После пополнения", "Туристов", "Сумма"]}
-              rows={risks.slice(0, 20).map((row) => [
+              rows={risks.map((row) => [
                 row.receiverOp,
                 row.receiverWarehouseType,
                 row.itemArticle ? `${row.itemArticle} · ${row.itemName}` : row.itemName,
@@ -613,7 +652,7 @@ export default function WmsTransferAnalyticsPage() {
         <CardContent>
           <SimpleTable
             headers={["Получатель", "Отправитель", "Склад", "Товар", "Строк", "Заказов", "Сумма", "Период"]}
-            rows={tourists.slice(0, 50).map((row) => [
+            rows={tourists.map((row) => [
               row.receiverOp,
               row.senderOp,
               row.receiverWarehouseType === row.senderWarehouseType

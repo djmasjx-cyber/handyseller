@@ -269,7 +269,21 @@ export class WmsController {
       retailMax: this.optionalFiniteNumber(query.retailMax),
       costMin: this.optionalFiniteNumber(query.costMin),
       costMax: this.optionalFiniteNumber(query.costMax),
+      byOpLimit: this.optionalLimitInt(query.byOpLimit, 1, 2000),
+      byOpOffset: this.optionalLimitInt(query.byOpOffset, 0, 2_000_000),
+      touristsLimit: this.optionalLimitInt(query.touristsLimit, 1, 2000),
+      touristsOffset: this.optionalLimitInt(query.touristsOffset, 0, 2_000_000),
+      risksLimit: this.optionalLimitInt(query.risksLimit, 1, 2000),
+      risksOffset: this.optionalLimitInt(query.risksOffset, 0, 2_000_000),
     };
+  }
+
+  private optionalLimitInt(value: string | string[] | undefined, min: number, max: number): number | undefined {
+    const raw = this.firstQueryValue(value)?.trim();
+    if (!raw) return undefined;
+    const n = Number.parseInt(raw, 10);
+    if (!Number.isFinite(n)) return undefined;
+    return Math.min(max, Math.max(min, n));
   }
 
   private optionalFiniteNumber(value: string | string[] | undefined): number | undefined {
