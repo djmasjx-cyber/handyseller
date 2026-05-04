@@ -510,7 +510,11 @@ export class WmsAnalyticsService implements OnModuleInit {
       CREATE INDEX IF NOT EXISTS ix_wms_bi_transfer_user_sender_op ON wms_bi_transfer_order_line(user_id, sender_op);
       CREATE INDEX IF NOT EXISTS ix_wms_bi_transfer_tourist_route ON wms_bi_transfer_order_line(user_id, kind, receiver_op, sender_op, item_code);
     `);
-    await this.backfillDenormWarehouseDimensions();
+    // Do not await: backfill can touch many rows; blocking onModuleInit delays HTTP listen and fails staging deploy health checks.
+    void this.backfillDenormWarehouseDimensions().catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.error(`WMS BI warehouse dimension backfill failed: ${msg}`);
+    });
   }
 
   /** Заполняет denorm-колонки ОП/типа склада для строк, импортированных до появления колонок. */
@@ -527,16 +531,33 @@ export class WmsAnalyticsService implements OnModuleInit {
         [CHUNK],
       );
       if (res.rows.length === 0) return;
+      const ids: string[] = [];
+      const senderTypes: string[] = [];
+      const senderOps: string[] = [];
+      const receiverTypes: string[] = [];
+      const receiverOps: string[] = [];
       for (const row of res.rows) {
         const s = parseWarehouseDimension(row.sender_warehouse);
         const r = parseWarehouseDimension(row.receiver_warehouse);
-        await this.pool.query(
-          `UPDATE wms_bi_transfer_order_line
-           SET sender_warehouse_type = $2, sender_op = $3, receiver_warehouse_type = $4, receiver_op = $5
-           WHERE id = $1`,
-          [row.id, s.warehouseType, s.op, r.warehouseType, r.op],
-        );
+        ids.push(row.id);
+        senderTypes.push(s.warehouseType);
+        senderOps.push(s.op);
+        receiverTypes.push(r.warehouseType);
+        receiverOps.push(r.op);
       }
+      await this.pool.query(
+        `UPDATE wms_bi_transfer_order_line AS t
+         SET sender_warehouse_type = u.swt,
+             sender_op = u.so,
+             receiver_warehouse_type = u.rwt,
+             receiver_op = u.ro
+         FROM (
+           SELECT * FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[])
+             AS u(id, swt, so, rwt, ro)
+         ) u
+         WHERE t.id = u.id`,
+        [ids, senderTypes, senderOps, receiverTypes, receiverOps],
+      );
       if (res.rows.length < CHUNK) return;
     }
     this.logger.warn(
