@@ -89,10 +89,6 @@ type Filters = {
   counterparties: string[]
   qtyMin: string
   qtyMax: string
-  retailMin: string
-  retailMax: string
-  costMin: string
-  costMax: string
   item: string
   /** Точные коды номенклатуры (из каталога). */
   itemCodes: string[]
@@ -224,10 +220,6 @@ function getDefaultFilters(): Filters {
     counterparties: [],
     qtyMin: "",
     qtyMax: "",
-    retailMin: "",
-    retailMax: "",
-    costMin: "",
-    costMax: "",
     item: "",
     itemCodes: [],
     kind: "",
@@ -270,10 +262,6 @@ function parseFiltersFromSearchParams(sp: URLSearchParams): Filters {
   d.itemCodes = splitList("itemCodes")
   d.qtyMin = sp.get("qtyMin") ?? ""
   d.qtyMax = sp.get("qtyMax") ?? ""
-  d.retailMin = sp.get("retailMin") ?? ""
-  d.retailMax = sp.get("retailMax") ?? ""
-  d.costMin = sp.get("costMin") ?? ""
-  d.costMax = sp.get("costMax") ?? ""
   d.item = sp.get("item") ?? ""
   const kind = sp.get("kind")
   if (kind === "REPLENISHMENT" || kind === "TOURIST") d.kind = kind
@@ -549,7 +537,7 @@ function WmsTransferAnalyticsPageContent() {
     setFilters((prev) => ({ ...prev, [key]: value }))
   }
 
-  const setRangeFilter = (key: "qtyMin" | "qtyMax" | "retailMin" | "retailMax" | "costMin" | "costMax", value: string) => {
+  const setRangeFilter = (key: "qtyMin" | "qtyMax", value: string) => {
     setFilters((prev) => ({ ...prev, [key]: value }))
   }
 
@@ -659,7 +647,19 @@ function WmsTransferAnalyticsPageContent() {
               formatOptionLabel={(v) => (v === "" ? "(не указан)" : v)}
             />
             <div className="space-y-1 md:col-span-2 xl:col-span-2">
-              <Label htmlFor="item">Товар / артикул</Label>
+              <div className="flex items-center justify-between gap-2">
+                <Label htmlFor="item">Товар / артикул</Label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-9 shrink-0 border-input bg-background text-foreground"
+                  onClick={() => setItemPickerOpen(true)}
+                >
+                  <Layers className="mr-2 h-4 w-4" />
+                  Каталог номенклатуры
+                </Button>
+              </div>
               <div className="flex flex-wrap gap-2">
                 <Input
                   id="item"
@@ -669,10 +669,6 @@ function WmsTransferAnalyticsPageContent() {
                   disabled={Boolean(filters.itemCodes.length)}
                   onChange={(e) => setFilter("item", e.target.value)}
                 />
-                <Button type="button" variant="secondary" className="shrink-0" onClick={() => setItemPickerOpen(true)}>
-                  <Layers className="mr-2 h-4 w-4" />
-                  Каталог номенклатуры
-                </Button>
                 {filters.itemCodes.length ? (
                   <Button
                     type="button"
@@ -691,64 +687,6 @@ function WmsTransferAnalyticsPageContent() {
                   {filters.itemCodes.length > 12 ? ` … +${filters.itemCodes.length - 12}` : ""}
                 </p>
               ) : null}
-            </div>
-          </div>
-          <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
-            <div className="space-y-1">
-              <Label htmlFor="qtyMin">Количество от</Label>
-              <Input
-                id="qtyMin"
-                inputMode="decimal"
-                placeholder="напр. 1"
-                value={filters.qtyMin}
-                onChange={(e) => setRangeFilter("qtyMin", e.target.value)}
-              />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="qtyMax">Количество до</Label>
-              <Input
-                id="qtyMax"
-                inputMode="decimal"
-                placeholder="напр. 100"
-                value={filters.qtyMax}
-                onChange={(e) => setRangeFilter("qtyMax", e.target.value)}
-              />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="retailMin">Розничная цена от, ₽</Label>
-              <Input
-                id="retailMin"
-                inputMode="decimal"
-                value={filters.retailMin}
-                onChange={(e) => setRangeFilter("retailMin", e.target.value)}
-              />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="retailMax">Розничная цена до, ₽</Label>
-              <Input
-                id="retailMax"
-                inputMode="decimal"
-                value={filters.retailMax}
-                onChange={(e) => setRangeFilter("retailMax", e.target.value)}
-              />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="costMin">Себестоимость от, ₽</Label>
-              <Input
-                id="costMin"
-                inputMode="decimal"
-                value={filters.costMin}
-                onChange={(e) => setRangeFilter("costMin", e.target.value)}
-              />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="costMax">Себестоимость до, ₽</Label>
-              <Input
-                id="costMax"
-                inputMode="decimal"
-                value={filters.costMax}
-                onChange={(e) => setRangeFilter("costMax", e.target.value)}
-              />
             </div>
           </div>
           <div className="flex flex-wrap items-end gap-3">
@@ -780,10 +718,6 @@ function WmsTransferAnalyticsPageContent() {
                   </option>
                 ))}
               </select>
-              <p className="max-w-md text-xs text-muted-foreground">
-                «Все партии» — суммируются все загрузки. Если выбрана одна партия, сводки и таблицы считаются только по ней;
-                значения в фильтрах (ОП, склады, контрагенты) тоже только по этой партии.
-              </p>
             </div>
             {filters.batchId ? (
               <Button
@@ -822,17 +756,10 @@ function WmsTransferAnalyticsPageContent() {
                 <option value={50000}>50 000 (по умолчанию)</option>
                 <option value={100000}>100 000 (макс.)</option>
               </select>
-              <p className="max-w-md text-xs text-muted-foreground">
-                Таблицы строятся агрегатами в PostgreSQL; лимит — сколько групп вернуть в каждой таблице. Сводка сверху — по всем строкам в фильтре.
-              </p>
             </div>
             <Button type="button" variant="outline" onClick={() => void load()} disabled={loading}>
               <RefreshCw className="mr-2 h-4 w-4" />
               Обновить
-            </Button>
-            <Button type="button" variant="outline" disabled={uploading}>
-              <FileUp className="mr-2 h-4 w-4" />
-              {uploading ? "Импорт..." : "Импорт через поле выше"}
             </Button>
           </div>
         </CardContent>
