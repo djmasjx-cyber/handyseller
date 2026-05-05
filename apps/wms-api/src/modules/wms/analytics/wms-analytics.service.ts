@@ -242,11 +242,8 @@ function matchesFilters(line: WmsBiTransferOrderLineRecord, filters: WmsBiTransf
   if (filters.senderOps?.length && !filters.senderOps.includes(normalized.senderOp)) {
     return false;
   }
-  if (
-    filters.warehouseTypes?.length &&
-    !filters.warehouseTypes.includes(normalized.receiverWarehouseType) &&
-    !filters.warehouseTypes.includes(normalized.senderWarehouseType)
-  ) {
+  /** Тип склада в фильтре «Склад» = склад-получатель (колонка «Получатель» / receiver_warehouse_type). */
+  if (filters.warehouseTypes?.length && !filters.warehouseTypes.includes(normalized.receiverWarehouseType)) {
     return false;
   }
   if (filters.counterparties?.length) {
@@ -347,9 +344,7 @@ function buildTransferAnalyticsWhere(userId: string, filters: WmsBiTransferFilte
   if (filters.warehouseTypes?.length) {
     params.push(filters.warehouseTypes);
     const idx = params.length;
-    conds.push(
-      `(receiver_warehouse_type = ANY($${idx}::text[]) OR sender_warehouse_type = ANY($${idx}::text[]))`,
-    );
+    conds.push(`receiver_warehouse_type = ANY($${idx}::text[])`);
   }
   if (filters.counterparties?.length) {
     const ors: string[] = [];

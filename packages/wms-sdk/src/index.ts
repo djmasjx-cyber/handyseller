@@ -254,6 +254,7 @@ export interface WmsBiTransferFilters {
   senderWarehouse?: string;
   receiverOps?: string[];
   senderOps?: string[];
+  /** Тип склада **получателя** (`receiver_warehouse_type`). Отбор по отправителю — через «Отправитель». */
   warehouseTypes?: string[];
   /** Подстрочный поиск по названию / коду / артикулу (если не задан itemCodes). */
   item?: string;

@@ -481,7 +481,7 @@ export default function WmsTransferAnalyticsPage() {
             </div>
             <CheckSelect
               id="warehouseTypes"
-              label="Склад"
+              label="Склад получателя"
               options={options.warehouseTypes}
               value={filters.warehouseTypes}
               onChange={(value) => setListFilter("warehouseTypes", value)}
