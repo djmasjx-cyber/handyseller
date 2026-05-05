@@ -402,6 +402,7 @@ function WmsTransferAnalyticsPageContent() {
     return () => window.clearTimeout(t)
   }, [filters, pathname, router, searchKey])
   const [itemPickerOpen, setItemPickerOpen] = useState(false)
+  const [batchMenuOpen, setBatchMenuOpen] = useState(false)
   const [touristSort, setTouristSort] = useState<{ key: TouristSortKey; dir: "asc" | "desc" }>({
     key: "default",
     dir: "asc",
@@ -542,16 +543,16 @@ function WmsTransferAnalyticsPageContent() {
     setFilters((prev) => ({ ...prev, [key]: value }))
   }
 
-  const deleteSelectedBatch = async () => {
-    if (!token || !filters.batchId) return
+  const deleteBatch = async (batchId: string) => {
+    if (!token || !batchId) return
     const ok = window.confirm(
-      "Удалить выбранную партию из базы вместе со всеми строками этой загрузки? Действие необратимо.",
+      "Удалить партию из базы вместе со всеми строками этой загрузки? Действие необратимо.",
     )
     if (!ok) return
     setError(null)
     setSuccess(null)
     try {
-      const res = await authFetch(`/api/wms/v1/analytics/imports/${encodeURIComponent(filters.batchId)}`, {
+      const res = await authFetch(`/api/wms/v1/analytics/imports/${encodeURIComponent(batchId)}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       })
@@ -566,13 +567,20 @@ function WmsTransferAnalyticsPageContent() {
         setError(formatHttpError(data, "Не удалось удалить партию."))
         return
       }
-      setFilters((prev) => ({ ...prev, batchId: "" }))
+      setFilters((prev) => ({ ...prev, batchId: prev.batchId === batchId ? "" : prev.batchId }))
       setSuccess("Партия удалена.")
+      setBatchMenuOpen(false)
       await load()
     } catch (err) {
       setError(err instanceof Error ? err.message : "Ошибка удаления.")
     }
   }
+
+  const selectedBatchLabel = useMemo(() => {
+    if (!filters.batchId) return "Все партии"
+    const b = imports.find((x) => x.id === filters.batchId)
+    return b ? `${b.fileName ?? b.id} · ${dateShort(b.createdAt)}` : "Все партии"
+  }, [filters.batchId, imports])
 
   return (
     <main className="space-y-6 p-6">
@@ -676,31 +684,55 @@ function WmsTransferAnalyticsPageContent() {
           <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
             <div className="space-y-1">
               <Label htmlFor="batch">Партия импорта</Label>
-              <div className="flex items-center gap-2">
-                <select
+              <div className="relative">
+                <Button
                   id="batch"
-                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                  value={filters.batchId}
-                  onChange={(e) => setFilter("batchId", e.target.value)}
+                  type="button"
+                  variant="outline"
+                  className="h-10 w-full justify-between"
+                  onClick={() => setBatchMenuOpen((v) => !v)}
                 >
-                  <option value="">Все партии</option>
-                  {imports.map((batch) => (
-                    <option key={batch.id} value={batch.id}>
-                      {batch.fileName ?? batch.id} · {dateShort(batch.createdAt)}
-                    </option>
-                  ))}
-                </select>
-                {filters.batchId ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-10 shrink-0 border-destructive/40 text-destructive hover:bg-destructive/10"
-                    onClick={() => void deleteSelectedBatch()}
-                    disabled={loading}
-                  >
-                    <Trash2 className="mr-2 h-4 w-4" />
-                    Удалить партию
-                  </Button>
+                  <span className="truncate text-left">{selectedBatchLabel}</span>
+                  <span className="ml-2 text-muted-foreground">v</span>
+                </Button>
+                {batchMenuOpen ? (
+                  <div className="absolute z-30 mt-1 max-h-80 w-full overflow-auto rounded-md border bg-background p-1 shadow-sm">
+                    <button
+                      type="button"
+                      className="flex w-full items-center rounded px-2 py-2 text-left text-sm hover:bg-muted"
+                      onClick={() => {
+                        setFilter("batchId", "")
+                        setBatchMenuOpen(false)
+                      }}
+                    >
+                      Все партии
+                    </button>
+                    {imports.map((batch) => (
+                      <div key={batch.id} className="flex items-center gap-1 rounded px-1 py-1 hover:bg-muted">
+                        <button
+                          type="button"
+                          className="flex-1 truncate px-1 py-1 text-left text-sm"
+                          onClick={() => {
+                            setFilter("batchId", batch.id)
+                            setBatchMenuOpen(false)
+                          }}
+                        >
+                          {batch.fileName ?? batch.id} · {dateShort(batch.createdAt)}
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded p-1 text-destructive hover:bg-destructive/10"
+                          title="Удалить партию"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            void deleteBatch(batch.id)
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
                 ) : null}
               </div>
             </div>
