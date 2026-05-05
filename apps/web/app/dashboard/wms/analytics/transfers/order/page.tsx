@@ -108,6 +108,17 @@ export default function WmsTouristOrderDetailPage() {
     void load()
   }, [load])
 
+  const orderLineTotals = useMemo(() => {
+    if (!detail || detail.lines.length <= 1) return null
+    let qty = 0
+    let sum = 0
+    for (const l of detail.lines) {
+      qty += l.quantity
+      sum += l.sum
+    }
+    return { qty, sum }
+  }, [detail])
+
   const backHref = listHref(sp)
 
   /** Возврат на сводку тем же URL, что был до входа в заказ (без повторной канонизации query). */
@@ -198,6 +209,20 @@ export default function WmsTouristOrderDetailPage() {
                       </tr>
                     ))}
                   </tbody>
+                  {orderLineTotals ? (
+                    <tfoot>
+                      <tr className="border-t-2 border-border bg-muted/25 font-medium">
+                        <td colSpan={2} className="px-3 py-2 text-foreground">
+                          Итого по заказу
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums text-foreground">
+                          {formatQty(orderLineTotals.qty)}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">—</td>
+                        <td className="px-3 py-2 text-right tabular-nums text-foreground">{money(orderLineTotals.sum)}</td>
+                      </tr>
+                    </tfoot>
+                  ) : null}
                 </table>
               </div>
             ) : detail ? (
