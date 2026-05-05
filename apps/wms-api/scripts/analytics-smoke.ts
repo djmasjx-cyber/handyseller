@@ -22,10 +22,12 @@ async function main() {
       'Цена',
     ],
     ['ref-1', 'MOV-1', '01.01.2026 10:00:00', 'Склад Запчасти ОСИНОВО', 'Склад Запчасти ЛОНМАДИ ЕЛИНО', 'Товар X', '', 'ART-X', 'CODE-X', '', 'Нет', 10],
-    ['ref-2', 'MOV-2', '02.01.2026 10:00:00', 'Склад Запчасти ЕЛИНО', 'Склад Запчасти ЛОНМАДИ ЕЛИНО', 'Товар X', '', 'ART-X', 'CODE-X', 'Заказ клиента', 'Нет', 20],
+    /** Пополнение: непустые Назначение и ДокументОснование (или достаточно одного из них). */
+    ['ref-2', 'MOV-2', '02.01.2026 10:00:00', 'Склад Запчасти ЕЛИНО', 'Склад Запчасти ЛОНМАДИ ЕЛИНО', 'Товар X', 'Назначение-A', 'ART-X', 'CODE-X', 'Документ-A', 'Нет', 20],
     ['ref-3', 'MOV-3', '03.01.2026 10:00:00', 'Склад Техники РОСТОВ', 'Склад Запчасти ЛОНМАДИ ЕЛИНО', 'Товар X', '', 'ART-X', 'CODE-X', '', 'Нет', 30],
-    ['ref-4', 'MOV-4', '04.01.2026 10:00:00', 'Склад Запчасти ЕЛИНО', 'Склад Запчасти ЛОНМАДИ ЕЛИНО', 'Товар X', 'Пополнение', 'ART-X', 'CODE-X', '', 'Нет', 40],
-    ['ref-5', 'MOV-5', '05.01.2026 10:00:00', 'Склад Гарантия САМАРА', 'Склад Запчасти РОСТОВ', 'Товар Y', '', 'ART-Y', 'CODE-Y', '', 'Нет', 50],
+    /** MOV-4: пополнение только у строки с непустым Назначение или Основание; вторая строка — турист. */
+    ['ref-4a', 'MOV-4', '04.01.2026 10:00:00', 'Склад Запчасти ЕЛИНО', 'Склад Запчасти ЛОНМАДИ ЕЛИНО', 'Товар X', 'Пополнение', 'ART-X', 'CODE-X', 'Основание-1', 'Нет', 40],
+    ['ref-4b', 'MOV-4', '04.01.2026 10:00:00', 'Склад Запчасти ЕЛИНО', 'Склад Запчасти ЛОНМАДИ ЕЛИНО', 'Товар X', '', 'ART-X', 'CODE-X', '', 'Нет', 40],
   ];
   const book = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet(rows), 'Лист_1');
@@ -40,16 +42,16 @@ async function main() {
   assert.equal(result.batch.rawRowCount, 5);
   assert.equal(result.batch.importedRowCount, 5);
   assert.equal(result.summary.rowsTotal, 5);
-  assert.equal(result.summary.ordersTotal, 5);
+  assert.equal(result.summary.ordersTotal, 4);
   assert.equal(result.summary.replenishmentRows, 2);
   assert.equal(result.summary.touristRows, 3);
-  assert.equal(result.summary.touristValue, 90);
+  assert.equal(result.summary.touristValue, 80);
 
   const byOp = await service.getTransfersByOp('test-user', {});
   assert.equal(byOp[0].receiverOp, 'ЛОНМАДИ ЕЛИНО');
   assert.equal(byOp[0].receiverWarehouseType, 'Склад Запчасти');
-  assert.equal(byOp[0].rows, 4);
-  assert.equal(byOp[0].touristRows, 2);
+  assert.equal(byOp[0].rows, 5);
+  assert.equal(byOp[0].touristRows, 3);
 
   const options = await service.getTransferOptions('test-user');
   assert.equal(options.warehouseTypes.includes('Склад Запчасти'), true);
@@ -64,13 +66,16 @@ async function main() {
 
   const freq = await service.getItemFrequency('test-user', {});
   const fx = freq.find((r) => r.itemCode === 'CODE-X');
-  assert.equal(fx != null && fx.rowCount >= 3, true);
+  assert.equal(fx != null && fx.rowCount >= 5, true);
 
   const risks = await service.getReplenishmentRisks('test-user', {});
-  assert.equal(risks.length, 1);
-  assert.equal(risks[0].receiverOp, 'ЛОНМАДИ ЕЛИНО');
-  assert.equal(risks[0].touristRowsUntilNextReplenishment, 1);
-  assert.equal(risks[0].touristValueUntilNextReplenishment, 30);
+  assert.equal(risks.length, 2);
+  const byValue = [...risks].sort((a, b) => b.touristValueUntilNextReplenishment - a.touristValueUntilNextReplenishment);
+  assert.equal(byValue[0].receiverOp, 'ЛОНМАДИ ЕЛИНО');
+  assert.equal(byValue[0].touristRowsUntilNextReplenishment, 1);
+  assert.equal(byValue[0].touristValueUntilNextReplenishment, 40);
+  assert.equal(byValue[1].touristRowsUntilNextReplenishment, 1);
+  assert.equal(byValue[1].touristValueUntilNextReplenishment, 30);
 }
 
 void main();

@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
-import { classifyTransferOrderLine } from '@handyseller/wms-domain';
+import { classifyTransferOrderLineKind, transferOrderGroupKey } from '@handyseller/wms-domain';
 import type {
   WmsBiImportBatchRecord,
   WmsBiRawRowRecord,
@@ -720,7 +720,7 @@ export class WmsAnalyticsService implements OnModuleInit {
     };
 
     const rawRows: WmsBiRawRowRecord[] = [];
-    const lines: WmsBiTransferOrderLineRecord[] = [];
+    const lineInputs: WmsBiTransferOrderLineInput[] = [];
     for (let r = 1; r < rows.length; r += 1) {
       const row = rows[r];
       const rowNumber = r + 1;
@@ -742,8 +742,27 @@ export class WmsAnalyticsService implements OnModuleInit {
       };
       rawRows.push(raw);
       if (!lineInput || errors.length) continue;
-      lines.push(this.buildTransferLine(userId, batch.id, lineInput, ts));
+      lineInputs.push(lineInput);
     }
+
+    const groupCounts = new Map<string, number>();
+    for (const li of lineInputs) {
+      const k = transferOrderGroupKey(li.orderNumber, li.orderDate);
+      groupCounts.set(k, (groupCounts.get(k) ?? 0) + 1);
+    }
+    const lines: WmsBiTransferOrderLineRecord[] = lineInputs.map((lineInput) => {
+      const groupKey = transferOrderGroupKey(lineInput.orderNumber, lineInput.orderDate);
+      const groupLineCount = groupCounts.get(groupKey) ?? 1;
+      const kind = classifyTransferOrderLineKind(
+        {
+          purpose: lineInput.purpose ?? null,
+          baseDocument: lineInput.baseDocument ?? null,
+          senderWarehouse: lineInput.senderWarehouse,
+        },
+        groupLineCount,
+      );
+      return this.buildTransferLine(userId, batch.id, lineInput, ts, kind);
+    });
 
     batch.rawRowCount = rawRows.length;
     batch.importedRowCount = lines.length;
@@ -1375,11 +1394,8 @@ export class WmsAnalyticsService implements OnModuleInit {
     batchId: string,
     input: WmsBiTransferOrderLineInput,
     createdAt: string,
+    kind: WmsBiTransferOrderKind,
   ): WmsBiTransferOrderLineRecord {
-    const kind = classifyTransferOrderLine({
-      purpose: input.purpose,
-      baseDocument: input.baseDocument,
-    });
     const sender = parseWarehouseDimension(input.senderWarehouse);
     const receiver = parseWarehouseDimension(input.receiverWarehouse);
     return {
