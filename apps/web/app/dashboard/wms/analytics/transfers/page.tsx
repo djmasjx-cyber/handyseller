@@ -64,7 +64,7 @@ type TouristOrderRow = {
   orderDate: string
 }
 
-type TouristSortKey = "default" | "period" | "orderSum"
+type TouristSortKey = "default" | "period" | "orderSum" | "products" | "margin" | "delivery" | "difference"
 
 type RiskRow = {
   receiverWarehouse: string
@@ -428,6 +428,40 @@ function WmsTransferAnalyticsPageContent() {
       rows.sort((a, b) => dir * a.orderDate.localeCompare(b.orderDate))
       return rows
     }
+    if (touristSort.key === "products") {
+      rows.sort((a, b) => {
+        const d = dir * (a.productCount - b.productCount)
+        if (d !== 0) return d
+        return a.orderNumber.localeCompare(b.orderNumber, "ru", { numeric: true, sensitivity: "base" })
+      })
+      return rows
+    }
+    if (touristSort.key === "margin") {
+      rows.sort((a, b) => {
+        const d = dir * (a.marginTotal - b.marginTotal)
+        if (d !== 0) return d
+        return a.orderNumber.localeCompare(b.orderNumber, "ru", { numeric: true, sensitivity: "base" })
+      })
+      return rows
+    }
+    if (touristSort.key === "delivery") {
+      rows.sort((a, b) => {
+        const d = dir * (a.deliveryTotal - b.deliveryTotal)
+        if (d !== 0) return d
+        return a.orderNumber.localeCompare(b.orderNumber, "ru", { numeric: true, sensitivity: "base" })
+      })
+      return rows
+    }
+    if (touristSort.key === "difference") {
+      rows.sort((a, b) => {
+        const av = a.differenceTotal ?? Number.NEGATIVE_INFINITY
+        const bv = b.differenceTotal ?? Number.NEGATIVE_INFINITY
+        const d = dir * (av - bv)
+        if (d !== 0) return d
+        return a.orderNumber.localeCompare(b.orderNumber, "ru", { numeric: true, sensitivity: "base" })
+      })
+      return rows
+    }
     rows.sort((a, b) => {
       const d = dir * (a.orderTotal - b.orderTotal)
       if (d !== 0) return d
@@ -436,7 +470,7 @@ function WmsTransferAnalyticsPageContent() {
     return rows
   }, [tourists, touristSort])
 
-  const toggleTouristSort = (key: "period" | "orderSum") => {
+  const toggleTouristSort = (key: Exclude<TouristSortKey, "default">) => {
     setTouristSort((prev) =>
       prev.key === key ? { key, dir: prev.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" },
     )
@@ -878,7 +912,24 @@ function WmsTransferAnalyticsPageContent() {
                   <th className="whitespace-nowrap px-3 py-2 font-medium">Отправитель</th>
                   <th className="whitespace-nowrap px-3 py-2 font-medium">Получатель</th>
                   <th className="whitespace-nowrap px-3 py-2 font-medium">Склад</th>
-                  <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Товаров</th>
+                  <th className="whitespace-nowrap px-3 py-2 text-right font-medium">
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 rounded hover:bg-muted"
+                      onClick={() => toggleTouristSort("products")}
+                    >
+                      Товаров
+                      {touristSort.key === "products" ? (
+                        touristSort.dir === "asc" ? (
+                          <ArrowUp className="h-3.5 w-3.5" />
+                        ) : (
+                          <ArrowDown className="h-3.5 w-3.5" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="h-3.5 w-3.5 opacity-40" />
+                      )}
+                    </button>
+                  </th>
                   <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Себестоимость</th>
                   <th className="whitespace-nowrap px-3 py-2 font-medium">
                     <button
@@ -898,9 +949,60 @@ function WmsTransferAnalyticsPageContent() {
                       )}
                     </button>
                   </th>
-                  <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Маржа</th>
-                  <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Доставка</th>
-                  <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Разница</th>
+                  <th className="whitespace-nowrap px-3 py-2 text-right font-medium">
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 rounded hover:bg-muted"
+                      onClick={() => toggleTouristSort("margin")}
+                    >
+                      Маржа
+                      {touristSort.key === "margin" ? (
+                        touristSort.dir === "asc" ? (
+                          <ArrowUp className="h-3.5 w-3.5" />
+                        ) : (
+                          <ArrowDown className="h-3.5 w-3.5" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="h-3.5 w-3.5 opacity-40" />
+                      )}
+                    </button>
+                  </th>
+                  <th className="whitespace-nowrap px-3 py-2 text-right font-medium">
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 rounded hover:bg-muted"
+                      onClick={() => toggleTouristSort("delivery")}
+                    >
+                      Доставка
+                      {touristSort.key === "delivery" ? (
+                        touristSort.dir === "asc" ? (
+                          <ArrowUp className="h-3.5 w-3.5" />
+                        ) : (
+                          <ArrowDown className="h-3.5 w-3.5" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="h-3.5 w-3.5 opacity-40" />
+                      )}
+                    </button>
+                  </th>
+                  <th className="whitespace-nowrap px-3 py-2 text-right font-medium">
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 rounded hover:bg-muted"
+                      onClick={() => toggleTouristSort("difference")}
+                    >
+                      Разница
+                      {touristSort.key === "difference" ? (
+                        touristSort.dir === "asc" ? (
+                          <ArrowUp className="h-3.5 w-3.5" />
+                        ) : (
+                          <ArrowDown className="h-3.5 w-3.5" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="h-3.5 w-3.5 opacity-40" />
+                      )}
+                    </button>
+                  </th>
                   <th className="whitespace-nowrap px-3 py-2 font-medium">
                     <button
                       type="button"
