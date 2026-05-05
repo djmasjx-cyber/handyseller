@@ -646,24 +646,26 @@ function WmsTransferAnalyticsPageContent() {
               onChange={(value) => setListFilter("counterparties", value)}
               formatOptionLabel={(v) => (v === "" ? "(не указан)" : v)}
             />
-            <div className="space-y-1 md:col-span-2 xl:col-span-2">
-              <div className="flex items-center justify-between gap-2">
-                <Label htmlFor="item">Товар / артикул</Label>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-9 shrink-0 border-input bg-background text-foreground"
-                  onClick={() => setItemPickerOpen(true)}
-                >
-                  <Layers className="mr-2 h-4 w-4" />
-                  Каталог номенклатуры
-                </Button>
-              </div>
+            <div className="space-y-1">
+              <Label className="whitespace-nowrap">Каталог номенклатуры</Label>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-10 w-full justify-start border-input bg-background text-foreground"
+                onClick={() => setItemPickerOpen(true)}
+              >
+                <Layers className="mr-2 h-4 w-4" />
+                Каталог номенклатуры
+              </Button>
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="item" className="whitespace-nowrap">
+                Товар / артикул
+              </Label>
               <div className="flex flex-wrap gap-2">
                 <Input
                   id="item"
-                  className="max-w-md flex-1 min-w-[12rem]"
+                  className="flex-1 min-w-[12rem]"
                   value={filters.item}
                   placeholder={filters.itemCodes.length ? "Отключено: выбраны коды из каталога" : "Подстрока по названию, коду или артикулу"}
                   disabled={Boolean(filters.itemCodes.length)}
