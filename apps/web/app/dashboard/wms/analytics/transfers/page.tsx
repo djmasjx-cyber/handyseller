@@ -313,6 +313,45 @@ function filterSearchFromLocationSearch(search: string): string {
   return u.toString()
 }
 
+const TRANSFERS_ANALYTICS_CACHE_PREFIX = "wmsTransfersAnalyticsBundle:v1"
+
+type TransfersCacheBundle = {
+  summary: Summary
+  imports: ImportBatch[]
+  options: FilterOptions
+  byOp: ByOpRow[]
+  tourists: TouristOrderRow[]
+  risks: RiskRow[]
+}
+
+function transfersAnalyticsStorageKey(filterKeyCanonical: string) {
+  return `${TRANSFERS_ANALYTICS_CACHE_PREFIX}:${filterKeyCanonical}`
+}
+
+function readTransfersAnalyticsBundle(filterKeyCanonical: string): TransfersCacheBundle | null {
+  if (typeof window === "undefined") return null
+  const keyForEmpty = transfersAnalyticsStorageKey("__empty__")
+  const storageKey = filterKeyCanonical ? transfersAnalyticsStorageKey(filterKeyCanonical) : keyForEmpty
+  try {
+    const raw = sessionStorage.getItem(storageKey)
+    if (!raw) return null
+    return JSON.parse(raw) as TransfersCacheBundle
+  } catch {
+    return null
+  }
+}
+
+function writeTransfersAnalyticsBundle(filterKeyCanonical: string, bundle: TransfersCacheBundle): void {
+  if (typeof window === "undefined") return
+  const keyForEmpty = transfersAnalyticsStorageKey("__empty__")
+  const storageKey = filterKeyCanonical ? transfersAnalyticsStorageKey(filterKeyCanonical) : keyForEmpty
+  try {
+    sessionStorage.setItem(storageKey, JSON.stringify(bundle))
+  } catch {
+    /* storage full / privacy mode */
+  }
+}
+
 function readFileAsBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -351,6 +390,8 @@ function WmsTransferAnalyticsPageContent() {
    * - pendingOwnCanonical: каноническая строка query, которую мы только что отправили в replace; один layout-проход игнорируем.
    */
   const pendingOwnCanonical = useRef<string | null>(null)
+  /** Если true, следующий вызов load() не включает «полную» загрузку (нет мигания пустых таблиц после history.back()). */
+  const skipFullLoadingOnceRef = useRef(false)
 
   const [summary, setSummary] = useState<Summary>(emptySummary)
   const [imports, setImports] = useState<ImportBatch[]>([])
@@ -391,6 +432,24 @@ function WmsTransferAnalyticsPageContent() {
       return parsed
     })
   }, [searchKey])
+
+  const filterKeyCanonical = useMemo(() => canonicalQueryString(searchKey), [searchKey])
+
+  useLayoutEffect(() => {
+    if (!token) return
+    const bundle = readTransfersAnalyticsBundle(filterKeyCanonical)
+    if (!bundle) {
+      skipFullLoadingOnceRef.current = false
+      return
+    }
+    skipFullLoadingOnceRef.current = true
+    setSummary(bundle.summary)
+    setImports(bundle.imports)
+    setOptions(bundle.options)
+    setByOp(bundle.byOp)
+    setTourists(bundle.tourists)
+    setRisks(bundle.risks)
+  }, [filterKeyCanonical, token])
 
   useEffect(() => {
     const want = filtersQueryKey(filters)
@@ -503,7 +562,12 @@ function WmsTransferAnalyticsPageContent() {
 
   const load = useCallback(async () => {
     if (!token) return
-    setLoading(true)
+    const cacheKeySnapshot = filterKeyCanonical
+    const quietInitial = skipFullLoadingOnceRef.current
+    skipFullLoadingOnceRef.current = false
+    if (!quietInitial) {
+      setLoading(true)
+    }
     setError(null)
     try {
       const headers = { Authorization: `Bearer ${token}` }
@@ -531,22 +595,36 @@ function WmsTransferAnalyticsPageContent() {
             : `Не удалось загрузить сводку аналитики (HTTP ${summaryRes.status}).`,
         )
       }
-      setSummary(JSON.parse(summaryText) as Summary)
-      setImports(importsRes.ok ? ((await importsRes.json()) as ImportBatch[]) : [])
-      setOptions(
-        optionsRes.ok
-          ? ((await optionsRes.json()) as FilterOptions)
-          : { warehouseTypes: [], receiverOps: [], senderOps: [], counterparties: [] },
-      )
-      setByOp(byOpRes.ok ? ((await byOpRes.json()) as ByOpRow[]) : [])
-      setTourists(touristsRes.ok ? ((await touristsRes.json()) as TouristOrderRow[]) : [])
-      setRisks(risksRes.ok ? ((await risksRes.json()) as RiskRow[]) : [])
+      const nextSummary = JSON.parse(summaryText) as Summary
+      const nextImports = importsRes.ok ? ((await importsRes.json()) as ImportBatch[]) : []
+      const nextOptions = optionsRes.ok
+        ? ((await optionsRes.json()) as FilterOptions)
+        : { warehouseTypes: [], receiverOps: [], senderOps: [], counterparties: [] }
+      const nextByOp = byOpRes.ok ? ((await byOpRes.json()) as ByOpRow[]) : []
+      const nextTourists = touristsRes.ok ? ((await touristsRes.json()) as TouristOrderRow[]) : []
+      const nextRisks = risksRes.ok ? ((await risksRes.json()) as RiskRow[]) : []
+
+      setSummary(nextSummary)
+      setImports(nextImports)
+      setOptions(nextOptions)
+      setByOp(nextByOp)
+      setTourists(nextTourists)
+      setRisks(nextRisks)
+
+      writeTransfersAnalyticsBundle(cacheKeySnapshot, {
+        summary: nextSummary,
+        imports: nextImports,
+        options: nextOptions,
+        byOp: nextByOp,
+        tourists: nextTourists,
+        risks: nextRisks,
+      })
     } catch (err) {
       setError(err instanceof Error ? err.message : "Ошибка загрузки аналитики.")
     } finally {
       setLoading(false)
     }
-  }, [query, token])
+  }, [query, token, filterKeyCanonical])
 
   useEffect(() => {
     void load()
@@ -908,25 +986,11 @@ function WmsTransferAnalyticsPageContent() {
 
       <Card className="flex min-h-0 flex-col">
         <CardHeader className="shrink-0 space-y-1.5 pb-3">
-          <div className="flex flex-wrap items-start justify-between gap-2">
-            <div>
-              <CardTitle>Заказы по маршрутам и товарам</CardTitle>
-              <CardDescription>
-                Туристы — одна строка на номер перемещения; пополнение — одна строка на номер LM из «ДокументОснование».
-                Состав — по клику на номер. Те же фильтры, что и выше.
-              </CardDescription>
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="shrink-0"
-              disabled={touristSort.key === "default"}
-              onClick={() => setTouristSort({ key: "default", dir: "asc" })}
-            >
-              По номеру заказа
-            </Button>
-          </div>
+          <CardTitle>Заказы по маршрутам и товарам</CardTitle>
+          <CardDescription>
+            Туристы — одна строка на номер перемещения; пополнение — одна строка на номер LM из «ДокументОснование». Состав — по
+            клику на номер. Те же фильтры, что и выше.
+          </CardDescription>
         </CardHeader>
         <CardContent className="min-h-0 flex-1 pt-0">
           <div className={ANALYTICS_TABLE_SCROLL}>
