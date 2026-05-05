@@ -250,7 +250,9 @@ export class WmsController {
     if (!orderNumber) {
       throw new BadRequestException('Укажите orderNumber (номер заказа).');
     }
-    return this.analytics.getTouristOrderDetail(userId, orderNumber, this.transferFilters(query));
+    const og = this.firstQueryValue(query.orderGroupKind)?.trim().toUpperCase();
+    const orderGroupKind: 'TOURIST' | 'REPLENISHMENT' = og === 'REPLENISHMENT' ? 'REPLENISHMENT' : 'TOURIST';
+    return this.analytics.getTouristOrderDetail(userId, orderNumber, this.transferFilters(query), orderGroupKind);
   }
 
   @Get('v1/analytics/transfers/replenishment-risks')

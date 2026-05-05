@@ -63,13 +63,18 @@ async function main() {
   assert.equal(options.receiverOps.includes('ЛОНМАДИ ЕЛИНО'), true);
 
   const touristOrders = await service.getTouristOrders('test-user', {});
-  const mov3 = touristOrders.find((o) => o.orderNumber === 'MOV-3');
+  const mov3 = touristOrders.find((o) => o.orderNumber === 'MOV-3' && o.orderGroupKind === 'TOURIST');
   assert.equal(mov3 != null && mov3.orderTotal === 30, true);
   assert.equal(mov3 != null && mov3.marginTotal === 10, true);
   assert.equal(mov3 != null && mov3.deliveryTotal === 4, true);
   assert.equal(mov3 != null && mov3.differenceTotal === 6, true);
   const detail = await service.getTouristOrderDetail('test-user', 'MOV-3', {});
   assert.equal(detail.lines.some((l) => l.itemCode === 'CODE-X' && l.sum === 30), true);
+
+  const lm022 = touristOrders.find((o) => o.orderGroupKind === 'REPLENISHMENT' && o.orderNumber === 'LM00-022106');
+  assert.equal(lm022 != null && lm022.productCount >= 1, true);
+  const replDetail = await service.getTouristOrderDetail('test-user', 'LM00-022106', {}, 'REPLENISHMENT');
+  assert.equal(replDetail.lines.some((l) => l.itemCode === 'CODE-X'), true);
 
   const freq = await service.getItemFrequency('test-user', {});
   const fx = freq.find((r) => r.itemCode === 'CODE-X');
