@@ -220,6 +220,12 @@ export interface WmsBiTransferOrderLineRecord {
   retailPrice: number | null;
   /** Себестоимость за единицу, ₽ (целые рубли, округление вверх при импорте). */
   costPrice: number | null;
+  /** Маржа за строку (розничная цена - себестоимость), ₽. */
+  margin: number | null;
+  /** Стоимость доставки по строке/заказу, ₽ (может быть заполнена позже). */
+  delivery: number | null;
+  /** Разница = Маржа - Доставка, если доставка задана; иначе null. */
+  difference: number | null;
   /** Контрагент (из файла). */
   counterparty: string | null;
   price: number;
@@ -243,6 +249,9 @@ export interface WmsBiTransferOrderLineInput {
   quantity?: number | null;
   retailPrice?: number | null;
   costPrice?: number | null;
+  margin?: number | null;
+  delivery?: number | null;
+  difference?: number | null;
   counterparty?: string | null;
   price?: number | null;
 }
@@ -333,8 +342,16 @@ export interface WmsBiTouristOrderSummary {
   receiverWarehouseType: string;
   /** Число наименований (уникальных НоменклатураКод) в заказе. */
   productCount: number;
-  /** Стоимость заказа: сумма поля «Цена» по всем туристским строкам. */
+  /** Стоимость заказа: сумма РозничнойЦена (fallback: Цена) по туристским строкам. */
   orderTotal: number;
+  /** Суммарная себестоимость по заказу. */
+  costTotal: number;
+  /** Суммарная маржа по заказу. */
+  marginTotal: number;
+  /** Суммарная доставка по заказу (может быть null/0 для незаполненных заказов). */
+  deliveryTotal: number;
+  /** Суммарная разница (маржа - доставка) по строкам с заполненной доставкой. */
+  differenceTotal: number | null;
   orderDate: string;
 }
 

@@ -37,8 +37,9 @@ const REQUIRED_COLUMNS = [
   'СкладПолучатель',
   'Номенклатура',
   'НоменклатураКод',
-  'Цена',
 ] as const;
+
+const REQUIRED_PRICE_COLUMNS = ['Цена', 'РозничнаяЦена'] as const;
 
 const HEADER_ALIASES: Record<string, string> = {
   ссылка: 'Ссылка',
@@ -64,6 +65,8 @@ const HEADER_ALIASES: Record<string, string> = {
   'розничная цена': 'РозничнаяЦена',
   себестоимость: 'Себестоимость',
   контрогент: 'Контрогент',
+  контрагент: 'Контрогент',
+  доставка: 'Доставка',
 };
 
 const WAREHOUSE_TYPE_PREFIXES = [
@@ -290,11 +293,32 @@ function optionalMoneyFromLine(value: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function calcMargin(retailPrice: number | null, costPrice: number | null): number | null {
+  if (retailPrice == null || costPrice == null) return null;
+  return retailPrice - costPrice;
+}
+
+function calcDifference(margin: number | null, delivery: number | null): number | null {
+  if (margin == null || delivery == null) return null;
+  return margin - delivery;
+}
+
+function touristValueForLine(line: WmsBiTransferOrderLineRecord): number {
+  return line.retailPrice ?? line.price;
+}
+
 function normalizeTransferLine(line: WmsBiTransferOrderLineRecord): WmsBiTransferOrderLineRecord {
   const sender = parseWarehouseDimension(line.senderWarehouse);
   const receiver = parseWarehouseDimension(line.receiverWarehouse);
   const qty = (line as { quantity?: unknown }).quantity;
   const cp = (line as { counterparty?: unknown }).counterparty;
+  const retail = optionalMoneyFromLine((line as { retailPrice?: unknown }).retailPrice);
+  const cost = optionalMoneyFromLine((line as { costPrice?: unknown }).costPrice);
+  const marginRaw = optionalMoneyFromLine((line as { margin?: unknown }).margin);
+  const delivery = optionalMoneyFromLine((line as { delivery?: unknown }).delivery);
+  const margin = marginRaw ?? calcMargin(retail, cost);
+  const differenceRaw = optionalMoneyFromLine((line as { difference?: unknown }).difference);
+  const difference = differenceRaw ?? calcDifference(margin, delivery);
   return {
     ...line,
     senderWarehouseType: line.senderWarehouseType || sender.warehouseType,
@@ -302,8 +326,11 @@ function normalizeTransferLine(line: WmsBiTransferOrderLineRecord): WmsBiTransfe
     receiverWarehouseType: line.receiverWarehouseType || receiver.warehouseType,
     receiverOp: line.receiverOp || receiver.op,
     quantity: typeof qty === 'number' && Number.isFinite(qty) ? qty : parseQuantity(qty),
-    retailPrice: optionalMoneyFromLine((line as { retailPrice?: unknown }).retailPrice),
-    costPrice: optionalMoneyFromLine((line as { costPrice?: unknown }).costPrice),
+    retailPrice: retail,
+    costPrice: cost,
+    margin,
+    delivery,
+    difference,
     counterparty: typeof cp === 'string' && cp.trim() ? cp.trim() : null,
   };
 }
@@ -496,6 +523,9 @@ type RelationalLineRow = {
   quantity: unknown;
   retail_price: unknown;
   cost_price: unknown;
+  margin: unknown;
+  delivery: unknown;
+  difference: unknown;
   counterparty: string | null;
 };
 
@@ -522,6 +552,9 @@ function relationalRowToLine(row: RelationalLineRow): WmsBiTransferOrderLineReco
     quantity: numFromDb(row.quantity),
     retailPrice: row.retail_price == null ? null : numFromDb(row.retail_price),
     costPrice: row.cost_price == null ? null : numFromDb(row.cost_price),
+    margin: row.margin == null ? null : numFromDb(row.margin),
+    delivery: row.delivery == null ? null : numFromDb(row.delivery),
+    difference: row.difference == null ? null : numFromDb(row.difference),
     counterparty: row.counterparty?.trim() ? row.counterparty.trim() : null,
     senderWarehouseType: row.sender_warehouse_type?.trim() ?? '',
     senderOp: row.sender_op?.trim() ?? '',
@@ -613,6 +646,9 @@ export class WmsAnalyticsService implements OnModuleInit {
       ALTER TABLE wms_bi_transfer_order_line ADD COLUMN IF NOT EXISTS sender_op TEXT NOT NULL DEFAULT '';
       ALTER TABLE wms_bi_transfer_order_line ADD COLUMN IF NOT EXISTS receiver_warehouse_type TEXT NOT NULL DEFAULT '';
       ALTER TABLE wms_bi_transfer_order_line ADD COLUMN IF NOT EXISTS receiver_op TEXT NOT NULL DEFAULT '';
+      ALTER TABLE wms_bi_transfer_order_line ADD COLUMN IF NOT EXISTS margin NUMERIC(18, 4);
+      ALTER TABLE wms_bi_transfer_order_line ADD COLUMN IF NOT EXISTS delivery NUMERIC(18, 4);
+      ALTER TABLE wms_bi_transfer_order_line ADD COLUMN IF NOT EXISTS difference NUMERIC(18, 4);
     `);
     await this.pool.query(`
       CREATE INDEX IF NOT EXISTS ix_wms_bi_transfer_user_receiver_op ON wms_bi_transfer_order_line(user_id, receiver_op);
@@ -624,6 +660,27 @@ export class WmsAnalyticsService implements OnModuleInit {
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.error(`WMS BI warehouse dimension backfill failed: ${msg}`);
     });
+    await this.pool.query(`
+      UPDATE wms_bi_transfer_order_line
+      SET
+        margin = CASE
+          WHEN NULLIF(trim(COALESCE(payload->>'retailPrice', '')), '') IS NULL
+            OR NULLIF(trim(COALESCE(payload->>'costPrice', '')), '') IS NULL
+          THEN NULL
+          ELSE (NULLIF(trim(COALESCE(payload->>'retailPrice', '')), ''))::double precision -
+               (NULLIF(trim(COALESCE(payload->>'costPrice', '')), ''))::double precision
+        END,
+        difference = CASE
+          WHEN NULLIF(trim(COALESCE(payload->>'delivery', '')), '') IS NULL THEN NULL
+          WHEN NULLIF(trim(COALESCE(payload->>'retailPrice', '')), '') IS NULL
+            OR NULLIF(trim(COALESCE(payload->>'costPrice', '')), '') IS NULL
+          THEN NULL
+          ELSE (NULLIF(trim(COALESCE(payload->>'retailPrice', '')), ''))::double precision -
+               (NULLIF(trim(COALESCE(payload->>'costPrice', '')), ''))::double precision -
+               (NULLIF(trim(COALESCE(payload->>'delivery', '')), ''))::double precision
+        END
+      WHERE margin IS NULL OR difference IS NULL
+    `);
   }
 
   /** Заполняет denorm-колонки ОП/типа склада для строк, импортированных до появления колонок. */
@@ -696,6 +753,12 @@ export class WmsAnalyticsService implements OnModuleInit {
     const missing = REQUIRED_COLUMNS.filter((col) => !headerIndex.has(col));
     if (missing.length) {
       throw new BadRequestException(`В файле нет обязательных колонок: ${missing.join(', ')}.`);
+    }
+    const hasAnyPriceColumn = REQUIRED_PRICE_COLUMNS.some((col) => headerIndex.has(col));
+    if (!hasAnyPriceColumn) {
+      throw new BadRequestException(
+        `В файле должна быть хотя бы одна колонка со стоимостью: ${REQUIRED_PRICE_COLUMNS.join(' или ')}.`,
+      );
     }
 
     const ts = nowIso();
@@ -987,7 +1050,18 @@ export class WmsAnalyticsService implements OnModuleInit {
           COUNT(*) FILTER (WHERE kind = 'REPLENISHMENT')::bigint AS replenishment_rows,
           COUNT(*) FILTER (WHERE kind = 'TOURIST')::bigint AS tourist_rows,
           COALESCE(SUM(price), 0)::float8 AS value_total,
-          COALESCE(SUM(price) FILTER (WHERE kind = 'TOURIST'), 0)::float8 AS tourist_value,
+          COALESCE(
+            SUM(
+              CASE WHEN kind = 'TOURIST'
+                THEN COALESCE(
+                  (NULLIF(trim(COALESCE(payload->>'retailPrice', '')), ''))::double precision,
+                  price
+                )
+                ELSE 0
+              END
+            ),
+            0
+          )::float8 AS tourist_value,
           MIN((order_date AT TIME ZONE 'UTC')::date)::text AS first_d,
           MAX((order_date AT TIME ZONE 'UTC')::date)::text AS last_d
         FROM wms_bi_transfer_order_line
@@ -1039,7 +1113,22 @@ export class WmsAnalyticsService implements OnModuleInit {
         MAX(t.receiver_op) AS receiver_op,
         MAX(t.receiver_warehouse_type) AS receiver_warehouse_type,
         COUNT(DISTINCT t.item_code)::bigint AS product_count,
-        COALESCE(SUM(t.price), 0)::float8 AS order_total,
+        COALESCE(
+          SUM(
+            COALESCE((NULLIF(trim(COALESCE(t.payload->>'retailPrice', '')), ''))::double precision, t.price)
+          ),
+          0
+        )::float8 AS order_total,
+        COALESCE(
+          SUM((NULLIF(trim(COALESCE(t.payload->>'costPrice', '')), ''))::double precision),
+          0
+        )::float8 AS cost_total,
+        COALESCE(SUM(COALESCE(t.margin, 0)), 0)::float8 AS margin_total,
+        COALESCE(SUM(COALESCE(t.delivery, 0)), 0)::float8 AS delivery_total,
+        CASE
+          WHEN COUNT(*) FILTER (WHERE t.delivery IS NOT NULL) = 0 THEN NULL
+          ELSE COALESCE(SUM(COALESCE(t.difference, 0)), 0)::float8
+        END AS difference_total,
         MIN(t.order_date) AS order_date
       FROM wms_bi_transfer_order_line t
       WHERE ${whereSql}
@@ -1054,6 +1143,10 @@ export class WmsAnalyticsService implements OnModuleInit {
       receiver_warehouse_type: string | null;
       product_count: string;
       order_total: string;
+      cost_total: string;
+      margin_total: string;
+      delivery_total: string;
+      difference_total: string | null;
       order_date: Date;
     }>(sql, [...params, limit, offset]);
     return res.rows.map((r) => ({
@@ -1063,6 +1156,10 @@ export class WmsAnalyticsService implements OnModuleInit {
       receiverWarehouseType: r.receiver_warehouse_type ?? '',
       productCount: Number(r.product_count),
       orderTotal: numFromDb(r.order_total),
+      costTotal: numFromDb(r.cost_total),
+      marginTotal: numFromDb(r.margin_total),
+      deliveryTotal: numFromDb(r.delivery_total),
+      differenceTotal: r.difference_total == null ? null : numFromDb(r.difference_total),
       orderDate: isoDate(r.order_date),
     }));
   }
@@ -1167,7 +1264,7 @@ export class WmsAnalyticsService implements OnModuleInit {
           replenishmentRows: lines.filter((l) => l.kind === 'REPLENISHMENT').length,
           touristRows: lines.filter((l) => l.kind === 'TOURIST').length,
           valueTotal: sum(lines.map((l) => l.price)),
-          touristValue: sum(lines.filter((l) => l.kind === 'TOURIST').map((l) => l.price)),
+          touristValue: sum(lines.filter((l) => l.kind === 'TOURIST').map(touristValueForLine)),
           firstDate: minDate(lines),
           lastDate: maxDate(lines),
         };
@@ -1203,7 +1300,11 @@ export class WmsAnalyticsService implements OnModuleInit {
         receiverOp: first.receiverOp ?? '',
         receiverWarehouseType: first.receiverWarehouseType ?? '',
         productCount: codes.size,
-        orderTotal: sum(lines.map((l) => l.price)),
+        orderTotal: sum(lines.map(touristValueForLine)),
+        costTotal: sum(lines.map((l) => l.costPrice ?? 0)),
+        marginTotal: sum(lines.map((l) => l.margin ?? 0)),
+        deliveryTotal: sum(lines.map((l) => l.delivery ?? 0)),
+        differenceTotal: lines.some((l) => l.delivery != null) ? sum(lines.map((l) => l.difference ?? 0)) : null,
         orderDate: minDate(lines) ?? first.orderDate,
       };
     });
@@ -1356,6 +1457,12 @@ export class WmsAnalyticsService implements OnModuleInit {
     errors: string[],
   ): WmsBiTransferOrderLineInput | null {
     const orderDate = parseOrderDate(row['Дата']);
+    const retailPrice = cleanString(row['РозничнаяЦена']) ? ceilRubles(row['РозничнаяЦена']) : null;
+    const costPrice = cleanString(row['Себестоимость']) ? ceilRubles(row['Себестоимость']) : null;
+    const delivery = cleanString(row['Доставка']) ? ceilRubles(row['Доставка']) : null;
+    const margin = calcMargin(retailPrice, costPrice);
+    const difference = calcDifference(margin, delivery);
+    const priceRaw = cleanString(row['Цена']) ? ceilRubles(row['Цена']) : null;
     const input: WmsBiTransferOrderLineInput = {
       rowNumber,
       orderRef: nullableString(row['Ссылка']),
@@ -1370,10 +1477,13 @@ export class WmsAnalyticsService implements OnModuleInit {
       baseDocument: nullableString(row['ДокументОснование']),
       isRetailPrice: parseBooleanRu(row['ЭтоРозничнаяЦена']),
       quantity: parseQuantity(row['Количество']),
-      retailPrice: cleanString(row['РозничнаяЦена']) ? ceilRubles(row['РозничнаяЦена']) : null,
-      costPrice: cleanString(row['Себестоимость']) ? ceilRubles(row['Себестоимость']) : null,
-      counterparty: nullableString(row['Контрогент']),
-      price: ceilRubles(row['Цена']),
+      retailPrice,
+      costPrice,
+      margin,
+      delivery,
+      difference,
+      counterparty: nullableString(row['Контрогент']) ?? nullableString(row['Контрагент']),
+      price: priceRaw ?? retailPrice ?? 0,
     };
     if (!input.orderNumber) errors.push('Не заполнен номер заказа.');
     if (!input.orderDate) errors.push('Не удалось распознать дату заказа.');
@@ -1416,6 +1526,9 @@ export class WmsAnalyticsService implements OnModuleInit {
       quantity: input.quantity ?? 0,
       retailPrice: input.retailPrice ?? null,
       costPrice: input.costPrice ?? null,
+      margin: input.margin ?? null,
+      delivery: input.delivery ?? null,
+      difference: input.difference ?? null,
       counterparty: input.counterparty?.trim() || null,
       price: input.price ?? 0,
       kind,
@@ -1495,7 +1608,7 @@ export class WmsAnalyticsService implements OnModuleInit {
     for (const part of chunks(lines, 300)) {
       const values: unknown[] = [];
       const placeholders = part.map((line, rowIndex) => {
-        const base = rowIndex * 23;
+        const base = rowIndex * 26;
         values.push(
           line.id,
           line.userId,
@@ -1516,18 +1629,21 @@ export class WmsAnalyticsService implements OnModuleInit {
           line.purpose,
           line.baseDocument,
           line.isRetailPrice,
+          line.margin,
+          line.delivery,
+          line.difference,
           line.price,
           line.kind,
           line.createdAt,
           JSON.stringify(line),
         );
-        return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, $${base + 9}, $${base + 10}, $${base + 11}, $${base + 12}, $${base + 13}, $${base + 14}, $${base + 15}, $${base + 16}, $${base + 17}, $${base + 18}, $${base + 19}, $${base + 20}, $${base + 21}, $${base + 22}, $${base + 23}::jsonb)`;
+        return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, $${base + 9}, $${base + 10}, $${base + 11}, $${base + 12}, $${base + 13}, $${base + 14}, $${base + 15}, $${base + 16}, $${base + 17}, $${base + 18}, $${base + 19}, $${base + 20}, $${base + 21}, $${base + 22}, $${base + 23}, $${base + 24}, $${base + 25}, $${base + 26}::jsonb)`;
       });
       await client.query(
         `INSERT INTO wms_bi_transfer_order_line
          (id, user_id, batch_id, row_number, order_ref, order_number, order_date, sender_warehouse, receiver_warehouse,
           sender_warehouse_type, sender_op, receiver_warehouse_type, receiver_op,
-          item_name, item_article, item_code, purpose, base_document, is_retail_price, price, kind, created_at, payload)
+          item_name, item_article, item_code, purpose, base_document, is_retail_price, margin, delivery, difference, price, kind, created_at, payload)
          VALUES ${placeholders.join(', ')}`,
         values,
       );
@@ -1560,7 +1676,7 @@ export class WmsAnalyticsService implements OnModuleInit {
           sender_warehouse, receiver_warehouse,
           sender_warehouse_type, sender_op, receiver_warehouse_type, receiver_op,
           item_name, item_article, item_code,
-          purpose, base_document, is_retail_price, price, kind, created_at,
+          purpose, base_document, is_retail_price, margin, delivery, difference, price, kind, created_at,
           COALESCE((NULLIF(trim(COALESCE(payload->>'quantity', '')), ''))::double precision, 0) AS quantity,
           CASE
             WHEN NULLIF(trim(COALESCE(payload->>'retailPrice', '')), '') IS NULL THEN NULL

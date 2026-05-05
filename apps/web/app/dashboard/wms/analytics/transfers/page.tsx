@@ -56,7 +56,11 @@ type TouristOrderRow = {
   receiverOp: string
   receiverWarehouseType: string
   productCount: number
+  costTotal: number
   orderTotal: number
+  marginTotal: number
+  deliveryTotal: number
+  differenceTotal: number | null
   orderDate: string
 }
 
@@ -857,7 +861,7 @@ function WmsTransferAnalyticsPageContent() {
         <Stat title="Строк" value={numberRu.format(summary.rowsTotal)} hint={`${numberRu.format(summary.ordersTotal)} заказов`} />
         <Stat title="Пополнения" value={numberRu.format(summary.replenishmentRows)} hint={money(summary.replenishmentValue)} />
         <Stat title="Туристы" value={numberRu.format(summary.touristRows)} hint={money(summary.touristValue)} accent />
-        <Stat title="Сумма" value={money(summary.valueTotal)} hint="по полю «Цена», целые ₽ (вверх при импорте)" />
+        <Stat title="Сумма" value={money(summary.valueTotal)} hint="по «Цена» (fallback: «РозничнаяЦена»), целые ₽" />
         <Stat title="Период" value={`${dateRu(summary.minDate)} — ${dateRu(summary.maxDate)}`} hint={loading ? "загрузка..." : "по фильтру"} />
       </section>
 
@@ -933,7 +937,7 @@ function WmsTransferAnalyticsPageContent() {
         </CardHeader>
         <CardContent className="min-h-0 flex-1 pt-0">
           <div className={ANALYTICS_TABLE_SCROLL}>
-            <table className="w-full min-w-[920px] text-left text-sm">
+            <table className="w-full min-w-[1200px] text-left text-sm">
               <thead className="sticky top-0 z-[1] border-b bg-background/95 text-muted-foreground backdrop-blur supports-[backdrop-filter]:bg-background/80">
                 <tr>
                   <th className="whitespace-nowrap px-3 py-2 font-medium">№ заказа</th>
@@ -941,6 +945,7 @@ function WmsTransferAnalyticsPageContent() {
                   <th className="whitespace-nowrap px-3 py-2 font-medium">Получатель</th>
                   <th className="whitespace-nowrap px-3 py-2 font-medium">Склад</th>
                   <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Товаров</th>
+                  <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Себестоимость</th>
                   <th className="whitespace-nowrap px-3 py-2 font-medium">
                     <button
                       type="button"
@@ -959,6 +964,9 @@ function WmsTransferAnalyticsPageContent() {
                       )}
                     </button>
                   </th>
+                  <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Маржа</th>
+                  <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Доставка</th>
+                  <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Разница</th>
                   <th className="whitespace-nowrap px-3 py-2 font-medium">
                     <button
                       type="button"
@@ -982,7 +990,7 @@ function WmsTransferAnalyticsPageContent() {
               <tbody>
                 {touristsSorted.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="p-4 text-muted-foreground">
+                    <td colSpan={11} className="p-4 text-muted-foreground">
                       Данных пока нет. Загрузите файл или измените фильтры.
                     </td>
                   </tr>
@@ -1003,7 +1011,13 @@ function WmsTransferAnalyticsPageContent() {
                         {row.receiverWarehouseType || "—"}
                       </td>
                       <td className="px-3 py-2 align-top text-right tabular-nums">{numberRu.format(row.productCount)}</td>
+                      <td className="px-3 py-2 align-top text-right tabular-nums">{money(row.costTotal)}</td>
                       <td className="px-3 py-2 align-top tabular-nums font-medium">{money(row.orderTotal)}</td>
+                      <td className="px-3 py-2 align-top text-right tabular-nums">{money(row.marginTotal)}</td>
+                      <td className="px-3 py-2 align-top text-right tabular-nums">{money(row.deliveryTotal)}</td>
+                      <td className="px-3 py-2 align-top text-right tabular-nums">
+                        {row.differenceTotal == null ? "—" : money(row.differenceTotal)}
+                      </td>
                       <td className="px-3 py-2 align-top whitespace-nowrap">{dateRu(row.orderDate)}</td>
                     </tr>
                   ))
