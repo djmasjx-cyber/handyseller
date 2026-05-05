@@ -501,7 +501,7 @@ function WmsTransferAnalyticsPageContent() {
   const touristOrdersScrollRef = useRef<HTMLDivElement>(null)
   const lastTouristOrdersScrollRef = useRef({ left: 0, top: 0 })
   const pendingScrollAfterHydrateRef = useRef<{ left: number; top: number } | null>(null)
-  const scrollPersistTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
+  const scrollPersistTimerRef = useRef<ReturnType<typeof globalThis.setTimeout> | null>(null)
 
   const persistTouristTableUi = useCallback(() => {
     if (typeof window === "undefined") return
@@ -518,8 +518,8 @@ function WmsTransferAnalyticsPageContent() {
   }, [])
 
   const schedulePersistTouristTableScroll = useCallback(() => {
-    if (scrollPersistTimerRef.current != null) window.clearTimeout(scrollPersistTimerRef.current)
-    scrollPersistTimerRef.current = window.setTimeout(() => {
+    if (scrollPersistTimerRef.current != null) globalThis.clearTimeout(scrollPersistTimerRef.current)
+    scrollPersistTimerRef.current = globalThis.setTimeout(() => {
       scrollPersistTimerRef.current = null
       persistTouristTableUi()
     }, 160)
@@ -686,7 +686,7 @@ function WmsTransferAnalyticsPageContent() {
     const scrollSnapshot = lastTouristOrdersScrollRef
     return () => {
       if (scrollPersistTimerRef.current != null) {
-        window.clearTimeout(scrollPersistTimerRef.current)
+        globalThis.clearTimeout(scrollPersistTimerRef.current)
         scrollPersistTimerRef.current = null
       }
       const { left, top } = scrollSnapshot.current
