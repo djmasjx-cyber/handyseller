@@ -95,17 +95,32 @@ export type TransferOrderLineKindInput = {
   baseDocument: string | null;
 };
 
+/**
+ * Из полного текста колонки «ДокументОснование» / «Назначение» выделяет номер пополнения вида **`LM`** + блоки через дефис
+ * (пример из выгрузки: `LM00-022106`). Возвращает **первое** совпадение или `null`.
+ */
+export function extractLmReplenishmentOrderRef(text: string | null | undefined): string | null {
+  const s = typeof text === 'string' ? text.trim() : '';
+  if (!s) return null;
+  const re = /\bLM[0-9A-Za-z]{2}-[0-9A-Za-z]+\b/;
+  const m = s.match(re);
+  return m ? m[0].toUpperCase() : null;
+}
+
 export type TransferOrderLineKindClassifyInput = {
+  /** Полный текст «Назначение» из файла (как в Excel). */
   purpose: string | null;
-  baseDocument: string | null;
+  /** Полный текст «ДокументОснование» из файла до нормализации. */
+  baseDocumentRaw: string | null;
   senderWarehouse: string;
 };
 
 /**
  * Классификация **одной строки** Excel «Заказы на перемещение».
  * Пополнение возможно только при отправке **с Елино или Балашиха** ({@link isAllowedReplenishmentOriginSender}):
- * - непустое «Назначение» **или** «ДокументОснование» → Пополнение, если отправитель разрешён, иначе Турист;
- * - оба пусты → Турист, кроме: в группе (Номер + дата) ≥ `bulkMinLines` строк и отправитель под
+ * - если **хотя бы одно** из «Назначение» / «ДокументОснование» непусто: Пополнение только при наличии в тексте номера вида {@link extractLmReplenishmentOrderRef}
+ *   и разрешённом отправителе; иначе Турист;
+ * - если **оба** пусты → Турист, кроме: в группе (Номер + дата) ≥ `bulkMinLines` строк и отправитель под
  *   {@link isBulkSparePartsRouteSender} (Елино/Балашиха + склад запчастей) → Пополнение.
  */
 export function classifyTransferOrderLineKind(
@@ -114,8 +129,11 @@ export function classifyTransferOrderLineKind(
   opts?: { bulkMinLines?: number },
 ): WmsBiTransferOrderKind {
   const purpose = line.purpose?.trim() ?? '';
-  const baseDocument = line.baseDocument?.trim() ?? '';
-  if (purpose || baseDocument) {
+  const baseDocumentRaw = line.baseDocumentRaw?.trim() ?? '';
+  if (purpose || baseDocumentRaw) {
+    const hasLm =
+      extractLmReplenishmentOrderRef(purpose) !== null || extractLmReplenishmentOrderRef(baseDocumentRaw) !== null;
+    if (!hasLm) return 'TOURIST';
     return isAllowedReplenishmentOriginSender(line.senderWarehouse) ? 'REPLENISHMENT' : 'TOURIST';
   }
 
@@ -136,5 +154,8 @@ export function classifyTransferOrderLine(input: {
 }): WmsBiTransferOrderKind {
   const purpose = input.purpose?.trim() ?? '';
   const baseDocument = input.baseDocument?.trim() ?? '';
-  return purpose || baseDocument ? 'REPLENISHMENT' : 'TOURIST';
+  if (!purpose && !baseDocument) return 'TOURIST';
+  const hasLm =
+    extractLmReplenishmentOrderRef(purpose) !== null || extractLmReplenishmentOrderRef(baseDocument) !== null;
+  return hasLm ? 'REPLENISHMENT' : 'TOURIST';
 }

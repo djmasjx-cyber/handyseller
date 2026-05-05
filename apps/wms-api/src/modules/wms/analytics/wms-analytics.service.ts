@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
-import { classifyTransferOrderLineKind, transferOrderGroupKey } from '@handyseller/wms-domain';
+import { classifyTransferOrderLineKind, extractLmReplenishmentOrderRef, transferOrderGroupKey } from '@handyseller/wms-domain';
 import type {
   WmsBiImportBatchRecord,
   WmsBiRawRowRecord,
@@ -778,7 +778,7 @@ export class WmsAnalyticsService implements OnModuleInit {
     };
 
     const rawRows: WmsBiRawRowRecord[] = [];
-    const lineInputs: WmsBiTransferOrderLineInput[] = [];
+    const stagedLines: Array<{ input: WmsBiTransferOrderLineInput; baseDocumentRaw: string | null }> = [];
     for (let r = 1; r < rows.length; r += 1) {
       const row = rows[r];
       const rowNumber = r + 1;
@@ -788,7 +788,7 @@ export class WmsAnalyticsService implements OnModuleInit {
         rawPayload[header] = row[idx] ?? '';
       }
       const errors: string[] = [];
-      const lineInput = this.rowToTransferLineInput(rawPayload, rowNumber, errors);
+      const staged = this.rowToTransferLineInput(rawPayload, rowNumber, errors);
       const raw: WmsBiRawRowRecord = {
         id: id('wmsbi_raw'),
         userId,
@@ -799,22 +799,22 @@ export class WmsAnalyticsService implements OnModuleInit {
         createdAt: ts,
       };
       rawRows.push(raw);
-      if (!lineInput || errors.length) continue;
-      lineInputs.push(lineInput);
+      if (!staged || errors.length) continue;
+      stagedLines.push(staged);
     }
 
     const groupCounts = new Map<string, number>();
-    for (const li of lineInputs) {
+    for (const { input: li } of stagedLines) {
       const k = transferOrderGroupKey(li.orderNumber, li.orderDate);
       groupCounts.set(k, (groupCounts.get(k) ?? 0) + 1);
     }
-    const lines: WmsBiTransferOrderLineRecord[] = lineInputs.map((lineInput) => {
+    const lines: WmsBiTransferOrderLineRecord[] = stagedLines.map(({ input: lineInput, baseDocumentRaw }) => {
       const groupKey = transferOrderGroupKey(lineInput.orderNumber, lineInput.orderDate);
       const groupLineCount = groupCounts.get(groupKey) ?? 1;
       const kind = classifyTransferOrderLineKind(
         {
           purpose: lineInput.purpose ?? null,
-          baseDocument: lineInput.baseDocument ?? null,
+          baseDocumentRaw,
           senderWarehouse: lineInput.senderWarehouse,
         },
         groupLineCount,
@@ -1455,7 +1455,7 @@ export class WmsAnalyticsService implements OnModuleInit {
     row: Record<string, unknown>,
     rowNumber: number,
     errors: string[],
-  ): WmsBiTransferOrderLineInput | null {
+  ): { input: WmsBiTransferOrderLineInput; baseDocumentRaw: string | null } | null {
     const orderDate = parseOrderDate(row['Дата']);
     const retailPrice = cleanString(row['РозничнаяЦена']) ? ceilRubles(row['РозничнаяЦена']) : null;
     const costPrice = cleanString(row['Себестоимость']) ? ceilRubles(row['Себестоимость']) : null;
@@ -1463,6 +1463,9 @@ export class WmsAnalyticsService implements OnModuleInit {
     const margin = calcMargin(retailPrice, costPrice);
     const difference = calcDifference(margin, delivery);
     const priceRaw = cleanString(row['Цена']) ? ceilRubles(row['Цена']) : null;
+    const baseDocumentRaw = nullableString(row['ДокументОснование']);
+    /** В колонке `base_document` хранится только номер пополнения (LM…); полный текст — в строке сырья импорта. */
+    const baseDocumentLm = extractLmReplenishmentOrderRef(baseDocumentRaw);
     const input: WmsBiTransferOrderLineInput = {
       rowNumber,
       orderRef: nullableString(row['Ссылка']),
@@ -1474,7 +1477,7 @@ export class WmsAnalyticsService implements OnModuleInit {
       itemArticle: nullableString(row['НоменклатураАртикул']),
       itemCode: cleanString(row['НоменклатураКод']),
       purpose: nullableString(row['Назначение']),
-      baseDocument: nullableString(row['ДокументОснование']),
+      baseDocument: baseDocumentLm ?? null,
       isRetailPrice: parseBooleanRu(row['ЭтоРозничнаяЦена']),
       quantity: parseQuantity(row['Количество']),
       retailPrice,
@@ -1491,7 +1494,8 @@ export class WmsAnalyticsService implements OnModuleInit {
     if (!input.receiverWarehouse) errors.push('Не заполнен склад-получатель.');
     if (!input.itemName) errors.push('Не заполнена номенклатура.');
     if (!input.itemCode) errors.push('Не заполнен код номенклатуры.');
-    return errors.length ? null : input;
+    if (errors.length) return null;
+    return { input, baseDocumentRaw };
   }
 
   private buildTransferLine(
