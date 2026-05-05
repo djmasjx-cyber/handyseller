@@ -49,8 +49,9 @@ type ByOpRow = {
   lastDate: string | null
 }
 
-/** Одна строка = один туристский заказ (сводка для руководителя). */
+/** Одна строка = один заказ: турист (группировка по «Номер») или пополнение по LM из «ДокументОснование». */
 type TouristOrderRow = {
+  orderGroupKind: TransferKind
   orderNumber: string
   senderOp: string
   receiverOp: string
@@ -197,11 +198,16 @@ function queryFromFilters(filters: Filters): string {
 }
 
 /** Ссылка на страницу состава заказа с теми же фильтрами. */
-function orderDetailHref(filters: Filters, orderNumber: string): string {
+function orderDetailHref(filters: Filters, orderNumber: string, orderGroupKind: TransferKind): string {
   const base = queryFromFilters(filters)
   const search = base.startsWith("?") ? base.slice(1) : ""
   const u = new URLSearchParams(search)
   u.set("orderNumber", orderNumber)
+  if (orderGroupKind === "REPLENISHMENT") {
+    u.set("orderGroupKind", "REPLENISHMENT")
+  } else {
+    u.delete("orderGroupKind")
+  }
   const q = u.toString()
   return q ? `/dashboard/wms/analytics/transfers/order?${q}` : `/dashboard/wms/analytics/transfers/order?orderNumber=${encodeURIComponent(orderNumber)}`
 }
@@ -303,6 +309,7 @@ function canonicalQueryString(qs: string): string {
 function filterSearchFromLocationSearch(search: string): string {
   const u = new URLSearchParams(search)
   u.delete("orderNumber")
+  u.delete("orderGroupKind")
   return u.toString()
 }
 
@@ -418,20 +425,30 @@ function WmsTransferAnalyticsPageContent() {
   const touristsSorted = useMemo(() => {
     const rows = tourists.slice()
     if (touristSort.key === "default") {
-      rows.sort((a, b) =>
-        a.orderNumber.localeCompare(b.orderNumber, "ru", { numeric: true, sensitivity: "base" }),
-      )
+      rows.sort((a, b) => {
+        const g = a.orderGroupKind.localeCompare(b.orderGroupKind)
+        if (g !== 0) return g
+        return a.orderNumber.localeCompare(b.orderNumber, "ru", { numeric: true, sensitivity: "base" })
+      })
       return rows
     }
     const dir = touristSort.dir === "asc" ? 1 : -1
     if (touristSort.key === "period") {
-      rows.sort((a, b) => dir * a.orderDate.localeCompare(b.orderDate))
+      rows.sort((a, b) => {
+        const c = dir * a.orderDate.localeCompare(b.orderDate)
+        if (c !== 0) return c
+        const g = a.orderGroupKind.localeCompare(b.orderGroupKind)
+        if (g !== 0) return g
+        return a.orderNumber.localeCompare(b.orderNumber, "ru", { numeric: true, sensitivity: "base" })
+      })
       return rows
     }
     if (touristSort.key === "products") {
       rows.sort((a, b) => {
         const d = dir * (a.productCount - b.productCount)
         if (d !== 0) return d
+        const g = a.orderGroupKind.localeCompare(b.orderGroupKind)
+        if (g !== 0) return g
         return a.orderNumber.localeCompare(b.orderNumber, "ru", { numeric: true, sensitivity: "base" })
       })
       return rows
@@ -440,6 +457,8 @@ function WmsTransferAnalyticsPageContent() {
       rows.sort((a, b) => {
         const d = dir * (a.marginTotal - b.marginTotal)
         if (d !== 0) return d
+        const g = a.orderGroupKind.localeCompare(b.orderGroupKind)
+        if (g !== 0) return g
         return a.orderNumber.localeCompare(b.orderNumber, "ru", { numeric: true, sensitivity: "base" })
       })
       return rows
@@ -448,6 +467,8 @@ function WmsTransferAnalyticsPageContent() {
       rows.sort((a, b) => {
         const d = dir * (a.deliveryTotal - b.deliveryTotal)
         if (d !== 0) return d
+        const g = a.orderGroupKind.localeCompare(b.orderGroupKind)
+        if (g !== 0) return g
         return a.orderNumber.localeCompare(b.orderNumber, "ru", { numeric: true, sensitivity: "base" })
       })
       return rows
@@ -458,6 +479,8 @@ function WmsTransferAnalyticsPageContent() {
         const bv = b.differenceTotal ?? Number.NEGATIVE_INFINITY
         const d = dir * (av - bv)
         if (d !== 0) return d
+        const g = a.orderGroupKind.localeCompare(b.orderGroupKind)
+        if (g !== 0) return g
         return a.orderNumber.localeCompare(b.orderNumber, "ru", { numeric: true, sensitivity: "base" })
       })
       return rows
@@ -465,6 +488,8 @@ function WmsTransferAnalyticsPageContent() {
     rows.sort((a, b) => {
       const d = dir * (a.orderTotal - b.orderTotal)
       if (d !== 0) return d
+      const g = a.orderGroupKind.localeCompare(b.orderGroupKind)
+      if (g !== 0) return g
       return a.orderNumber.localeCompare(b.orderNumber, "ru", { numeric: true, sensitivity: "base" })
     })
     return rows
@@ -885,10 +910,10 @@ function WmsTransferAnalyticsPageContent() {
         <CardHeader className="shrink-0 space-y-1.5 pb-3">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
-              <CardTitle>Туристы по маршрутам и товарам</CardTitle>
+              <CardTitle>Заказы по маршрутам и товарам</CardTitle>
               <CardDescription>
-                Сводка по заказам: одна строка на заказ. Состав заказа — по клику на номер. Сортировка по дате и стоимости
-                заказа.
+                Туристы — одна строка на номер перемещения; пополнение — одна строка на номер LM из «ДокументОснование».
+                Состав — по клику на номер. Те же фильтры, что и выше.
               </CardDescription>
             </div>
             <Button
@@ -908,6 +933,7 @@ function WmsTransferAnalyticsPageContent() {
             <table className="w-full min-w-[1200px] text-left text-sm">
               <thead className="sticky top-0 z-[1] border-b bg-background/95 text-muted-foreground backdrop-blur supports-[backdrop-filter]:bg-background/80">
                 <tr>
+                  <th className="whitespace-nowrap px-3 py-2 font-medium">Тип</th>
                   <th className="whitespace-nowrap px-3 py-2 font-medium">№ заказа</th>
                   <th className="whitespace-nowrap px-3 py-2 font-medium">Отправитель</th>
                   <th className="whitespace-nowrap px-3 py-2 font-medium">Получатель</th>
@@ -1026,16 +1052,19 @@ function WmsTransferAnalyticsPageContent() {
               <tbody>
                 {touristsSorted.length === 0 ? (
                   <tr>
-                    <td colSpan={11} className="p-4 text-muted-foreground">
+                    <td colSpan={12} className="p-4 text-muted-foreground">
                       Данных пока нет. Загрузите файл или измените фильтры.
                     </td>
                   </tr>
                 ) : (
                   touristsSorted.map((row) => (
-                    <tr key={row.orderNumber} className="border-b last:border-0">
+                    <tr key={`${row.orderGroupKind}:${row.orderNumber}`} className="border-b last:border-0">
+                      <td className="px-3 py-2 align-top text-muted-foreground">
+                        {row.orderGroupKind === "REPLENISHMENT" ? "Пополнение" : "Турист"}
+                      </td>
                       <td className="px-3 py-2 align-top">
                         <Link
-                          href={orderDetailHref(filters, row.orderNumber)}
+                          href={orderDetailHref(filters, row.orderNumber, row.orderGroupKind)}
                           className="font-medium text-primary underline-offset-4 hover:underline"
                         >
                           {row.orderNumber || "—"}

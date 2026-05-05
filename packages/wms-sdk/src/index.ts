@@ -335,6 +335,8 @@ export interface WmsBiTransferByOpRow {
 
 /** Строка сводки: один заказ (туристы), для таблицы на уровне заказа. */
 export interface WmsBiTouristOrderSummary {
+  /** Туристы: группировка по полю «Номер» перемещения. Пополнение по LM: группировка по `base_document` (номер из «ДокументОснование»). */
+  orderGroupKind: 'TOURIST' | 'REPLENISHMENT';
   orderNumber: string;
   senderOp: string;
   receiverOp: string;

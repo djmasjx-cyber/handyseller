@@ -371,6 +371,11 @@ function aggregateTouristDetailLines(lines: WmsBiTransferOrderLineRecord[]): Wms
     .sort((a, b) => a.itemCode.localeCompare(b.itemCode, 'ru'));
 }
 
+function filtersWithoutKind(filters: WmsBiTransferFilters): WmsBiTransferFilters {
+  const { kind: _removed, ...rest } = filters;
+  return rest;
+}
+
 function buildTransferAnalyticsWhere(userId: string, filters: WmsBiTransferFilters): { whereSql: string; params: unknown[] } {
   const params: unknown[] = [userId];
   const conds: string[] = ['user_id = $1'];
@@ -1101,14 +1106,16 @@ export class WmsAnalyticsService implements OnModuleInit {
   }
 
   private async getTouristOrdersSql(userId: string, filters: WmsBiTransferFilters): Promise<WmsBiTouristOrderSummary[]> {
-    const { whereSql, params } = buildTransferAnalyticsWhere(userId, filters);
+    const wantTourist = !filters.kind || filters.kind === 'TOURIST';
+    const wantReplen = !filters.kind || filters.kind === 'REPLENISHMENT';
+    if (!wantTourist && !wantReplen) {
+      return [];
+    }
+    const { whereSql, params } = buildTransferAnalyticsWhere(userId, filtersWithoutKind(filters));
     const limit = clampBiTableLimit(filters.touristsLimit);
     const offset = clampOffset(filters.touristsOffset, 500_000);
-    const limParam = params.length + 1;
-    const offParam = params.length + 2;
-    const sql = `
-      SELECT
-        t.order_number,
+
+    const aggSelect = `
         MAX(t.sender_op) AS sender_op,
         MAX(t.receiver_op) AS receiver_op,
         MAX(t.receiver_warehouse_type) AS receiver_warehouse_type,
@@ -1129,15 +1136,44 @@ export class WmsAnalyticsService implements OnModuleInit {
           WHEN COUNT(*) FILTER (WHERE t.delivery IS NOT NULL) = 0 THEN NULL
           ELSE COALESCE(SUM(COALESCE(t.difference, 0)), 0)::float8
         END AS difference_total,
-        MIN(t.order_date) AS order_date
+        MIN(t.order_date) AS order_date`;
+
+    const branches: string[] = [];
+    if (wantTourist) {
+      branches.push(`(
+      SELECT
+        t.order_number AS order_number,
+        'TOURIST'::text AS order_group_kind,
+        ${aggSelect}
       FROM wms_bi_transfer_order_line t
-      WHERE ${whereSql}
+      WHERE ${whereSql} AND t.kind = 'TOURIST'
       GROUP BY t.order_number
-      ORDER BY MIN(t.order_date) DESC NULLS LAST, t.order_number ASC
+    )`);
+    }
+    if (wantReplen) {
+      branches.push(`(
+      SELECT
+        trim(t.base_document) AS order_number,
+        'REPLENISHMENT'::text AS order_group_kind,
+        ${aggSelect}
+      FROM wms_bi_transfer_order_line t
+      WHERE ${whereSql} AND t.kind = 'REPLENISHMENT' AND NULLIF(trim(t.base_document), '') IS NOT NULL
+      GROUP BY trim(t.base_document)
+    )`);
+    }
+
+    const limParam = params.length + 1;
+    const offParam = params.length + 2;
+    const sql = `
+      SELECT * FROM (
+        ${branches.join(' UNION ALL ')}
+      ) u
+      ORDER BY u.order_date DESC NULLS LAST, u.order_number ASC
       LIMIT $${limParam} OFFSET $${offParam}
     `;
     const res = await this.pool!.query<{
       order_number: string;
+      order_group_kind: string;
       sender_op: string | null;
       receiver_op: string | null;
       receiver_warehouse_type: string | null;
@@ -1150,6 +1186,7 @@ export class WmsAnalyticsService implements OnModuleInit {
       order_date: Date;
     }>(sql, [...params, limit, offset]);
     return res.rows.map((r) => ({
+      orderGroupKind: (r.order_group_kind === 'REPLENISHMENT' ? 'REPLENISHMENT' : 'TOURIST') as 'TOURIST' | 'REPLENISHMENT',
       orderNumber: r.order_number,
       senderOp: r.sender_op ?? '',
       receiverOp: r.receiver_op ?? '',
@@ -1166,19 +1203,22 @@ export class WmsAnalyticsService implements OnModuleInit {
 
   private async getTouristOrderDetailSql(
     userId: string,
-    orderNumber: string,
+    orderKey: string,
+    orderGroupKind: 'TOURIST' | 'REPLENISHMENT',
     filters: WmsBiTransferFilters,
   ): Promise<WmsBiTouristOrderDetail> {
-    const { whereSql, params } = buildTransferAnalyticsWhere(userId, filters);
-    params.push(orderNumber);
+    const merged: WmsBiTransferFilters = { ...filters, kind: orderGroupKind };
+    const { whereSql, params } = buildTransferAnalyticsWhere(userId, merged);
+    params.push(orderKey.trim());
     const onIdx = params.length;
+    const keyCond = orderGroupKind === 'TOURIST' ? `t.order_number = $${onIdx}` : `trim(t.base_document) = $${onIdx}`;
     const headerSql = `
       SELECT
         MAX(t.sender_op) AS sender_op,
         MAX(t.receiver_op) AS receiver_op,
         MIN(t.order_date) AS order_date
       FROM wms_bi_transfer_order_line t
-      WHERE ${whereSql} AND t.order_number = $${onIdx}
+      WHERE ${whereSql} AND ${keyCond}
     `;
     const detailSql = `
       WITH agg AS (
@@ -1189,7 +1229,7 @@ export class WmsAnalyticsService implements OnModuleInit {
           SUM(t.price) AS price_sum,
           COUNT(*)::bigint AS line_count
         FROM wms_bi_transfer_order_line t
-        WHERE ${whereSql} AND t.order_number = $${onIdx}
+        WHERE ${whereSql} AND ${keyCond}
         GROUP BY t.item_code
       )
       SELECT
@@ -1213,7 +1253,11 @@ export class WmsAnalyticsService implements OnModuleInit {
       sum_line: string;
     }>(detailSql, params);
     if (!linesRes.rows.length) {
-      throw new NotFoundException(`Туристский заказ «${orderNumber}» не найден`);
+      throw new NotFoundException(
+        orderGroupKind === 'REPLENISHMENT'
+          ? `Пополнение по номеру «${orderKey.trim()}» (ДокументОснование) не найдено`
+          : `Туристский заказ «${orderKey.trim()}» не найден`,
+      );
     }
     const headRes = await this.pool!.query<{
       sender_op: string | null;
@@ -1222,7 +1266,7 @@ export class WmsAnalyticsService implements OnModuleInit {
     }>(headerSql, params);
     const head = headRes.rows[0];
     return {
-      orderNumber,
+      orderNumber: orderKey.trim(),
       senderOp: head?.sender_op ?? '',
       receiverOp: head?.receiver_op ?? '',
       orderDate: head?.order_date != null ? isoDate(head.order_date) : '',
@@ -1274,67 +1318,116 @@ export class WmsAnalyticsService implements OnModuleInit {
   }
 
   async getTouristOrders(userId: string, filters: WmsBiTransferFilters): Promise<WmsBiTouristOrderSummary[]> {
-    const merged = { ...filters, kind: 'TOURIST' as const };
     if (this.pool) {
       try {
-        return await this.getTouristOrdersSql(userId, merged);
+        return await this.getTouristOrdersSql(userId, filters);
       } catch (err) {
         this.logger.warn(`getTouristOrdersSql fallback: ${(err as Error).message}`);
       }
     }
-    const touristLines = (await this.filteredLines(userId, merged)).filter((l) => l.kind === 'TOURIST');
-    const byOrder = new Map<string, WmsBiTransferOrderLineRecord[]>();
-    for (const line of touristLines) {
-      const arr = byOrder.get(line.orderNumber) ?? [];
-      arr.push(line);
-      byOrder.set(line.orderNumber, arr);
+    const wantTourist = !filters.kind || filters.kind === 'TOURIST';
+    const wantReplen = !filters.kind || filters.kind === 'REPLENISHMENT';
+    const baseLines = await this.filteredLines(userId, filtersWithoutKind(filters));
+    const summaries: WmsBiTouristOrderSummary[] = [];
+    if (wantTourist) {
+      const touristLines = baseLines.filter((l) => l.kind === 'TOURIST');
+      const byOrder = new Map<string, WmsBiTransferOrderLineRecord[]>();
+      for (const line of touristLines) {
+        const arr = byOrder.get(line.orderNumber) ?? [];
+        arr.push(line);
+        byOrder.set(line.orderNumber, arr);
+      }
+      for (const [orderNumber, lines] of byOrder) {
+        const codes = new Set(lines.map((l) => l.itemCode));
+        const first = lines[0];
+        summaries.push({
+          orderGroupKind: 'TOURIST',
+          orderNumber,
+          senderOp: first.senderOp ?? '',
+          receiverOp: first.receiverOp ?? '',
+          receiverWarehouseType: first.receiverWarehouseType ?? '',
+          productCount: codes.size,
+          orderTotal: sum(lines.map(touristValueForLine)),
+          costTotal: sum(lines.map((l) => l.costPrice ?? 0)),
+          marginTotal: sum(lines.map((l) => l.margin ?? 0)),
+          deliveryTotal: sum(lines.map((l) => l.delivery ?? 0)),
+          differenceTotal: lines.some((l) => l.delivery != null) ? sum(lines.map((l) => l.difference ?? 0)) : null,
+          orderDate: minDate(lines) ?? first.orderDate,
+        });
+      }
     }
-    const limit = clampBiTableLimit(filters.touristsLimit);
-    const offset = clampOffset(filters.touristsOffset, 500_000);
-    const summaries = [...byOrder.entries()].map(([orderNumber, lines]) => {
-      const codes = new Set(lines.map((l) => l.itemCode));
-      const first = lines[0];
-      return {
-        orderNumber,
-        senderOp: first.senderOp ?? '',
-        receiverOp: first.receiverOp ?? '',
-        receiverWarehouseType: first.receiverWarehouseType ?? '',
-        productCount: codes.size,
-        orderTotal: sum(lines.map(touristValueForLine)),
-        costTotal: sum(lines.map((l) => l.costPrice ?? 0)),
-        marginTotal: sum(lines.map((l) => l.margin ?? 0)),
-        deliveryTotal: sum(lines.map((l) => l.delivery ?? 0)),
-        differenceTotal: lines.some((l) => l.delivery != null) ? sum(lines.map((l) => l.difference ?? 0)) : null,
-        orderDate: minDate(lines) ?? first.orderDate,
-      };
-    });
+    if (wantReplen) {
+      const replLines = baseLines.filter((l) => l.kind === 'REPLENISHMENT' && l.baseDocument?.trim());
+      const byLm = new Map<string, WmsBiTransferOrderLineRecord[]>();
+      for (const line of replLines) {
+        const k = line.baseDocument!.trim();
+        const arr = byLm.get(k) ?? [];
+        arr.push(line);
+        byLm.set(k, arr);
+      }
+      for (const [lm, lines] of byLm) {
+        const codes = new Set(lines.map((l) => l.itemCode));
+        const first = lines[0];
+        summaries.push({
+          orderGroupKind: 'REPLENISHMENT',
+          orderNumber: lm,
+          senderOp: first.senderOp ?? '',
+          receiverOp: first.receiverOp ?? '',
+          receiverWarehouseType: first.receiverWarehouseType ?? '',
+          productCount: codes.size,
+          orderTotal: sum(lines.map(touristValueForLine)),
+          costTotal: sum(lines.map((l) => l.costPrice ?? 0)),
+          marginTotal: sum(lines.map((l) => l.margin ?? 0)),
+          deliveryTotal: sum(lines.map((l) => l.delivery ?? 0)),
+          differenceTotal: lines.some((l) => l.delivery != null) ? sum(lines.map((l) => l.difference ?? 0)) : null,
+          orderDate: minDate(lines) ?? first.orderDate,
+        });
+      }
+    }
     summaries.sort((a, b) => {
       const td = b.orderDate.localeCompare(a.orderDate);
       if (td !== 0) return td;
+      if (a.orderGroupKind !== b.orderGroupKind) {
+        return a.orderGroupKind.localeCompare(b.orderGroupKind);
+      }
       return a.orderNumber.localeCompare(b.orderNumber, 'ru', { numeric: true, sensitivity: 'base' });
     });
+    const limit = clampBiTableLimit(filters.touristsLimit);
+    const offset = clampOffset(filters.touristsOffset, 500_000);
     return summaries.slice(offset, offset + limit);
   }
 
-  async getTouristOrderDetail(userId: string, orderNumber: string, filters: WmsBiTransferFilters): Promise<WmsBiTouristOrderDetail> {
+  async getTouristOrderDetail(
+    userId: string,
+    orderNumber: string,
+    filters: WmsBiTransferFilters,
+    orderGroupKind: 'TOURIST' | 'REPLENISHMENT' = 'TOURIST',
+  ): Promise<WmsBiTouristOrderDetail> {
     const trimmed = orderNumber.trim();
     if (!trimmed) {
       throw new BadRequestException('Нужен номер заказа');
     }
-    const merged = { ...filters, kind: 'TOURIST' as const };
     if (this.pool) {
       try {
-        return await this.getTouristOrderDetailSql(userId, trimmed, merged);
+        return await this.getTouristOrderDetailSql(userId, trimmed, orderGroupKind, filters);
       } catch (err) {
         if (err instanceof NotFoundException) throw err;
         this.logger.warn(`getTouristOrderDetailSql fallback: ${(err as Error).message}`);
       }
     }
-    const lines = (await this.filteredLines(userId, merged)).filter(
-      (l) => l.kind === 'TOURIST' && l.orderNumber === trimmed,
-    );
+    const merged: WmsBiTransferFilters = { ...filters, kind: orderGroupKind };
+    const lines = (await this.filteredLines(userId, merged)).filter((l) => {
+      if (orderGroupKind === 'TOURIST') {
+        return l.kind === 'TOURIST' && l.orderNumber === trimmed;
+      }
+      return l.kind === 'REPLENISHMENT' && l.baseDocument?.trim() === trimmed;
+    });
     if (!lines.length) {
-      throw new NotFoundException(`Туристский заказ «${trimmed}» не найден`);
+      throw new NotFoundException(
+        orderGroupKind === 'REPLENISHMENT'
+          ? `Пополнение по номеру «${trimmed}» (ДокументОснование) не найдено`
+          : `Туристский заказ «${trimmed}» не найден`,
+      );
     }
     return {
       orderNumber: trimmed,

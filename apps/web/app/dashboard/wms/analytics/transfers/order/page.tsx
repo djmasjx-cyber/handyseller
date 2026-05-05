@@ -47,6 +47,7 @@ function formatQty(n: number): string {
 function listHref(sp: URLSearchParams): string {
   const q = new URLSearchParams(sp)
   q.delete("orderNumber")
+  q.delete("orderGroupKind")
   const s = q.toString()
   return s ? `/dashboard/wms/analytics/transfers?${s}` : "/dashboard/wms/analytics/transfers"
 }
@@ -55,7 +56,10 @@ export default function WmsTouristOrderDetailPage() {
   const token = typeof window !== "undefined" ? localStorage.getItem(AUTH_STORAGE_KEYS.accessToken) : null
   const sp = useSearchParams()
   const orderNumber = sp.get("orderNumber")?.trim() ?? ""
+  const orderGroupKind =
+    sp.get("orderGroupKind")?.trim().toUpperCase() === "REPLENISHMENT" ? "REPLENISHMENT" : "TOURIST"
   const queryString = useMemo(() => sp.toString(), [sp])
+  const isReplenishment = orderGroupKind === "REPLENISHMENT"
 
   const [detail, setDetail] = useState<OrderDetail | null>(null)
   const [loading, setLoading] = useState(true)
@@ -111,9 +115,11 @@ export default function WmsTouristOrderDetailPage() {
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <p className="text-sm text-muted-foreground">WMS / BI</p>
-          <h1 className="text-2xl font-semibold">Туристский заказ</h1>
+          <h1 className="text-2xl font-semibold">{isReplenishment ? "Пополнение (LM)" : "Туристский заказ"}</h1>
           <p className="text-sm text-muted-foreground">
-            Состав заказа по номенклатуре; те же фильтры, что на странице аналитики.
+            {isReplenishment
+              ? "Состав по строкам с тем же номером в «ДокументОснование»; те же фильтры, что на странице аналитики."
+              : "Состав заказа по номенклатуре; те же фильтры, что на странице аналитики."}
           </p>
         </div>
         <WmsSubnav />
@@ -125,7 +131,7 @@ export default function WmsTouristOrderDetailPage() {
           className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
         >
           <ArrowLeft className="h-4 w-4" />
-          К сводке туристов
+          К сводке заказов
         </Link>
       </div>
 
@@ -192,13 +198,13 @@ export default function WmsTouristOrderDetailPage() {
       ) : !orderNumber ? (
         <Card>
           <CardContent className="py-6 text-sm text-muted-foreground">
-            Откройте страницу по ссылке с номером заказа из блока «Туристы по маршрутам и товарам» на аналитике перемещений.
+            Откройте страницу по ссылке с номером заказа из блока «Заказы по маршрутам и товарам» на аналитике перемещений.
           </CardContent>
         </Card>
       ) : (
         <Card>
           <CardContent className="py-6 text-sm text-muted-foreground">
-            Войдите в аккаунт и снова перейдите по ссылке из сводки туристов.
+            Войдите в аккаунт и снова перейдите по ссылке из сводки заказов.
           </CardContent>
         </Card>
       )}
