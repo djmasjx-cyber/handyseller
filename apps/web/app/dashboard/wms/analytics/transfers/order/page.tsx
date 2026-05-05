@@ -1,8 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import Link from "next/link"
-import { useSearchParams } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@handyseller/ui"
 import { ArrowLeft } from "lucide-react"
 import { WmsSubnav } from "@/components/wms/wms-subnav"
@@ -53,6 +52,7 @@ function listHref(sp: URLSearchParams): string {
 }
 
 export default function WmsTouristOrderDetailPage() {
+  const router = useRouter()
   const token = typeof window !== "undefined" ? localStorage.getItem(AUTH_STORAGE_KEYS.accessToken) : null
   const sp = useSearchParams()
   const orderNumber = sp.get("orderNumber")?.trim() ?? ""
@@ -110,6 +110,15 @@ export default function WmsTouristOrderDetailPage() {
 
   const backHref = listHref(sp)
 
+  /** Возврат на сводку тем же URL, что был до входа в заказ (без повторной канонизации query). */
+  const goBackToSummary = () => {
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      router.back()
+      return
+    }
+    router.push(backHref)
+  }
+
   return (
     <main className="space-y-6 p-6">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -126,13 +135,14 @@ export default function WmsTouristOrderDetailPage() {
       </div>
 
       <div>
-        <Link
-          href={backHref}
+        <button
+          type="button"
+          onClick={goBackToSummary}
           className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
         >
           <ArrowLeft className="h-4 w-4" />
           К сводке заказов
-        </Link>
+        </button>
       </div>
 
       {error ? <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{error}</div> : null}
