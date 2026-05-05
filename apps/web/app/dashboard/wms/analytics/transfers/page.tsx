@@ -314,6 +314,7 @@ function filterSearchFromLocationSearch(search: string): string {
 }
 
 const TRANSFERS_ANALYTICS_CACHE_PREFIX = "wmsTransfersAnalyticsBundle:v1"
+const TOURIST_TABLE_UI_PREFIX = "wmsTransfersTouristTableUi:v1"
 
 type TransfersCacheBundle = {
   summary: Summary
@@ -324,8 +325,61 @@ type TransfersCacheBundle = {
   risks: RiskRow[]
 }
 
+type TouristTableUiState = {
+  sort: { key: TouristSortKey; dir: "asc" | "desc" }
+  scrollLeft: number
+  scrollTop: number
+}
+
+const TOURIST_SORT_KEYS = new Set<TouristSortKey>([
+  "default",
+  "period",
+  "orderSum",
+  "products",
+  "margin",
+  "delivery",
+  "difference",
+])
+
 function transfersAnalyticsStorageKey(filterKeyCanonical: string) {
   return `${TRANSFERS_ANALYTICS_CACHE_PREFIX}:${filterKeyCanonical}`
+}
+
+function touristTableUiStorageKey(filterKeyCanonical: string) {
+  return `${TOURIST_TABLE_UI_PREFIX}:${filterKeyCanonical ? filterKeyCanonical : "__empty__"}`
+}
+
+function readTouristTableUi(filterKeyCanonical: string): TouristTableUiState | null {
+  if (typeof window === "undefined") return null
+  try {
+    const raw = sessionStorage.getItem(touristTableUiStorageKey(filterKeyCanonical))
+    if (!raw) return null
+    const p = JSON.parse(raw) as unknown
+    if (!p || typeof p !== "object") return null
+    const o = p as Record<string, unknown>
+    const s = o.sort
+    if (!s || typeof s !== "object") return null
+    const sk = (s as Record<string, unknown>).key
+    const sd = (s as Record<string, unknown>).dir
+    if (typeof sk !== "string" || !TOURIST_SORT_KEYS.has(sk as TouristSortKey)) return null
+    if (sd !== "asc" && sd !== "desc") return null
+    const sl = o.scrollLeft
+    const st = o.scrollTop
+    const scrollLeft = typeof sl === "number" && Number.isFinite(sl) ? sl : 0
+    const scrollTop = typeof st === "number" && Number.isFinite(st) ? st : 0
+    return { sort: { key: sk as TouristSortKey, dir: sd }, scrollLeft, scrollTop }
+  } catch {
+    return null
+  }
+}
+
+function writeTouristTableUi(filterKeyCanonical: string, state: TouristTableUiState): void {
+  if (typeof window === "undefined") return
+  try {
+    sessionStorage.setItem(touristTableUiStorageKey(filterKeyCanonical), JSON.stringify(state))
+  } catch {
+    /* storage full / privacy mode */
+  }
 }
 
 function readTransfersAnalyticsBundle(filterKeyCanonical: string): TransfersCacheBundle | null {
@@ -435,11 +489,53 @@ function WmsTransferAnalyticsPageContent() {
 
   const filterKeyCanonical = useMemo(() => canonicalQueryString(searchKey), [searchKey])
 
+  const [touristSort, setTouristSort] = useState<{ key: TouristSortKey; dir: "asc" | "desc" }>({
+    key: "default",
+    dir: "asc",
+  })
+
+  const filterKeyCanonicalRef = useRef(filterKeyCanonical)
+  filterKeyCanonicalRef.current = filterKeyCanonical
+  const touristSortRef = useRef(touristSort)
+  touristSortRef.current = touristSort
+  const touristOrdersScrollRef = useRef<HTMLDivElement>(null)
+  const lastTouristOrdersScrollRef = useRef({ left: 0, top: 0 })
+  const pendingScrollAfterHydrateRef = useRef<{ left: number; top: number } | null>(null)
+  const scrollPersistTimerRef = useRef<ReturnType<typeof globalThis.setTimeout> | null>(null)
+
+  const persistTouristTableUi = useCallback(() => {
+    if (typeof window === "undefined") return
+    const key = filterKeyCanonicalRef.current
+    const el = touristOrdersScrollRef.current
+    const scrollLeft = el?.scrollLeft ?? 0
+    const scrollTop = el?.scrollTop ?? 0
+    lastTouristOrdersScrollRef.current = { left: scrollLeft, top: scrollTop }
+    writeTouristTableUi(key, {
+      sort: touristSortRef.current,
+      scrollLeft,
+      scrollTop,
+    })
+  }, [])
+
+  const schedulePersistTouristTableScroll = useCallback(() => {
+    if (scrollPersistTimerRef.current != null) globalThis.clearTimeout(scrollPersistTimerRef.current)
+    scrollPersistTimerRef.current = globalThis.setTimeout(() => {
+      scrollPersistTimerRef.current = null
+      persistTouristTableUi()
+    }, 160)
+  }, [persistTouristTableUi])
+
+  useLayoutEffect(() => {
+    lastTouristOrdersScrollRef.current = { left: 0, top: 0 }
+  }, [filterKeyCanonical])
+
   useLayoutEffect(() => {
     if (!token) return
     const bundle = readTransfersAnalyticsBundle(filterKeyCanonical)
     if (!bundle) {
       skipFullLoadingOnceRef.current = false
+      pendingScrollAfterHydrateRef.current = null
+      setTouristSort({ key: "default", dir: "asc" })
       return
     }
     skipFullLoadingOnceRef.current = true
@@ -449,7 +545,31 @@ function WmsTransferAnalyticsPageContent() {
     setByOp(bundle.byOp)
     setTourists(bundle.tourists)
     setRisks(bundle.risks)
+    if (bundle.tourists.length === 0) {
+      pendingScrollAfterHydrateRef.current = null
+      setTouristSort({ key: "default", dir: "asc" })
+      return
+    }
+    const ui = readTouristTableUi(filterKeyCanonical)
+    if (ui) {
+      setTouristSort(ui.sort)
+      pendingScrollAfterHydrateRef.current = { left: ui.scrollLeft, top: ui.scrollTop }
+    } else {
+      pendingScrollAfterHydrateRef.current = null
+      setTouristSort({ key: "default", dir: "asc" })
+    }
   }, [filterKeyCanonical, token])
+
+  useLayoutEffect(() => {
+    const pending = pendingScrollAfterHydrateRef.current
+    if (!pending) return
+    const el = touristOrdersScrollRef.current
+    if (!el || tourists.length === 0) return
+    el.scrollLeft = pending.left
+    el.scrollTop = pending.top
+    lastTouristOrdersScrollRef.current = { left: pending.left, top: pending.top }
+    pendingScrollAfterHydrateRef.current = null
+  }, [tourists.length, filterKeyCanonical])
 
   useEffect(() => {
     const want = filtersQueryKey(filters)
@@ -469,10 +589,6 @@ function WmsTransferAnalyticsPageContent() {
   }, [filters, pathname, router, searchKey])
   const [itemPickerOpen, setItemPickerOpen] = useState(false)
   const [batchMenuOpen, setBatchMenuOpen] = useState(false)
-  const [touristSort, setTouristSort] = useState<{ key: TouristSortKey; dir: "asc" | "desc" }>({
-    key: "default",
-    dir: "asc",
-  })
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -559,6 +675,28 @@ function WmsTransferAnalyticsPageContent() {
       prev.key === key ? { key, dir: prev.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" },
     )
   }
+
+  useEffect(() => {
+    touristSortRef.current = touristSort
+    persistTouristTableUi()
+  }, [touristSort, filterKeyCanonical, persistTouristTableUi])
+
+  useEffect(() => {
+    const key = filterKeyCanonical
+    const scrollSnapshot = lastTouristOrdersScrollRef
+    return () => {
+      if (scrollPersistTimerRef.current != null) {
+        globalThis.clearTimeout(scrollPersistTimerRef.current)
+        scrollPersistTimerRef.current = null
+      }
+      const { left, top } = scrollSnapshot.current
+      writeTouristTableUi(key, {
+        sort: touristSortRef.current,
+        scrollLeft: left,
+        scrollTop: top,
+      })
+    }
+  }, [filterKeyCanonical])
 
   const load = useCallback(async () => {
     if (!token) return
@@ -993,7 +1131,11 @@ function WmsTransferAnalyticsPageContent() {
           </CardDescription>
         </CardHeader>
         <CardContent className="min-h-0 flex-1 pt-0">
-          <div className={ANALYTICS_TABLE_SCROLL}>
+          <div
+            ref={touristOrdersScrollRef}
+            className={ANALYTICS_TABLE_SCROLL}
+            onScroll={schedulePersistTouristTableScroll}
+          >
             <table className="w-full min-w-[1200px] text-left text-sm">
               <thead className="sticky top-0 z-[1] border-b bg-background/95 text-muted-foreground backdrop-blur supports-[backdrop-filter]:bg-background/80">
                 <tr>
