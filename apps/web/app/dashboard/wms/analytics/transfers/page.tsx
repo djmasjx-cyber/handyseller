@@ -647,7 +647,7 @@ function WmsTransferAnalyticsPageContent() {
               formatOptionLabel={(v) => (v === "" ? "(не указан)" : v)}
             />
             <div className="space-y-1">
-              <Label className="whitespace-nowrap">Каталог номенклатуры</Label>
+              <Label className="whitespace-nowrap">Каталог</Label>
               <Button
                 type="button"
                 variant="outline"
@@ -655,7 +655,7 @@ function WmsTransferAnalyticsPageContent() {
                 onClick={() => setItemPickerOpen(true)}
               >
                 <Layers className="mr-2 h-4 w-4" />
-                Каталог номенклатуры
+                Номенклатура
               </Button>
             </div>
             <div className="space-y-1">
@@ -690,13 +690,11 @@ function WmsTransferAnalyticsPageContent() {
                 </p>
               ) : null}
             </div>
-          </div>
-          <div className="flex flex-wrap items-end gap-3">
             <div className="space-y-1">
               <Label htmlFor="kind">Тип</Label>
               <select
                 id="kind"
-                className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
                 value={filters.kind}
                 onChange={(e) => setFilter("kind", e.target.value)}
               >
@@ -705,11 +703,13 @@ function WmsTransferAnalyticsPageContent() {
                 <option value="TOURIST">Туристы</option>
               </select>
             </div>
+          </div>
+          <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
             <div className="space-y-1">
               <Label htmlFor="batch">Партия импорта</Label>
               <select
                 id="batch"
-                className="h-10 max-w-80 rounded-md border border-input bg-background px-3 text-sm"
+                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
                 value={filters.batchId}
                 onChange={(e) => setFilter("batchId", e.target.value)}
               >
@@ -721,23 +721,11 @@ function WmsTransferAnalyticsPageContent() {
                 ))}
               </select>
             </div>
-            {filters.batchId ? (
-              <Button
-                type="button"
-                variant="outline"
-                className="border-destructive/40 text-destructive hover:bg-destructive/10"
-                onClick={() => void deleteSelectedBatch()}
-                disabled={loading}
-              >
-                <Trash2 className="mr-2 h-4 w-4" />
-                Удалить партию
-              </Button>
-            ) : null}
             <div className="space-y-1">
-              <Label htmlFor="table-rows-cap">Строк в таблицах (после группировки в БД)</Label>
+              <Label htmlFor="table-rows-cap">Товаров в таблицах</Label>
               <select
                 id="table-rows-cap"
-                className="h-10 max-w-xs rounded-md border border-input bg-background px-3 text-sm"
+                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
                 value={filters.byOpLimit}
                 onChange={(e) => {
                   const n = Number.parseInt(e.target.value, 10)
@@ -759,6 +747,20 @@ function WmsTransferAnalyticsPageContent() {
                 <option value={100000}>100 000 (макс.)</option>
               </select>
             </div>
+            {filters.batchId ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="h-10 self-end border-destructive/40 text-destructive hover:bg-destructive/10"
+                onClick={() => void deleteSelectedBatch()}
+                disabled={loading}
+              >
+                <Trash2 className="mr-2 h-4 w-4" />
+                Удалить партию
+              </Button>
+            ) : null}
+          </div>
+          <div className="flex justify-end">
             <Button type="button" variant="outline" onClick={() => void load()} disabled={loading}>
               <RefreshCw className="mr-2 h-4 w-4" />
               Обновить
@@ -787,7 +789,7 @@ function WmsTransferAnalyticsPageContent() {
       />
 
       <section className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5">
-        <Stat title="Строк" value={numberRu.format(summary.rowsTotal)} hint={`${numberRu.format(summary.ordersTotal)} заказов`} />
+        <Stat title="Товаров" value={numberRu.format(summary.rowsTotal)} hint={`${numberRu.format(summary.ordersTotal)} заказов`} />
         <Stat title="Пополнения" value={numberRu.format(summary.replenishmentRows)} hint={money(summary.replenishmentValue)} />
         <Stat title="Туристы" value={numberRu.format(summary.touristRows)} hint={money(summary.touristValue)} accent />
         <Stat title="Сумма" value={money(summary.valueTotal)} hint="по «Цена» (fallback: «РозничнаяЦена»), целые ₽" />
@@ -806,7 +808,7 @@ function WmsTransferAnalyticsPageContent() {
             <SimpleTable
               scrollClassName={ANALYTICS_TABLE_SCROLL}
               tableClassName="min-w-[720px]"
-              headers={["Получатель", "Склад", "Строк", "Заказов", "Туристы", "Сумма туристов"]}
+              headers={["Получатель", "Склад", "Товаров", "Заказов", "Туристы", "Сумма туристов"]}
               rows={byOp.map((row) => [
                 row.receiverOp,
                 row.receiverWarehouseType,
@@ -1095,7 +1097,7 @@ function ItemCatalogModal({
                   <th className="px-2 py-2 font-medium">НоменклатураАртикул</th>
                   <th className="px-2 py-2 font-medium">НоменклатураКод</th>
                   <th className="px-2 py-2 font-medium">Название</th>
-                  <th className="px-2 py-2 font-medium text-right">Строк</th>
+                  <th className="px-2 py-2 font-medium text-right">Товаров</th>
                 </tr>
               </thead>
               <tbody>
