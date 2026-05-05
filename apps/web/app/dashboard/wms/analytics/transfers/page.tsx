@@ -1,6 +1,8 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import Link from "next/link"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Label } from "@handyseller/ui"
 import { ArrowDown, ArrowUp, ArrowUpDown, FileUp, Layers, RefreshCw, Trash2 } from "lucide-react"
 import { WmsSubnav } from "@/components/wms/wms-subnav"
@@ -47,19 +49,14 @@ type ByOpRow = {
   lastDate: string | null
 }
 
-type TouristRow = {
+/** Одна строка = один туристский заказ (сводка для руководителя). */
+type TouristOrderRow = {
   orderNumber: string
-  receiverWarehouse: string
-  receiverWarehouseType: string
-  receiverOp: string
-  senderWarehouse: string
-  senderWarehouseType: string
   senderOp: string
-  itemCode: string
-  itemArticle: string | null
-  itemName: string
-  lineValue: number
-  orderSum: number
+  receiverOp: string
+  receiverWarehouseType: string
+  productCount: number
+  orderTotal: number
   orderDate: string
 }
 
@@ -198,9 +195,122 @@ function queryFromFilters(filters: Filters): string {
   return raw ? `?${raw}` : ""
 }
 
+/** Ссылка на страницу состава заказа с теми же фильтрами. */
+function orderDetailHref(filters: Filters, orderNumber: string): string {
+  const base = queryFromFilters(filters)
+  const search = base.startsWith("?") ? base.slice(1) : ""
+  const u = new URLSearchParams(search)
+  u.set("orderNumber", orderNumber)
+  const q = u.toString()
+  return q ? `/dashboard/wms/analytics/transfers/order?${q}` : `/dashboard/wms/analytics/transfers/order?orderNumber=${encodeURIComponent(orderNumber)}`
+}
+
 /** Запрос каталога номенклатуры: те же фильтры, но без отбора по товару. */
 function queryFromFiltersExcludingItem(filters: Filters): string {
   return queryFromFilters({ ...filters, item: "", itemCodes: [] })
+}
+
+function getDefaultFilters(): Filters {
+  return {
+    from: "",
+    to: "",
+    receiverOps: [],
+    senderOps: [],
+    warehouseTypes: [],
+    counterparties: [],
+    qtyMin: "",
+    qtyMax: "",
+    retailMin: "",
+    retailMax: "",
+    costMin: "",
+    costMax: "",
+    item: "",
+    itemCodes: [],
+    kind: "",
+    batchId: "",
+    byOpLimit: 50_000,
+    byOpOffset: 0,
+    touristsLimit: 50_000,
+    touristsOffset: 0,
+    risksLimit: 50_000,
+    risksOffset: 0,
+  }
+}
+
+function clampTableInt(raw: string | null, min: number, max: number, fallback: number): number {
+  if (raw == null || raw === "") return fallback
+  const n = Number.parseInt(raw, 10)
+  if (!Number.isFinite(n)) return fallback
+  return Math.min(max, Math.max(min, n))
+}
+
+/** Восстановление фильтров из адресной строки (тот же формат, что queryFromFilters). */
+function parseFiltersFromSearchParams(sp: URLSearchParams): Filters {
+  const d = getDefaultFilters()
+  const from = sp.get("from")
+  if (from) d.from = from
+  const to = sp.get("to")
+  if (to) d.to = to
+  const splitList = (key: string) => {
+    const raw = sp.get(key)
+    if (!raw) return []
+    return raw
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+  }
+  d.receiverOps = splitList("receiverOps")
+  d.senderOps = splitList("senderOps")
+  d.warehouseTypes = splitList("warehouseTypes")
+  d.counterparties = splitList("counterparties").map((c) => (c === COUNTERPARTY_EMPTY_PARAM ? "" : c))
+  d.itemCodes = splitList("itemCodes")
+  d.qtyMin = sp.get("qtyMin") ?? ""
+  d.qtyMax = sp.get("qtyMax") ?? ""
+  d.retailMin = sp.get("retailMin") ?? ""
+  d.retailMax = sp.get("retailMax") ?? ""
+  d.costMin = sp.get("costMin") ?? ""
+  d.costMax = sp.get("costMax") ?? ""
+  d.item = sp.get("item") ?? ""
+  const kind = sp.get("kind")
+  if (kind === "REPLENISHMENT" || kind === "TOURIST") d.kind = kind
+  d.batchId = sp.get("batchId") ?? ""
+  d.byOpLimit = clampTableInt(sp.get("byOpLimit"), 1, 100_000, d.byOpLimit)
+  d.byOpOffset = clampTableInt(sp.get("byOpOffset"), 0, 2_000_000, d.byOpOffset)
+  d.touristsLimit = clampTableInt(sp.get("touristsLimit"), 1, 100_000, d.touristsLimit)
+  d.touristsOffset = clampTableInt(sp.get("touristsOffset"), 0, 2_000_000, d.touristsOffset)
+  d.risksLimit = clampTableInt(sp.get("risksLimit"), 1, 100_000, d.risksLimit)
+  d.risksOffset = clampTableInt(sp.get("risksOffset"), 0, 2_000_000, d.risksOffset)
+  return d
+}
+
+function filtersQueryKey(filters: Filters): string {
+  return queryFromFilters(filters).slice(1)
+}
+
+/**
+ * Одинаковые параметры в разном порядке дают разные строки у URLSearchParams и у queryFromFilters.
+ * Без канонизации получается цикл: replace → новый порядок в адресе → снова replace.
+ */
+function canonicalQueryString(qs: string): string {
+  if (!qs || qs === "") return ""
+  const u = new URLSearchParams(qs)
+  const pairs = [...u.entries()].sort((a, b) => {
+    const cmp = a[0].localeCompare(b[0])
+    if (cmp !== 0) return cmp
+    return String(a[1]).localeCompare(String(b[1]))
+  })
+  const out = new URLSearchParams()
+  for (const [k, v] of pairs) {
+    out.append(k, v)
+  }
+  return out.toString()
+}
+
+/** Query без служебных для других экранов ключей (напр. orderNumber на карточке заказа). */
+function filterSearchFromLocationSearch(search: string): string {
+  const u = new URLSearchParams(search)
+  u.delete("orderNumber")
+  return u.toString()
 }
 
 function readFileAsBase64(file: File): Promise<string> {
@@ -230,8 +340,18 @@ function formatHttpError(data: unknown, fallback: string): string {
   return fallback
 }
 
-export default function WmsTransferAnalyticsPage() {
+function WmsTransferAnalyticsPageContent() {
   const token = typeof window !== "undefined" ? localStorage.getItem(AUTH_STORAGE_KEYS.accessToken) : null
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const pathname = usePathname() ?? "/dashboard/wms/analytics/transfers"
+  /**
+   * Синхронизация URL ↔ фильтры без гонок:
+   * - После router.replace Next присылает тот же query; без маркера снова parse → setFilters → replace → цикл.
+   * - pendingOwnCanonical: каноническая строка query, которую мы только что отправили в replace; один layout-проход игнорируем.
+   */
+  const pendingOwnCanonical = useRef<string | null>(null)
+
   const [summary, setSummary] = useState<Summary>(emptySummary)
   const [imports, setImports] = useState<ImportBatch[]>([])
   const [options, setOptions] = useState<FilterOptions>({
@@ -241,32 +361,53 @@ export default function WmsTransferAnalyticsPage() {
     counterparties: [],
   })
   const [byOp, setByOp] = useState<ByOpRow[]>([])
-  const [tourists, setTourists] = useState<TouristRow[]>([])
+  const [tourists, setTourists] = useState<TouristOrderRow[]>([])
   const [risks, setRisks] = useState<RiskRow[]>([])
-  const [filters, setFilters] = useState<Filters>({
-    from: "",
-    to: "",
-    receiverOps: [],
-    senderOps: [],
-    warehouseTypes: [],
-    counterparties: [],
-    qtyMin: "",
-    qtyMax: "",
-    retailMin: "",
-    retailMax: "",
-    costMin: "",
-    costMax: "",
-    item: "",
-    itemCodes: [],
-    kind: "",
-    batchId: "",
-    byOpLimit: 50_000,
-    byOpOffset: 0,
-    touristsLimit: 50_000,
-    touristsOffset: 0,
-    risksLimit: 50_000,
-    risksOffset: 0,
+  const [filters, setFilters] = useState<Filters>(() => {
+    if (typeof window === "undefined") return getDefaultFilters()
+    return parseFiltersFromSearchParams(
+      new URLSearchParams(filterSearchFromLocationSearch(window.location.search)),
+    )
   })
+
+  const searchParamsString = searchParams.toString()
+  const searchKey = useMemo(
+    () => filterSearchFromLocationSearch(searchParamsString),
+    [searchParamsString],
+  )
+
+  useLayoutEffect(() => {
+    const cs = canonicalQueryString(searchKey)
+    if (pendingOwnCanonical.current != null && cs === pendingOwnCanonical.current) {
+      pendingOwnCanonical.current = null
+      return
+    }
+    const u = new URLSearchParams(searchKey)
+    const parsed = parseFiltersFromSearchParams(u)
+    setFilters((prev) => {
+      const prevQ = canonicalQueryString(filtersQueryKey(prev))
+      const nextQ = canonicalQueryString(filtersQueryKey(parsed))
+      if (prevQ === nextQ) return prev
+      return parsed
+    })
+  }, [searchKey])
+
+  useEffect(() => {
+    const want = filtersQueryKey(filters)
+    const cw = canonicalQueryString(want)
+    const cs = canonicalQueryString(searchKey)
+    if (cw === cs) return
+    const t = window.setTimeout(() => {
+      const w = filtersQueryKey(filters)
+      const cwn = canonicalQueryString(w)
+      const csn = canonicalQueryString(searchKey)
+      if (cwn === csn) return
+      pendingOwnCanonical.current = cwn
+      const href = w ? `${pathname}?${w}` : pathname
+      router.replace(href, { scroll: false })
+    }, 160)
+    return () => window.clearTimeout(t)
+  }, [filters, pathname, router, searchKey])
   const [itemPickerOpen, setItemPickerOpen] = useState(false)
   const [touristSort, setTouristSort] = useState<{ key: TouristSortKey; dir: "asc" | "desc" }>({
     key: "default",
@@ -282,14 +423,19 @@ export default function WmsTransferAnalyticsPage() {
 
   const touristsSorted = useMemo(() => {
     const rows = tourists.slice()
-    if (touristSort.key === "default") return rows
+    if (touristSort.key === "default") {
+      rows.sort((a, b) =>
+        a.orderNumber.localeCompare(b.orderNumber, "ru", { numeric: true, sensitivity: "base" }),
+      )
+      return rows
+    }
     const dir = touristSort.dir === "asc" ? 1 : -1
     if (touristSort.key === "period") {
       rows.sort((a, b) => dir * a.orderDate.localeCompare(b.orderDate))
       return rows
     }
     rows.sort((a, b) => {
-      const d = dir * (a.orderSum - b.orderSum)
+      const d = dir * (a.orderTotal - b.orderTotal)
       if (d !== 0) return d
       return a.orderNumber.localeCompare(b.orderNumber, "ru", { numeric: true, sensitivity: "base" })
     })
@@ -340,7 +486,7 @@ export default function WmsTransferAnalyticsPage() {
           : { warehouseTypes: [], receiverOps: [], senderOps: [], counterparties: [] },
       )
       setByOp(byOpRes.ok ? ((await byOpRes.json()) as ByOpRow[]) : [])
-      setTourists(touristsRes.ok ? ((await touristsRes.json()) as TouristRow[]) : [])
+      setTourists(touristsRes.ok ? ((await touristsRes.json()) as TouristOrderRow[]) : [])
       setRisks(risksRes.ok ? ((await risksRes.json()) as RiskRow[]) : [])
     } catch (err) {
       setError(err instanceof Error ? err.message : "Ошибка загрузки аналитики.")
@@ -769,8 +915,8 @@ export default function WmsTransferAnalyticsPage() {
             <div>
               <CardTitle>Туристы по маршрутам и товарам</CardTitle>
               <CardDescription>
-                Позиции по заказам: строки одного заказа рядом. По умолчанию сортировка по номеру заказа; столбцы «Период» и
-                «Сумма» (по заказу) можно отсортировать.
+                Сводка по заказам: одна строка на заказ. Состав заказа — по клику на номер. Сортировка по дате и стоимости
+                заказа.
               </CardDescription>
             </div>
             <Button
@@ -787,25 +933,22 @@ export default function WmsTransferAnalyticsPage() {
         </CardHeader>
         <CardContent className="min-h-0 flex-1 pt-0">
           <div className={ANALYTICS_TABLE_SCROLL}>
-            <table className="w-full min-w-[1040px] text-left text-sm">
+            <table className="w-full min-w-[920px] text-left text-sm">
               <thead className="sticky top-0 z-[1] border-b bg-background/95 text-muted-foreground backdrop-blur supports-[backdrop-filter]:bg-background/80">
                 <tr>
                   <th className="whitespace-nowrap px-3 py-2 font-medium">№ заказа</th>
-                  <th className="whitespace-nowrap px-3 py-2 font-medium">Получатель</th>
                   <th className="whitespace-nowrap px-3 py-2 font-medium">Отправитель</th>
+                  <th className="whitespace-nowrap px-3 py-2 font-medium">Получатель</th>
                   <th className="whitespace-nowrap px-3 py-2 font-medium">Склад</th>
-                  <th className="whitespace-nowrap px-3 py-2 font-medium">Товар</th>
-                  <th className="whitespace-nowrap px-3 py-2 font-medium">Строк</th>
-                  <th className="whitespace-nowrap px-3 py-2 font-medium">Заказов</th>
-                  <th className="whitespace-nowrap px-3 py-2 font-medium">Стоимость</th>
+                  <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Товаров</th>
                   <th className="whitespace-nowrap px-3 py-2 font-medium">
                     <button
                       type="button"
                       className="inline-flex items-center gap-1 rounded hover:bg-muted"
-                      onClick={() => toggleTouristSort("period")}
+                      onClick={() => toggleTouristSort("orderSum")}
                     >
-                      Период
-                      {touristSort.key === "period" ? (
+                      Стоимость
+                      {touristSort.key === "orderSum" ? (
                         touristSort.dir === "asc" ? (
                           <ArrowUp className="h-3.5 w-3.5" />
                         ) : (
@@ -820,10 +963,10 @@ export default function WmsTransferAnalyticsPage() {
                     <button
                       type="button"
                       className="inline-flex items-center gap-1 rounded hover:bg-muted"
-                      onClick={() => toggleTouristSort("orderSum")}
+                      onClick={() => toggleTouristSort("period")}
                     >
-                      Сумма
-                      {touristSort.key === "orderSum" ? (
+                      Дата
+                      {touristSort.key === "period" ? (
                         touristSort.dir === "asc" ? (
                           <ArrowUp className="h-3.5 w-3.5" />
                         ) : (
@@ -839,29 +982,29 @@ export default function WmsTransferAnalyticsPage() {
               <tbody>
                 {touristsSorted.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="p-4 text-muted-foreground">
+                    <td colSpan={7} className="p-4 text-muted-foreground">
                       Данных пока нет. Загрузите файл или измените фильтры.
                     </td>
                   </tr>
                 ) : (
-                  touristsSorted.map((row, idx) => (
-                    <tr key={`${row.orderNumber}-${row.itemCode}-${idx}`} className="border-b last:border-0">
-                      <td className="px-3 py-2 align-top font-medium">{row.orderNumber || "—"}</td>
-                      <td className="px-3 py-2 align-top">{row.receiverOp}</td>
-                      <td className="px-3 py-2 align-top">{row.senderOp}</td>
-                      <td className="max-w-[min(28rem,44vw)] px-3 py-2 align-top break-words">
-                        {row.receiverWarehouseType === row.senderWarehouseType
-                          ? row.receiverWarehouseType
-                          : `${row.senderWarehouseType} → ${row.receiverWarehouseType}`}
+                  touristsSorted.map((row) => (
+                    <tr key={row.orderNumber} className="border-b last:border-0">
+                      <td className="px-3 py-2 align-top">
+                        <Link
+                          href={orderDetailHref(filters, row.orderNumber)}
+                          className="font-medium text-primary underline-offset-4 hover:underline"
+                        >
+                          {row.orderNumber || "—"}
+                        </Link>
                       </td>
+                      <td className="px-3 py-2 align-top">{row.senderOp || "—"}</td>
+                      <td className="px-3 py-2 align-top">{row.receiverOp || "—"}</td>
                       <td className="max-w-[min(28rem,44vw)] px-3 py-2 align-top break-words">
-                        {row.itemArticle ? `${row.itemArticle} · ${row.itemName}` : row.itemName}
+                        {row.receiverWarehouseType || "—"}
                       </td>
-                      <td className="px-3 py-2 align-top tabular-nums">1</td>
-                      <td className="px-3 py-2 align-top tabular-nums">1</td>
-                      <td className="px-3 py-2 align-top tabular-nums">{money(row.lineValue)}</td>
+                      <td className="px-3 py-2 align-top text-right tabular-nums">{numberRu.format(row.productCount)}</td>
+                      <td className="px-3 py-2 align-top tabular-nums font-medium">{money(row.orderTotal)}</td>
                       <td className="px-3 py-2 align-top whitespace-nowrap">{dateRu(row.orderDate)}</td>
-                      <td className="px-3 py-2 align-top tabular-nums font-medium">{money(row.orderSum)}</td>
                     </tr>
                   ))
                 )}
@@ -871,6 +1014,21 @@ export default function WmsTransferAnalyticsPage() {
         </CardContent>
       </Card>
     </main>
+  )
+}
+
+export default function WmsTransferAnalyticsPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="space-y-6 p-6">
+          <p className="text-sm text-muted-foreground">WMS / BI</p>
+          <p className="text-muted-foreground">Загрузка аналитики…</p>
+        </main>
+      }
+    >
+      <WmsTransferAnalyticsPageContent />
+    </Suspense>
   )
 }
 
