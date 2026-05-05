@@ -185,6 +185,7 @@ function queryFromFilters(filters: Filters): string {
       if (value.length) qs.set(key, value.join(","))
       continue
     }
+    if (key === "item") continue
     if (Array.isArray(value)) {
       if (value.length) qs.set(key, value.join(","))
     } else if (typeof value === "string" && value) {
@@ -262,7 +263,7 @@ function parseFiltersFromSearchParams(sp: URLSearchParams): Filters {
   d.itemCodes = splitList("itemCodes")
   d.qtyMin = sp.get("qtyMin") ?? ""
   d.qtyMax = sp.get("qtyMax") ?? ""
-  d.item = sp.get("item") ?? ""
+  d.item = ""
   const kind = sp.get("kind")
   if (kind === "REPLENISHMENT" || kind === "TOURIST") d.kind = kind
   d.batchId = sp.get("batchId") ?? ""
@@ -659,38 +660,6 @@ function WmsTransferAnalyticsPageContent() {
               </Button>
             </div>
             <div className="space-y-1">
-              <Label htmlFor="item" className="whitespace-nowrap">
-                Товар / артикул
-              </Label>
-              <div className="flex flex-wrap gap-2">
-                <Input
-                  id="item"
-                  className="flex-1 min-w-[12rem]"
-                  value={filters.item}
-                  placeholder={filters.itemCodes.length ? "Отключено: выбраны коды из каталога" : "Подстрока по названию, коду или артикулу"}
-                  disabled={Boolean(filters.itemCodes.length)}
-                  onChange={(e) => setFilter("item", e.target.value)}
-                />
-                {filters.itemCodes.length ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="shrink-0"
-                    onClick={() => setFilters((p) => ({ ...p, itemCodes: [] }))}
-                  >
-                    Сбросить коды ({filters.itemCodes.length})
-                  </Button>
-                ) : null}
-              </div>
-              {filters.itemCodes.length ? (
-                <p className="text-xs text-muted-foreground">
-                  Фильтр по кодам: {filters.itemCodes.slice(0, 12).join(", ")}
-                  {filters.itemCodes.length > 12 ? ` … +${filters.itemCodes.length - 12}` : ""}
-                </p>
-              ) : null}
-            </div>
-            <div className="space-y-1">
               <Label htmlFor="kind">Тип</Label>
               <select
                 id="kind"
@@ -707,19 +676,33 @@ function WmsTransferAnalyticsPageContent() {
           <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
             <div className="space-y-1">
               <Label htmlFor="batch">Партия импорта</Label>
-              <select
-                id="batch"
-                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                value={filters.batchId}
-                onChange={(e) => setFilter("batchId", e.target.value)}
-              >
-                <option value="">Все партии</option>
-                {imports.map((batch) => (
-                  <option key={batch.id} value={batch.id}>
-                    {batch.fileName ?? batch.id} · {dateShort(batch.createdAt)}
-                  </option>
-                ))}
-              </select>
+              <div className="flex items-center gap-2">
+                <select
+                  id="batch"
+                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  value={filters.batchId}
+                  onChange={(e) => setFilter("batchId", e.target.value)}
+                >
+                  <option value="">Все партии</option>
+                  {imports.map((batch) => (
+                    <option key={batch.id} value={batch.id}>
+                      {batch.fileName ?? batch.id} · {dateShort(batch.createdAt)}
+                    </option>
+                  ))}
+                </select>
+                {filters.batchId ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-10 shrink-0 border-destructive/40 text-destructive hover:bg-destructive/10"
+                    onClick={() => void deleteSelectedBatch()}
+                    disabled={loading}
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Удалить партию
+                  </Button>
+                ) : null}
+              </div>
             </div>
             <div className="space-y-1">
               <Label htmlFor="table-rows-cap">Товаров в таблицах</Label>
@@ -747,18 +730,6 @@ function WmsTransferAnalyticsPageContent() {
                 <option value={100000}>100 000 (макс.)</option>
               </select>
             </div>
-            {filters.batchId ? (
-              <Button
-                type="button"
-                variant="outline"
-                className="h-10 self-end border-destructive/40 text-destructive hover:bg-destructive/10"
-                onClick={() => void deleteSelectedBatch()}
-                disabled={loading}
-              >
-                <Trash2 className="mr-2 h-4 w-4" />
-                Удалить партию
-              </Button>
-            ) : null}
           </div>
           <div className="flex justify-end">
             <Button type="button" variant="outline" onClick={() => void load()} disabled={loading}>
