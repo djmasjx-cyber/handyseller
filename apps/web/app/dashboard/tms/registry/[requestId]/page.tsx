@@ -25,7 +25,13 @@ type RegistryDetail = {
     draft?: { serviceFlags?: string[]; notes?: string }
     snapshot?: {
       coreOrderNumber?: string
-      itemSummary?: Array<{ title: string; quantity: number; weightGrams?: number | null }>
+      itemSummary?: Array<{
+        title: string
+        quantity: number
+        weightGrams?: number | null
+        declaredValueLineRub?: number | null
+        priceRub?: number | null
+      }>
       cargo?: { weightGrams?: number; places?: number; declaredValueRub?: number }
     }
   }

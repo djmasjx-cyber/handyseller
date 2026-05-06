@@ -77,6 +77,21 @@ export function buildShipmentPayload(input: DemoCheckoutPayload) {
   const pickupDate = input.pickupDate || new Date(Date.now() + 86400000).toISOString().slice(0, 10)
   const originLabel = process.env.TMS_DEMO_ORIGIN_LABEL?.trim() || "Москва, Склад HandySeller"
 
+  const itemSummary = input.cart.items.map((item) => {
+    const qty = Math.max(1, Math.round(Number(item.quantity) || 1))
+    const unitPrice = Number(item.priceRub) || 0
+    const lineDeclared = Math.round(unitPrice * qty * 100) / 100
+    return {
+      productId: item.productId,
+      title: item.title,
+      quantity: item.quantity,
+      weightGrams: item.weightGrams,
+      declaredValueLineRub: lineDeclared,
+    }
+  })
+  const sumLineDeclared =
+    Math.round(itemSummary.reduce((s, row) => s + (Number(row.declaredValueLineRub) || 0), 0) * 100) / 100
+
   return {
     externalOrderId,
     payload: {
@@ -95,14 +110,9 @@ export function buildShipmentPayload(input: DemoCheckoutPayload) {
           lengthMm: input.cart.lengthMm,
           heightMm: input.cart.heightMm,
           places: 1,
-          declaredValueRub: input.cart.declaredValueRub,
+          declaredValueRub: sumLineDeclared > 0 ? sumLineDeclared : input.cart.declaredValueRub,
         },
-        itemSummary: input.cart.items.map((item) => ({
-          productId: item.productId,
-          title: item.title,
-          quantity: item.quantity,
-          weightGrams: item.weightGrams,
-        })),
+        itemSummary,
         contacts: {
           shipper: {
             name: process.env.TMS_DEMO_SHIPPER_NAME?.trim() || "Склад HandySeller",

@@ -3,6 +3,7 @@ import type {
   CarrierDescriptor,
   CarrierPickupPoint,
   CarrierQuote,
+  CoreOrderSnapshot,
   CreateShipmentRequestInput,
   InternalCarrierCredentials,
   ShipmentRecord,
@@ -264,6 +265,73 @@ function withRequestIdHeaders(
 
 function round2(value: number): number {
   return Math.round(value * 100) / 100;
+}
+
+type ItemSummaryRow = CoreOrderSnapshot['itemSummary'][number];
+
+/** Сумма объявленной стоимости строки: `declaredValueLineRub` или legacy `priceRub` (сумма строки). */
+function cdekLineDeclaredTotalRub(row: ItemSummaryRow): number | null {
+  if (row.declaredValueLineRub != null && Number.isFinite(row.declaredValueLineRub) && row.declaredValueLineRub >= 0) {
+    return round2(Number(row.declaredValueLineRub));
+  }
+  if (row.priceRub != null && Number.isFinite(row.priceRub) && row.priceRub >= 0) {
+    return round2(Number(row.priceRub));
+  }
+  return null;
+}
+
+/**
+ * Стоимость единицы (`cost`) для позиций заказа СДЭК по `cargo.declaredValueRub` и суммам строк.
+ * Строки с явной суммой → cost = сумма_строки / количество; без явной → остаток бюджета поровну на единицы.
+ */
+function buildCdekPackageLineItems(
+  rawItems: ItemSummaryRow[],
+  cargoDeclaredTotal: number,
+  logger: Logger,
+): Array<{ name: string; ware_key: string; payment: { value: number }; cost: number; weight: number; amount: number }> {
+  const rows = rawItems.map((it, idx) => {
+    const amount = Math.max(1, Math.round(Number(it.quantity) || 1));
+    const totalWeight = Math.max(Math.round(Number(it.weightGrams) || 100), 1);
+    const itemWeight = Math.max(Math.round(totalWeight / amount), 1);
+    const name = (it.title || `Товар ${idx + 1}`).toString().slice(0, 255);
+    const wareKey = (it.productId || `item-${idx + 1}`).toString().slice(0, 50);
+    const lineTot = cdekLineDeclaredTotalRub(it);
+    return { name, ware_key: wareKey, weight: itemWeight, amount, lineTot };
+  });
+
+  const explicitSum = round2(rows.reduce((s, r) => (r.lineTot != null ? s + r.lineTot : s), 0));
+  const implicitRows = rows.filter((r) => r.lineTot == null);
+  const implicitUnits = implicitRows.reduce((s, r) => s + r.amount, 0);
+  const remainder = round2(cargoDeclaredTotal - explicitSum);
+  if (explicitSum > cargoDeclaredTotal + 0.01 && cargoDeclaredTotal > 0) {
+    logger.warn(
+      `CDEK book: sum(item declared lines)=${explicitSum} exceeds cargo.declaredValueRub=${cargoDeclaredTotal}; implicit lines use minimum cost`,
+    );
+  }
+  let implicitPerUnit = 0.01;
+  if (cargoDeclaredTotal > 0) {
+    const budget = Math.max(0, remainder);
+    implicitPerUnit = implicitUnits > 0 ? Math.max(0.01, round2(budget / implicitUnits)) : 0.01;
+  }
+
+  return rows.map((r) => {
+    let cost: number;
+    if (r.lineTot != null) {
+      cost = Math.max(0.01, round2(r.lineTot / r.amount));
+    } else if (cargoDeclaredTotal > 0) {
+      cost = implicitPerUnit;
+    } else {
+      cost = 0.01;
+    }
+    return {
+      name: r.name,
+      ware_key: r.ware_key,
+      payment: { value: 0 },
+      cost,
+      weight: r.weight,
+      amount: r.amount,
+    };
+  });
 }
 
 export class CdekAdapter implements CarrierAdapter {
@@ -601,32 +669,9 @@ export class CdekAdapter implements CarrierAdapter {
     const cargo = input.snapshot.cargo;
     const declaredTotal = Math.max(round2(Number(cargo.declaredValueRub) || 0), 0);
     const rawItems = input.snapshot.itemSummary ?? [];
-    const totalUnits = Math.max(
-      1,
-      rawItems.reduce((sum, it) => sum + Math.max(1, Math.round(Number(it.quantity) || 1)), 0),
-    );
-    const declaredPerUnit = declaredTotal > 0 ? round2(declaredTotal / totalUnits) : 0;
-    const orderItems = rawItems
-      .map((it, idx) => {
-        const amount = Math.max(1, Math.round(Number(it.quantity) || 1));
-        const totalWeight = Math.max(Math.round(Number(it.weightGrams) || 100), 1);
-        const itemWeight = Math.max(Math.round(totalWeight / amount), 1);
-        const name = (it.title || `Товар ${idx + 1}`).toString().slice(0, 255);
-        const wareKey = (it.productId || `item-${idx + 1}`).toString().slice(0, 50);
-        const itemDeclared = declaredTotal > 0 ? Math.max(0.01, declaredPerUnit) : 0.01;
-        return {
-          name,
-          ware_key: wareKey,
-          payment: { value: 0 },
-          cost: itemDeclared,
-          weight: itemWeight,
-          amount,
-        };
-      })
-      .filter((x) => x.amount > 0);
     const packageItems =
-      orderItems.length > 0
-        ? orderItems
+      rawItems.length > 0
+        ? buildCdekPackageLineItems(rawItems, declaredTotal, this.logger)
         : [
             {
               name: 'Груз',

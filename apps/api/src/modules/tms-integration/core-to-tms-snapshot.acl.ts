@@ -11,6 +11,8 @@ type OrderProduct = {
 
 type OrderItem = {
   quantity: number;
+  /** Unit price from заказа (OrderItem.price), ₽ */
+  price?: unknown;
   product: OrderProduct | null;
 };
 
@@ -52,6 +54,22 @@ export class CoreToTmsSnapshotAcl {
       order.deliveryAddressLabel?.trim() ||
       (order.marketplace === 'MANUAL' ? 'Ручной канал' : `${order.marketplace} order`);
 
+    const itemSummary = order.items.map((item) => {
+      const unit = item.price != null ? Number(item.price) : NaN;
+      const lineDeclared =
+        Number.isFinite(unit) && unit >= 0
+          ? Math.round(unit * item.quantity * 100) / 100
+          : undefined;
+      return {
+        productId: item.product?.id ?? null,
+        title: cargoOv?.cargoDescription || item.product?.title || 'Товар',
+        quantity: item.quantity,
+        weightGrams: item.product?.weight ?? null,
+        declaredValueLineRub: lineDeclared,
+      };
+    });
+    const sumLineDeclared = itemSummary.reduce((s, row) => s + (row.declaredValueLineRub ?? 0), 0);
+
     return {
       sourceSystem: 'HANDYSELLER_CORE',
       userId,
@@ -79,14 +97,11 @@ export class CoreToTmsSnapshotAcl {
         lengthMm: cargoOv?.lengthMm ?? (maxLengthMm || null),
         heightMm: cargoOv?.heightMm ?? (totalHeightMm || null),
         places: cargoOv?.places ?? Math.max(order.items.length, 1),
-        declaredValueRub: cargoOv?.declaredValueRub ?? Number(order.totalAmount),
+        declaredValueRub:
+          cargoOv?.declaredValueRub ??
+          (sumLineDeclared > 0 ? sumLineDeclared : Number(order.totalAmount)),
       },
-      itemSummary: order.items.map((item) => ({
-        productId: item.product?.id ?? null,
-        title: cargoOv?.cargoDescription || item.product?.title || 'Товар',
-        quantity: item.quantity,
-        weightGrams: item.product?.weight ?? null,
-      })),
+      itemSummary,
     };
   }
 
