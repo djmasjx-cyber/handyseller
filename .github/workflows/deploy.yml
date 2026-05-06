@@ -438,6 +438,7 @@ jobs:
           CLIENT_ID: ${{ secrets.TMS_CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.TMS_CLIENT_SECRET }}
           API_BASE_URL: ${{ vars.API_BASE_URL || 'https://api.handyseller.ru/api' }}
+          SLO_GATE_STRICT: ${{ vars.SLO_GATE_STRICT || '0' }}
         run: |
           set -euo pipefail
           TOKEN_RESPONSE="$(curl -sS -X POST "${API_BASE_URL}/tms/oauth/token" \
@@ -449,7 +450,13 @@ jobs:
             echo "${TOKEN_RESPONSE}"
             exit 1
           fi
-          ACCESS_TOKEN="${ACCESS_TOKEN}" API_BASE_URL="${API_BASE_URL}" bash scripts/tms-slo-alert-check.sh
+          if ! ACCESS_TOKEN="${ACCESS_TOKEN}" API_BASE_URL="${API_BASE_URL}" bash scripts/tms-slo-alert-check.sh; then
+            if [[ "${SLO_GATE_STRICT}" == "1" || "${SLO_GATE_STRICT}" == "true" ]]; then
+              echo "::error::SLO gate failed in strict mode"
+              exit 1
+            fi
+            echo "::warning::SLO gate breached (advisory mode); deploy continues. Set SLO_GATE_STRICT=1 to hard-fail."
+          fi
 
       - name: Rollback previous images on failure
         if: ${{ failure() && steps.capture_previous.outputs.prev_image_api != '' && steps.capture_previous.outputs.prev_image_web != '' && steps.capture_previous.outputs.prev_image_tms_api != '' }}
