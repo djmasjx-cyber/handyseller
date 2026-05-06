@@ -8,6 +8,10 @@ import { ArrowDown, ArrowUp, ArrowUpDown, FileUp, Layers, RefreshCw, Trash2 } fr
 import { WmsSubnav } from "@/components/wms/wms-subnav"
 import { authFetch } from "@/lib/auth-fetch"
 import { AUTH_STORAGE_KEYS } from "@/lib/auth-storage"
+import {
+  consumeScrollToTransfersTouristOrdersSection,
+  persistTransfersListStateForOrderDrill,
+} from "@/lib/wms-transfers-analytics-session"
 
 type TransferKind = "REPLENISHMENT" | "TOURIST"
 
@@ -605,6 +609,17 @@ function WmsTransferAnalyticsPageContent() {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
 
+  /** Возврат с карточки заказа: проскроллить к блоку «Заказы по маршрутам и товарам», а не к шапке страницы. */
+  useLayoutEffect(() => {
+    if (!consumeScrollToTransfersTouristOrdersSection()) return
+    const run = () => {
+      document.getElementById("wms-transfers-tourist-orders")?.scrollIntoView({ block: "start", behavior: "instant" })
+    }
+    requestAnimationFrame(() => {
+      requestAnimationFrame(run)
+    })
+  }, [filterKeyCanonical, loading])
+
   const query = useMemo(() => queryFromFilters(filters), [filters])
   const catalogQuery = useMemo(() => queryFromFiltersExcludingItem(filters), [filters])
 
@@ -1133,7 +1148,7 @@ function WmsTransferAnalyticsPageContent() {
         </Card>
       </section>
 
-      <Card className="flex min-h-0 flex-col">
+      <Card id="wms-transfers-tourist-orders" className="scroll-mt-24 flex min-h-0 flex-col">
         <CardHeader className="shrink-0 space-y-1.5 pb-3">
           <CardTitle>Заказы по маршрутам и товарам</CardTitle>
           <CardDescription>
@@ -1283,6 +1298,12 @@ function WmsTransferAnalyticsPageContent() {
                         <Link
                           href={orderDetailHref(filters, row.orderNumber, row.orderGroupKind)}
                           className="font-medium text-primary underline-offset-4 hover:underline"
+                          onClick={() =>
+                            persistTransfersListStateForOrderDrill(
+                              row.orderNumber,
+                              canonicalQueryString(filtersQueryKey(filters)),
+                            )
+                          }
                         >
                           {row.orderNumber || "—"}
                         </Link>
