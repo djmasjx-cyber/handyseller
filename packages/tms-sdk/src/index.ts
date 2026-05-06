@@ -77,6 +77,16 @@ export interface CoreOrderSnapshot {
     title: string;
     quantity: number;
     weightGrams: number | null;
+    /**
+     * Объявленная стоимость всей позиции (все единицы), ₽.
+     * Если задано, при передаче заказа в СДЭК на строку уходит cost = declaredValueLineRub / quantity.
+     */
+    declaredValueLineRub?: number | null;
+    /**
+     * Legacy: как в Partner API, часто передают сумму строки заказа.
+     * Используется только если `declaredValueLineRub` не задан.
+     */
+    priceRub?: number | null;
   }>;
 }
 
