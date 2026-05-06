@@ -1,6 +1,10 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
+import {
+  requestScrollToTransfersTouristOrdersSection,
+  resolveTransfersListHrefFromOrder,
+} from "@/lib/wms-transfers-analytics-session"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@handyseller/ui"
 import { ArrowLeft } from "lucide-react"
@@ -43,14 +47,6 @@ function formatQty(n: number): string {
   return qtyRu.format(n)
 }
 
-function listHref(sp: URLSearchParams): string {
-  const q = new URLSearchParams(sp)
-  q.delete("orderNumber")
-  q.delete("orderGroupKind")
-  const s = q.toString()
-  return s ? `/dashboard/wms/analytics/transfers?${s}` : "/dashboard/wms/analytics/transfers"
-}
-
 export default function WmsTouristOrderDetailPage() {
   const router = useRouter()
   const token = typeof window !== "undefined" ? localStorage.getItem(AUTH_STORAGE_KEYS.accessToken) : null
@@ -59,6 +55,10 @@ export default function WmsTouristOrderDetailPage() {
   const orderGroupKind =
     sp.get("orderGroupKind")?.trim().toUpperCase() === "REPLENISHMENT" ? "REPLENISHMENT" : "TOURIST"
   const queryString = useMemo(() => sp.toString(), [sp])
+  const backHref = useMemo(
+    () => resolveTransfersListHrefFromOrder(new URLSearchParams(queryString), orderNumber),
+    [queryString, orderNumber],
+  )
   const isReplenishment = orderGroupKind === "REPLENISHMENT"
 
   const [detail, setDetail] = useState<OrderDetail | null>(null)
@@ -119,14 +119,12 @@ export default function WmsTouristOrderDetailPage() {
     return { qty, sum }
   }, [detail])
 
-  const backHref = listHref(sp)
-
   /**
-   * Всегда переход по вычисленному URL сводки (те же query, что на карточке заказа, без orderNumber).
-   * `router.back()` ненадёжен: стек может вести не на сводку (другая вкладка, общий layout, редирект),
-   * тогда на аналитике снова применяются дефолтные фильтры и уходит полный пересчёт.
+   * URL сводки: приоритет у sessionStorage-пина с полным query (длинные списки ОП не теряются в Next).
+   * Флаг скролла — чтобы на сводке открыть блок «Заказы по маршрутам и товарам», а не верх страницы.
    */
   const goBackToSummary = () => {
+    requestScrollToTransfersTouristOrdersSection()
     router.push(backHref, { scroll: false })
   }
 
