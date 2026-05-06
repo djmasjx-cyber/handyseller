@@ -346,7 +346,7 @@ jobs:
               sleep $((i * 5))
             done
 
-            if docker ps -a --format '{{.Names}}' | rg -x 'handyseller-redis' >/dev/null; then
+            if docker ps -a --format '{{.Names}}' | grep -x 'handyseller-redis' >/dev/null; then
               echo "=== Starting existing Redis container ==="
               docker start handyseller-redis 2>/dev/null || true
             elif docker image inspect redis:7-alpine >/dev/null 2>&1; then
@@ -400,12 +400,32 @@ jobs:
             sleep 5
             docker exec handyseller-api node dist/scripts/seed-database.js 2>/dev/null || true
 
+            wait_http_ok() {
+              local name="$1"
+              local url="$2"
+              local logs_cmd="$3"
+              local retries="${4:-30}"
+              local sleep_s="${5:-3}"
+              for i in $(seq 1 "${retries}"); do
+                if curl -sf --connect-timeout 5 "${url}" >/dev/null 2>&1; then
+                  echo "${name} healthy after ${i}x${sleep_s}s"
+                  return 0
+                fi
+                if [ "${i}" -eq "${retries}" ]; then
+                  echo "${name} not responding after $((retries * sleep_s))s"
+                  eval "${logs_cmd}" || true
+                  return 1
+                fi
+                sleep "${sleep_s}"
+              done
+            }
+
             echo "=== Verify Web ==="
-            curl -sf --connect-timeout 5 http://127.0.0.1:3001/ >/dev/null || { echo "Web not responding"; docker logs handyseller-web --tail 30 2>&1; exit 1; }
+            wait_http_ok "Web" "http://127.0.0.1:3001/" "docker logs handyseller-web --tail 30 2>&1"
             echo "=== Verify TMS API ==="
-            curl -sf --connect-timeout 5 http://127.0.0.1:4100/health >/dev/null || { echo "TMS API not responding"; docker logs handyseller-tms-api --tail 60 2>&1; exit 1; }
+            wait_http_ok "TMS API" "http://127.0.0.1:4100/health" "docker logs handyseller-tms-api --tail 60 2>&1"
             echo "=== Verify WMS API ==="
-            curl -sf --connect-timeout 5 http://127.0.0.1:4200/health >/dev/null || { echo "WMS API not responding"; docker logs handyseller-wms-api --tail 60 2>&1; exit 1; }
+            wait_http_ok "WMS API" "http://127.0.0.1:4200/health" "docker logs handyseller-wms-api --tail 60 2>&1"
 
             # Post-success cleanup (non-blocking) to avoid disk growth.
             docker image prune -f || true
