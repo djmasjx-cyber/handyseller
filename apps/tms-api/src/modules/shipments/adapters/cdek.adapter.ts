@@ -30,6 +30,18 @@ type CdekTariff = {
   calendar_max?: number;
 };
 
+/** Ответ `POST /v2/calculator/tariff`: итог с НДС в `total_sum`, услуги (страхование и т.д.) в `services`. */
+type CdekTariffCalculatorResponse = {
+  delivery_sum?: number;
+  total_sum?: number;
+  services?: Array<{
+    code?: string;
+    sum?: number;
+    total_sum?: number;
+    vat_sum?: number;
+  }>;
+};
+
 type CdekCity = { code?: number; city?: string };
 type CdekDeliveryPoint = {
   code?: string;
@@ -250,7 +262,9 @@ function extractDeliveryModeFromQuoteId(quoteId: string): number | null {
  */
 function getCdekOrderType(): 1 | 2 {
   const raw = process.env.CDEK_ORDER_TYPE?.trim();
-  if (raw === '2') return 2;
+  // По умолчанию используем тип 1 (интернет-магазин), чтобы CDEK принимал состав товаров.
+  // legacy CDEK_ORDER_TYPE=2 разрешаем только при явном флаге совместимости.
+  if (raw === '2' && process.env.CDEK_ENABLE_LEGACY_TYPE2 === 'true') return 2;
   return 1;
 }
 
@@ -334,6 +348,111 @@ function buildCdekPackageLineItems(
   });
 }
 
+/** Итоговая к оплате по ответу калькулятора (предпочитаем `total_sum` от СДЭК — включает НДС и доп. услуги). */
+function cdekQuoteTotalRub(detail: CdekTariffCalculatorResponse | null | undefined): number | null {
+  if (!detail) return null;
+  const total = asNum(detail.total_sum);
+  if (total != null && total > 0) return round2(total);
+  const delivery = asNum(detail.delivery_sum) ?? 0;
+  const servicesExtra = (detail.services ?? []).reduce((acc, s) => {
+    const line = asNum(s.total_sum) ?? asNum(s.sum);
+    return acc + (line != null && line > 0 ? line : 0);
+  }, 0);
+  const combined = round2(delivery + servicesExtra);
+  return combined > 0 ? combined : null;
+}
+
+/**
+ * Коды тарифов СДЭК (справочник в OpenAPI / приложение к договору API v2):
+ * «Экспресс» и «Магистральный экспресс» — только четыре топологии Д-Д, Д-Склад, Склад-Д, С-С (без постаматов и без «Посылки»).
+ * @see metrica-pro/cdek-go api/cdek-api.yaml (таблица тарифов)
+ */
+const CDEK_QUOTE_TARIFF_CODES_EXPRESS_AND_MAGISTRAL = new Set([
+  62, // Магистральный экспресс склад-склад
+  121, // Магистральный экспресс дверь-дверь
+  122, // Магистральный экспресс склад-дверь
+  123, // Магистральный экспресс дверь-склад
+  480, // Экспресс дверь-дверь
+  481, // Экспресс дверь-склад
+  482, // Экспресс склад-дверь
+  483, // Экспресс склад-склад
+]);
+
+const CDEK_POSTAMAT_TARIFF_CODES_DEFAULT = new Set([366, 368]);
+
+function parseCommaSeparatedPositiveInts(raw: string | undefined): number[] {
+  if (!raw?.trim()) return [];
+  const out: number[] = [];
+  for (const part of raw.split(',')) {
+    const n = Number(part.trim());
+    if (Number.isFinite(n) && n > 0) out.push(Math.round(n));
+  }
+  return out;
+}
+
+/**
+ * Режимы доставки из ответа tarifflist: 1 дверь-дверь, 2 дверь-склад(ПВЗ), 3 склад-дверь, 4 склад-склад.
+ */
+function cdekQuoteAllowedDeliveryModes(): Set<number> {
+  const fromEnv = parseCommaSeparatedPositiveInts(process.env.CDEK_QUOTE_DELIVERY_MODES);
+  if (fromEnv.length) return new Set(fromEnv);
+  return new Set([1, 2, 3, 4]);
+}
+
+/** Коды, которые вычитаем из итогового allowlist (постаматы по умолчанию + env). */
+function cdekQuoteExcludedTariffCodes(): Set<number> {
+  const s = new Set(CDEK_POSTAMAT_TARIFF_CODES_DEFAULT);
+  for (const c of parseCommaSeparatedPositiveInts(process.env.CDEK_QUOTE_EXCLUDE_TARIFF_CODES_EXTRA)) {
+    s.add(c);
+  }
+  return s;
+}
+
+/**
+ * Итоговый набор `tariff_code` для квоты.
+ * - По умолчанию: фиксированные 8 кодов (экспресс + магистральный экспресс) + `CDEK_QUOTE_EXTRA_TARIFF_CODES`, минус exclude.
+ * - Если задан `CDEK_QUOTE_ALLOWED_TARIFF_CODES` — только он (полная замена списка для нестандартного договора), затем минус exclude.
+ */
+function cdekQuoteAllowedTariffCodeSet(): Set<number> {
+  const envOnly = parseCommaSeparatedPositiveInts(process.env.CDEK_QUOTE_ALLOWED_TARIFF_CODES);
+  const s = new Set<number>();
+  if (envOnly.length) {
+    for (const c of envOnly) s.add(c);
+  } else {
+    for (const c of CDEK_QUOTE_TARIFF_CODES_EXPRESS_AND_MAGISTRAL) s.add(c);
+    for (const c of parseCommaSeparatedPositiveInts(process.env.CDEK_QUOTE_EXTRA_TARIFF_CODES)) {
+      s.add(c);
+    }
+  }
+  for (const c of cdekQuoteExcludedTariffCodes()) s.delete(c);
+  return s;
+}
+
+/**
+ * Сужаем ответ tarifflist до нужных `tariff_code` — один вызов `/v2/calculator/tariff` на строку.
+ */
+function filterCdekTariffsForQuote(tariffs: CdekTariff[], logger?: Logger): CdekTariff[] {
+  const modes = cdekQuoteAllowedDeliveryModes();
+  const allowedCodes = cdekQuoteAllowedTariffCodeSet();
+  const before = tariffs.length;
+  const out = tariffs.filter((t) => {
+    const code = t.tariff_code;
+    if (typeof code !== 'number' || !Number.isFinite(code) || code <= 0) return false;
+    if (!allowedCodes.has(code)) return false;
+    const dm = t.delivery_mode;
+    if (dm == null || Number.isNaN(Number(dm))) return false;
+    if (!modes.has(Number(dm))) return false;
+    return true;
+  });
+  if (logger && before !== out.length) {
+    const sorted = [...allowedCodes].sort((a, b) => a - b).join(',');
+    logger.log(
+      `[cdek-quote-filter] tariffs ${before} -> ${out.length}; allowedCodes=[${sorted}]; modes=${[...modes].join(',')}`,
+    );
+  }
+  return out;
+}
+
 export class CdekAdapter implements CarrierAdapter {
   private readonly logger = new Logger(CdekAdapter.name);
   private readonly credentialsCache = new Map<
@@ -377,6 +496,34 @@ export class CdekAdapter implements CarrierAdapter {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  /** Детальный расчёт по коду тарифа (`total_sum` совпадает с отображением в ЛК СДЭК: база, НДС, страхование объявленной стоимости). */
+  private async fetchCalculatorTariffDetail(
+    base: string,
+    token: string,
+    traceId: string,
+    body: Record<string, unknown>,
+    timeoutMs: number,
+  ): Promise<CdekTariffCalculatorResponse | null> {
+    const res = await this.fetchWithTimeout(
+      `${base}/v2/calculator/tariff`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          ...withRequestIdHeaders({}, traceId),
+        },
+        body: JSON.stringify(body),
+        cache: 'no-store',
+      },
+      timeoutMs,
+    );
+    if (!res?.ok) return null;
+    const data = (await res.json().catch(() => null)) as CdekTariffCalculatorResponse | null;
+    return data && typeof data === 'object' ? data : null;
   }
 
   async quote(
@@ -434,6 +581,12 @@ export class CdekAdapter implements CarrierAdapter {
       );
       return done([], 'city_resolve_failed');
     }
+    const declaredTotal = Math.max(round2(Number(input.snapshot.cargo.declaredValueRub) || 0), 0);
+    const optionalInsuranceServices =
+      declaredTotal > 0
+        ? [{ code: 'INSURANCE', parameter: String(Math.max(1, Math.round(declaredTotal))) }]
+        : undefined;
+
     const payload = {
       type: orderType,
       currency: 1,
@@ -475,15 +628,60 @@ export class CdekAdapter implements CarrierAdapter {
     const tariffs = tariffsRaw as CdekTariff[];
     if (!tariffs.length) return done([], 'no_tariffs');
 
+    const tariffsForQuote = filterCdekTariffsForQuote(tariffs, this.logger);
+    if (!tariffsForQuote.length) {
+      this.logger.warn(
+        `CDEK tarifflist produced ${tariffs.length} tariffs but none passed CDEK_QUOTE_* filters; requestId=${requestId}`,
+      );
+      return done([], 'no_tariffs_after_filter');
+    }
+
+    const perTariffTimeout = this.quoteTimeoutMs();
+    const detailStartedAt = Date.now();
+    const tariffDetails = await Promise.all(
+      tariffsForQuote.map(async (t): Promise<{ t: CdekTariff; detail: CdekTariffCalculatorResponse | null }> => {
+        const tc = t.tariff_code;
+        if (typeof tc !== 'number' || !Number.isFinite(tc) || tc <= 0) {
+          return { t, detail: null };
+        }
+        const body: Record<string, unknown> = {
+          ...payload,
+          tariff_code: tc,
+        };
+        if (optionalInsuranceServices?.length) {
+          body.services = optionalInsuranceServices;
+        }
+        const detail = await this.fetchCalculatorTariffDetail(base, token, traceId, body, perTariffTimeout);
+        return { t, detail };
+      }),
+    );
+    calculatorMs += Math.max(0, Date.now() - detailStartedAt);
+
     const serviceFlags = input.draft.serviceFlags.filter((f) => this.descriptor.supportedFlags.includes(f));
     const quotes: CarrierQuote[] = [];
-    for (const t of tariffs) {
-      const priceRub = asNum(t.delivery_sum);
-      if (!priceRub || priceRub <= 0) continue;
+    for (const { t, detail } of tariffDetails) {
+      const priceFromDetail = cdekQuoteTotalRub(detail);
+      const listDelivery = asNum(t.delivery_sum);
+      if (priceFromDetail == null || priceFromDetail <= 0) {
+        this.logger.warn(
+          `CDEK calculator/tariff omitted or invalid total_sum for tariff_code=${t.tariff_code ?? 'n/a'}; requestId=${requestId}; hadDetail=${Boolean(detail)}`,
+        );
+        continue;
+      }
+      const priceRub = priceFromDetail;
       const etaMin = asNum(t.calendar_min) ?? asNum(t.period_min) ?? 1;
       const etaMax = asNum(t.calendar_max) ?? asNum(t.period_max) ?? etaMin;
       const etaDays = Math.max(1, Math.round((etaMin + etaMax) / 2));
-      const code = t.tariff_code ?? Math.round(priceRub);
+      const tariffBaseRub = asNum(detail?.delivery_sum) ?? listDelivery ?? 0;
+      const ins = detail?.services?.find((s) => (s.code ?? '').toUpperCase() === 'INSURANCE');
+      const insuranceRub =
+        ins != null ? round2(asNum(ins.total_sum) ?? asNum(ins.sum) ?? 0) : undefined;
+      let extrasRub = round2(priceRub - tariffBaseRub - (insuranceRub ?? 0));
+      if (extrasRub < 0) extrasRub = 0;
+      const code =
+        typeof t.tariff_code === 'number' && Number.isFinite(t.tariff_code) && t.tariff_code > 0
+          ? t.tariff_code
+          : Math.round(priceRub);
       const name = t.tariff_name ?? `Тариф ${code}`;
       const dm = t.delivery_mode;
       const modeLabel = cdekDeliveryModeLabel(dm);
@@ -501,7 +699,10 @@ export class CdekAdapter implements CarrierAdapter {
           source: 'carrier_total',
           totalRub: priceRub,
           currency: 'RUB',
-          comment: `CDEK tariff ${code}${dm != null ? ` · delivery_mode=${dm}` : ''}`,
+          tariffRub: tariffBaseRub > 0 ? round2(tariffBaseRub) : undefined,
+          insuranceRub: insuranceRub != null && insuranceRub > 0 ? insuranceRub : undefined,
+          extrasRub: extrasRub > 0 ? extrasRub : undefined,
+          comment: `CDEK tariff ${code} · total_sum (НДС+услуги)${declaredTotal > 0 ? ` · INSURANCE=${Math.round(declaredTotal)}` : ''}${dm != null ? ` · delivery_mode=${dm}` : ''}`,
         },
         score: Math.round((100000 / Math.max(priceRub, 1)) * 100) / 100,
       });
