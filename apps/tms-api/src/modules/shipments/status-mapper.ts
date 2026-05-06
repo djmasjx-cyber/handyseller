@@ -44,7 +44,6 @@ const DALLI_RULES: Array<{ id: string; match: RegExp; status: ShipmentStatus }> 
   { id: 'dalli_confirmed', match: /(^|\b)(NEW|ACCEPTED|CONFIRM)(\b|$)/i, status: 'CONFIRMED' },
   { id: 'dalli_canceled', match: /(^|\b)(CANCELED|RETURNED|LOST)(\b|$)/i, status: 'DELETED_EXTERNAL' },
 ];
-
 function rulesForCarrier(carrier: string | undefined): Array<{ id: string; match: RegExp; status: ShipmentStatus }> {
   const id = (carrier ?? '').trim().toLowerCase();
   if (id === 'cdek') return CDEK_RULES;

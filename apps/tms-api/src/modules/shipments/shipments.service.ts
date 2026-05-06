@@ -288,7 +288,17 @@ export class ShipmentsService implements OnModuleInit {
 
   listRequests(userId: string): ShipmentRequestRecord[] {
     return [...this.requests.values()]
-      .filter((request) => request.userId === userId)
+      .filter(
+        (request): request is ShipmentRequestRecord =>
+          Boolean(
+            request &&
+              request.userId === userId &&
+              request.snapshot &&
+              typeof request.snapshot === 'object' &&
+              typeof request.snapshot.marketplace === 'string' &&
+              typeof request.snapshot.coreOrderId === 'string',
+          ),
+      )
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
@@ -313,8 +323,7 @@ export class ShipmentsService implements OnModuleInit {
   ): Promise<{ items: OrderRegistryItem[]; nextCursor: string | null }> {
     const safeLimit = Math.max(1, Math.min(100, filter?.limit ?? 25));
     const cursor = filter?.cursor?.trim();
-    const requestItems = [...this.requests.values()]
-      .filter((request) => request.userId === userId)
+    const requestItems = this.listRequests(userId)
       .filter((request) => !this.isMarketplaceOrder(request.snapshot.marketplace))
       .filter((request) => {
         if (request.integration?.fulfillmentMode === 'PARTNER_SELF_SERVE') {
