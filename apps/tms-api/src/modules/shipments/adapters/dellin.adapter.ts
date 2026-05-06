@@ -3,6 +3,7 @@ import type {
   CarrierDescriptor,
   CarrierPickupPoint,
   CarrierQuote,
+  CoreOrderSnapshot,
   CreateShipmentRequestInput,
   InternalCarrierCredentials,
   ShipmentDocumentRecord,
@@ -37,6 +38,47 @@ function asNumber(value: unknown): number | null {
   if (typeof value === 'string') {
     const n = Number(value.replace(',', '.'));
     return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+function dellinRound2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+type DellinItemRow = CoreOrderSnapshot['itemSummary'][number];
+
+function dellinLineDeclaredTotalRub(row: DellinItemRow): number | null {
+  if (row.declaredValueLineRub != null && Number.isFinite(row.declaredValueLineRub) && row.declaredValueLineRub >= 0) {
+    return dellinRound2(Number(row.declaredValueLineRub));
+  }
+  if (row.priceRub != null && Number.isFinite(row.priceRub) && row.priceRub >= 0) {
+    return dellinRound2(Number(row.priceRub));
+  }
+  return null;
+}
+
+/** Объявленная стоимость для калькулятора ДЛ: max(cargo, сумма строк), минимум 1 ₽. */
+function dellinSnapshotDeclaredTotalRub(input: CreateShipmentRequestInput): number {
+  const c = dellinRound2(Number(input.snapshot.cargo.declaredValueRub) || 0);
+  const items = input.snapshot.itemSummary ?? [];
+  let lineSum = 0;
+  for (const it of items) {
+    const v = dellinLineDeclaredTotalRub(it);
+    if (v != null) lineSum = dellinRound2(lineSum + v);
+  }
+  return Math.max(1, dellinRound2(Math.max(c, lineSum)));
+}
+
+function dellinPickPositiveAcross(
+  layers: readonly Record<string, unknown>[],
+  keys: readonly string[],
+): number | null {
+  for (const key of keys) {
+    for (const layer of layers) {
+      const n = asNumber(layer[key]);
+      if (n != null && n > 0) return n;
+    }
   }
   return null;
 }
@@ -123,36 +165,98 @@ function parseKladrFirstCode(payload: unknown): string | null {
   return null;
 }
 
-function parsePublicCalculator(
-  payload: unknown,
-): { priceRub: number; etaDays: number; insuranceRub: number | null } | null {
+function parsePublicCalculator(payload: unknown): {
+  priceRub: number;
+  etaDays: number;
+  insuranceRub: number | null;
+  tariffRub: number;
+  vatRub: number | null;
+  priceSource: string;
+} | null {
   if (!payload || typeof payload !== 'object') return null;
   const root = payload as Record<string, unknown>;
+  if (root.errors) return null;
+  const dataObj = asObject(root.data);
+  if (dataObj && dataObj.errors) return null;
 
-  if (root.errors) {
+  const layers: Record<string, unknown>[] = [];
+  if (dataObj) layers.push(dataObj);
+  layers.push(root);
+
+  const transportBase =
+    dellinPickPositiveAcross(layers, ['price', 'deliveryPrice', 'freightPrice', 'tariffPrice']) ?? 0;
+  const explicitTotal = dellinPickPositiveAcross(layers, [
+    'totalWithVat',
+    'total_with_vat',
+    'priceWithVat',
+    'paySum',
+    'pay',
+    'totalPrice',
+    'totalCost',
+    'total',
+    'amount',
+    'sum',
+    'invoiceTotal',
+  ]);
+  const vatRaw =
+    dellinPickPositiveAcross(layers, [
+      'vat',
+      'VAT',
+      'tax',
+      'nds',
+      'vatSum',
+      'taxSum',
+      'vatAmount',
+      'ndsSum',
+      'vatValue',
+    ]) ?? 0;
+
+  const netTransport = transportBase > 0 ? transportBase : explicitTotal ?? 0;
+  if (!(netTransport > 0) && !(explicitTotal != null && explicitTotal > 0)) {
     return null;
   }
 
-  const priceRub = asNumber(root.price);
-  if (!priceRub || priceRub <= 0) {
-    return null;
+  const eps = Math.max(0.05, 0.001 * Math.max(netTransport, explicitTotal ?? 0, 1));
+  let customer: number;
+  let priceSource: string;
+  if (explicitTotal != null && explicitTotal > 0) {
+    customer = explicitTotal;
+    priceSource = 'total из ответа ДЛ';
+    if (vatRaw > 0 && transportBase > 0 && Math.abs(explicitTotal - transportBase) <= eps) {
+      customer = dellinRound2(transportBase + vatRaw);
+      priceSource = 'price+НДС (total≈price в ответе ДЛ)';
+    }
+  } else if (netTransport > 0 && vatRaw > 0) {
+    customer = dellinRound2(netTransport + vatRaw);
+    priceSource = 'price+НДС';
+  } else {
+    customer = netTransport;
+    priceSource = netTransport > 0 ? 'price' : 'computed';
   }
 
-  const insuranceRub = asNumber(root.insurance ?? root.insurancePrice ?? root.insuranceCost);
+  customer = dellinRound2(customer);
+  if (!(customer > 0)) return null;
 
-  const time = root.time as Record<string, unknown> | undefined;
+  const insVal = dellinPickPositiveAcross(layers, ['insurance', 'insurancePrice', 'insuranceCost']);
+  const insuranceRub = insVal != null && insVal > 0 ? dellinRound2(insVal) : null;
+  const vatRub = vatRaw > 0 ? dellinRound2(vatRaw) : null;
+
+  const tariffRub =
+    transportBase > 0 ? dellinRound2(transportBase) : dellinRound2(Math.min(customer, netTransport || customer));
+
+  const timeLayer = asObject(dataObj?.time) ?? asObject(root.time);
   let etaDays = 2;
-  if (time) {
-    const std = asNumber(time.standard ?? time.value ?? time.days);
+  if (timeLayer) {
+    const std = asNumber(timeLayer.standard ?? timeLayer.value ?? timeLayer.days);
     if (std != null && std > 0) {
       etaDays = Math.max(1, Math.round(std));
-    } else if (typeof time.nominative === 'string') {
-      const digits = time.nominative.match(/\d+/u);
+    } else if (typeof timeLayer.nominative === 'string') {
+      const digits = timeLayer.nominative.match(/\d+/u);
       if (digits) etaDays = Math.max(1, parseInt(digits[0], 10));
     }
   }
 
-  return { priceRub, etaDays, insuranceRub: insuranceRub && insuranceRub > 0 ? insuranceRub : null };
+  return { priceRub: customer, etaDays, insuranceRub, tariffRub, vatRub, priceSource };
 }
 
 function parseDellinTerminalPoints(payload: unknown): CarrierPickupPoint[] {
@@ -841,7 +945,7 @@ export class DellinAdapter implements CarrierAdapter {
       ((cargo.lengthMm ?? 300) / 1000) * ((cargo.widthMm ?? 210) / 1000) * ((cargo.heightMm ?? 500) / 1000),
       0.0001,
     );
-    const statedValue = Math.max(cargo.declaredValueRub, 1);
+    const statedValue = dellinSnapshotDeclaredTotalRub(input);
 
     const lenM = Math.max((cargo.lengthMm ?? 0) / 1000, 0.01);
     const widM = Math.max((cargo.widthMm ?? 0) / 1000, 0.01);
@@ -890,8 +994,10 @@ export class DellinAdapter implements CarrierAdapter {
       if (!data) return null;
       const parsed = parsePublicCalculator(data);
       if (!parsed) return null;
-      const { priceRub, etaDays, insuranceRub } = parsed;
+      const { priceRub, etaDays, insuranceRub, tariffRub, vatRub, priceSource } = parsed;
       const insNote = insuranceRub != null ? ` · страховка ~${insuranceRub} ₽` : '';
+      const vatNote = vatRub != null ? ` · НДС ~${vatRub} ₽` : '';
+      const extrasRub = dellinRound2(Math.max(0, priceRub - tariffRub - (insuranceRub ?? 0)));
       return {
         id: `${requestId}:${this.descriptor.id}:${variant.key}`,
         requestId,
@@ -901,13 +1007,15 @@ export class DellinAdapter implements CarrierAdapter {
         priceRub,
         etaDays,
         serviceFlags,
-        notes: `${variant.label} · ${credentials.accountLabel ?? 'Договор'} · КЛАДР ${originCode.slice(0, 13)}…→${destCode.slice(0, 13)}… · оценка ${statedValue} ₽${insNote}`,
+        notes: `${variant.label} · ${credentials.accountLabel ?? 'Договор'} · КЛАДР ${originCode.slice(0, 13)}…→${destCode.slice(0, 13)}… · оценка ${statedValue} ₽${insNote}${vatNote} · итог ~${priceRub} ₽`,
         priceDetails: {
           source: 'carrier_total',
           totalRub: priceRub,
+          tariffRub,
           insuranceRub: insuranceRub ?? undefined,
+          extrasRub: extrasRub > 0 ? extrasRub : undefined,
           currency: 'RUB',
-          comment: `Dellin public calculator (${variant.label})`,
+          comment: `Dellin public calculator (${variant.label}) · ${priceSource}`,
         },
         score: Math.round((100000 / Math.max(priceRub, 1)) * 100) / 100,
       };
