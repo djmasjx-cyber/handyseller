@@ -458,6 +458,7 @@ enum CarrierCode {
   MAJOR_EXPRESS
   DELLIN
   CDEK
+  DALLI
 }
 
 enum CarrierServiceType {

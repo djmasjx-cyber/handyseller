@@ -1251,6 +1251,209 @@ export class MarketplacesService {
   }
 
   /**
+   * Аудит качества связок WB по данным БД (без вызовов WB API).
+   * Нужен для поиска системных причин, когда при большом каталоге часть товаров не связывается корректно.
+   */
+  async getWbMappingAudit(userId: string): Promise<{
+    summary: {
+      activeProducts: number;
+      mappedProducts: number;
+      unmappedProducts: number;
+      duplicateNmIds: number;
+      duplicateArticles: number;
+      legacySkuWithoutMapping: number;
+    };
+    duplicatesByNmId: Array<{
+      nmId: string;
+      products: Array<{ productId: string; displayId: number; title: string; article: string | null }>;
+    }>;
+    duplicatesByArticle: Array<{
+      article: string;
+      products: Array<{ productId: string; displayId: number; title: string; nmId: string }>;
+    }>;
+    unmappedProducts: Array<{
+      productId: string;
+      displayId: number;
+      title: string;
+      article: string | null;
+      sku: string | null;
+      hint: string;
+    }>;
+    legacySkuWithoutMapping: Array<{
+      productId: string;
+      displayId: number;
+      title: string;
+      sku: string;
+    }>;
+    recommendations: string[];
+    suggestedActions: Array<{
+      action: 'run_repair_dry' | 'run_repair_apply' | 'refresh_single_mapping';
+      reason: string;
+      params?: Record<string, unknown>;
+    }>;
+  }> {
+    const ids = await this.getEffectiveUserIds(userId);
+
+    const [products, wbMappings] = await Promise.all([
+      this.prisma.product.findMany({
+        where: { userId: { in: ids }, archivedAt: null },
+        select: { id: true, displayId: true, title: true, article: true, sku: true },
+      }),
+      this.prisma.productMarketplaceMapping.findMany({
+        where: { userId: { in: ids }, marketplace: 'WILDBERRIES', isActive: true },
+        select: { productId: true, externalSystemId: true, externalArticle: true },
+      }),
+    ]);
+
+    const productById = new Map(products.map((p) => [p.id, p]));
+
+    const mappedProductIds = new Set<string>();
+    for (const m of wbMappings) mappedProductIds.add(m.productId);
+
+    const wbLegacySkuRegex = /^WB-[^-]+-[0-9]+$/;
+    const unmappedProducts = products
+      .filter((p) => !mappedProductIds.has(p.id))
+      .map((p) => ({
+        productId: p.id,
+        displayId: p.displayId,
+        title: p.title,
+        article: p.article ?? null,
+        sku: p.sku ?? null,
+        hint: wbLegacySkuRegex.test(p.sku ?? '')
+          ? 'Есть legacy SKU WB, но отсутствует активный mapping'
+          : 'Нет active mapping для WB (externalSystemId=nmId)',
+      }));
+
+    const legacySkuWithoutMapping = unmappedProducts
+      .filter((p) => wbLegacySkuRegex.test(p.sku ?? ''))
+      .map((p) => ({
+        productId: p.productId,
+        displayId: p.displayId,
+        title: p.title,
+        sku: p.sku ?? '',
+      }));
+
+    const byNmId = new Map<string, Set<string>>();
+    const byArticle = new Map<string, Set<string>>();
+    for (const m of wbMappings) {
+      const nmId = String(m.externalSystemId);
+      if (!byNmId.has(nmId)) byNmId.set(nmId, new Set());
+      byNmId.get(nmId)!.add(m.productId);
+
+      const article = (m.externalArticle ?? '').trim();
+      if (article) {
+        if (!byArticle.has(article)) byArticle.set(article, new Set());
+        byArticle.get(article)!.add(m.productId);
+      }
+    }
+
+    const duplicatesByNmId = [...byNmId.entries()]
+      .filter(([, pids]) => pids.size > 1)
+      .map(([nmId, pids]) => ({
+        nmId,
+        products: [...pids]
+          .map((pid) => productById.get(pid))
+          .filter((p): p is NonNullable<typeof p> => !!p)
+          .map((p) => ({
+            productId: p.id,
+            displayId: p.displayId,
+            title: p.title,
+            article: p.article ?? null,
+          })),
+      }))
+      .sort((a, b) => b.products.length - a.products.length)
+      .slice(0, 100);
+
+    const duplicatesByArticle = [...byArticle.entries()]
+      .filter(([, pids]) => pids.size > 1)
+      .map(([article, pids]) => ({
+        article,
+        products: [...pids]
+          .map((pid) => {
+            const p = productById.get(pid);
+            if (!p) return null;
+            const map = wbMappings.find((m) => m.productId === pid && (m.externalArticle ?? '').trim() === article);
+            return {
+              productId: p.id,
+              displayId: p.displayId,
+              title: p.title,
+              nmId: map?.externalSystemId ?? '',
+            };
+          })
+          .filter((p): p is NonNullable<typeof p> => !!p),
+      }))
+      .sort((a, b) => b.products.length - a.products.length)
+      .slice(0, 100);
+
+    const recommendations: string[] = [];
+    const suggestedActions: Array<{
+      action: 'run_repair_dry' | 'run_repair_apply' | 'refresh_single_mapping';
+      reason: string;
+      params?: Record<string, unknown>;
+    }> = [];
+
+    if (unmappedProducts.length > 0) {
+      recommendations.push(
+        `Есть непривязанные товары WB: ${unmappedProducts.length}. Запустите массовый repair сначала в dryRun.`,
+      );
+      suggestedActions.push({
+        action: 'run_repair_dry',
+        reason: 'Оценить, сколько связок восстановится автоматически',
+        params: { limit: Math.min(unmappedProducts.length, 100), dryRun: true, async: true },
+      });
+    }
+    if (legacySkuWithoutMapping.length > 0) {
+      recommendations.push(
+        `Найдены legacy SKU WB без mapping: ${legacySkuWithoutMapping.length}. Это признак рассинхрона после импорта/миграции.`,
+      );
+    }
+    if (duplicatesByNmId.length > 0) {
+      recommendations.push(
+        `Найдены дубли по nmId: ${duplicatesByNmId.length}. Нужна ручная сверка и очистка лишних связок.`,
+      );
+      const first = duplicatesByNmId[0]?.products?.[0];
+      if (first?.productId) {
+        suggestedActions.push({
+          action: 'refresh_single_mapping',
+          reason: 'Точечно восстановить связку проблемного товара по vendorCode',
+          params: { productId: first.productId },
+        });
+      }
+    }
+    if (duplicatesByArticle.length > 0) {
+      recommendations.push(
+        `Найдены дубли по vendorCode/externalArticle: ${duplicatesByArticle.length}. Проверьте уникальность артикулов у товаров.`,
+      );
+    }
+    if (unmappedProducts.length === 0 && duplicatesByNmId.length === 0 && duplicatesByArticle.length === 0) {
+      recommendations.push('Состояние WB-связок стабильное: критичных проблем в аудите не обнаружено.');
+    } else if (unmappedProducts.length > 0) {
+      suggestedActions.push({
+        action: 'run_repair_apply',
+        reason: 'После dryRun применить восстановление связок',
+        params: { limit: Math.min(unmappedProducts.length, 100), dryRun: false, async: true },
+      });
+    }
+
+    return {
+      summary: {
+        activeProducts: products.length,
+        mappedProducts: mappedProductIds.size,
+        unmappedProducts: unmappedProducts.length,
+        duplicateNmIds: duplicatesByNmId.length,
+        duplicateArticles: duplicatesByArticle.length,
+        legacySkuWithoutMapping: legacySkuWithoutMapping.length,
+      },
+      duplicatesByNmId,
+      duplicatesByArticle,
+      unmappedProducts: unmappedProducts.slice(0, 200),
+      legacySkuWithoutMapping: legacySkuWithoutMapping.slice(0, 200),
+      recommendations,
+      suggestedActions,
+    };
+  }
+
+  /**
    * Получение статистики по всем маркетплейсам.
    * totalProducts — из адаптера (карточек на площадке); linkedProductsCount — число наших товаров (по productId), связанных с площадкой.
    */
@@ -2061,6 +2264,343 @@ export class MarketplacesService {
   }
 
   /**
+   * Обновить связку с WB по текущему артикулу товара (vendorCode).
+   * Ищет nmId через WB API и обновляет/создаёт mapping.
+   * POST /api/marketplaces/wb-refresh-mapping/:productId
+   */
+  async refreshWbMapping(userId: string, productIdOrArticle: string): Promise<
+    { success: true; nmId: string; vendorCode: string } | { success: false; error: string }
+  > {
+    const product = await this.productsService.findByArticleOrId(userId, productIdOrArticle);
+    if (!product) return { success: false, error: 'Товар не найден' };
+
+    const vendorCode = (product.article ?? product.sku ?? '').toString().trim();
+    if (!vendorCode) return { success: false, error: 'Укажите артикул товара (vendorCode)' };
+
+    const conn = await this.getMarketplaceConnection(userId, 'WILDBERRIES');
+    if (!conn?.token) return { success: false, error: 'Wildberries не подключён' };
+
+    const adapter = this.adapterFactory.createAdapter('WILDBERRIES', {
+      encryptedToken: conn.token,
+      encryptedRefreshToken: conn.refreshToken,
+      sellerId: conn.sellerId ?? undefined,
+      warehouseId: conn.warehouseId ?? undefined,
+    });
+    if (!adapter || !(adapter instanceof WildberriesAdapter)) {
+      return { success: false, error: 'Ошибка доступа к Wildberries' };
+    }
+
+    const foundNmId = await adapter.findNmIdByVendorCode(vendorCode);
+    if (!foundNmId) {
+      return {
+        success: false,
+        error: `Карточка с артикулом «${vendorCode}» не найдена на WB. Проверьте артикул или дождитесь обработки карточки.`,
+      };
+    }
+
+    const newNmId = String(foundNmId);
+    const ids = await this.getEffectiveUserIds(userId);
+    const updated = await this.productMappingService.updateMappingForUserIds(
+      product.id,
+      ids,
+      'WILDBERRIES',
+      newNmId,
+      { externalArticle: vendorCode },
+    );
+    if (!updated) {
+      await this.productMappingService.upsertMapping(product.id, userId, 'WILDBERRIES', newNmId, {
+        externalArticle: vendorCode,
+      });
+    }
+    return { success: true, nmId: newNmId, vendorCode };
+  }
+
+  /**
+   * Массовое восстановление WB-связок для непривязанных товаров.
+   * Ищет nmId через WB API по vendorCode (article), затем обновляет/создаёт mapping.
+   */
+  async repairWbMappings(
+    userId: string,
+    options?: { limit?: number; dryRun?: boolean },
+  ): Promise<{
+    dryRun: boolean;
+    strategy: 'catalog_index' | 'per_item_lookup';
+    summary: {
+      considered: number;
+      processed: number;
+      fixed: number;
+      wouldFix: number;
+      notFoundOnWb: number;
+      skippedNoVendorCode: number;
+      failed: number;
+      wbApiCalls: number;
+      durationMs: number;
+    };
+    items: Array<{
+      productId: string;
+      displayId: number;
+      vendorCode: string | null;
+      status: 'fixed' | 'would_fix' | 'not_found' | 'skipped' | 'error';
+      nmId?: string;
+      reason?: string;
+    }>;
+  }> {
+    const startedAt = Date.now();
+    const dryRun = !!options?.dryRun;
+    const limit = Math.max(1, Math.min(300, Number(options?.limit ?? 100)));
+    const ids = await this.getEffectiveUserIds(userId);
+
+    const conn = await this.getMarketplaceConnection(userId, 'WILDBERRIES');
+    if (!conn?.token) {
+      return {
+        dryRun,
+        strategy: 'per_item_lookup',
+        summary: {
+          considered: 0,
+          processed: 0,
+          fixed: 0,
+          wouldFix: 0,
+          notFoundOnWb: 0,
+          skippedNoVendorCode: 0,
+          failed: 0,
+          wbApiCalls: 0,
+          durationMs: Date.now() - startedAt,
+        },
+        items: [
+          {
+            productId: '',
+            displayId: 0,
+            vendorCode: null,
+            status: 'error',
+            reason: 'Wildberries не подключён',
+          },
+        ],
+      };
+    }
+
+    const adapter = this.adapterFactory.createAdapter('WILDBERRIES', {
+      encryptedToken: conn.token,
+      encryptedRefreshToken: conn.refreshToken,
+      sellerId: conn.sellerId ?? undefined,
+      warehouseId: conn.warehouseId ?? undefined,
+    });
+    if (!adapter || !(adapter instanceof WildberriesAdapter)) {
+      return {
+        dryRun,
+        strategy: 'per_item_lookup',
+        summary: {
+          considered: 0,
+          processed: 0,
+          fixed: 0,
+          wouldFix: 0,
+          notFoundOnWb: 0,
+          skippedNoVendorCode: 0,
+          failed: 0,
+          wbApiCalls: 0,
+          durationMs: Date.now() - startedAt,
+        },
+        items: [
+          {
+            productId: '',
+            displayId: 0,
+            vendorCode: null,
+            status: 'error',
+            reason: 'Ошибка доступа к Wildberries',
+          },
+        ],
+      };
+    }
+
+    const [products, wbMappings] = await Promise.all([
+      this.prisma.product.findMany({
+        where: { userId: { in: ids }, archivedAt: null },
+        select: { id: true, displayId: true, title: true, article: true, sku: true },
+      }),
+      this.prisma.productMarketplaceMapping.findMany({
+        where: { userId: { in: ids }, marketplace: 'WILDBERRIES', isActive: true },
+        select: { productId: true },
+      }),
+    ]);
+
+    const mappedProductIds = new Set(wbMappings.map((m) => m.productId));
+    const wbLegacySkuRegex = /^WB-[^-]+-[0-9]+$/;
+    const candidates = products
+      .filter((p) => !mappedProductIds.has(p.id))
+      .map((p) => {
+        const article = (p.article ?? '').toString().trim();
+        const sku = (p.sku ?? '').toString().trim();
+        const vendorCode = article || (sku && !wbLegacySkuRegex.test(sku) ? sku : '');
+        return {
+          productId: p.id,
+          displayId: p.displayId,
+          title: p.title,
+          vendorCode: vendorCode || null,
+        };
+      })
+      .slice(0, limit);
+
+    const items: Array<{
+      productId: string;
+      displayId: number;
+      vendorCode: string | null;
+      status: 'fixed' | 'would_fix' | 'not_found' | 'skipped' | 'error';
+      nmId?: string;
+      reason?: string;
+    }> = [];
+
+    let processed = 0;
+    let fixed = 0;
+    let wouldFix = 0;
+    let notFoundOnWb = 0;
+    let skippedNoVendorCode = 0;
+    let failed = 0;
+    let wbApiCalls = 0;
+    let strategy: 'catalog_index' | 'per_item_lookup' = 'per_item_lookup';
+
+    const normalizeVendorCode = (value: string) => value.toLowerCase().trim();
+    const stripWbSuffix = (value: string) => value.replace(/-1$/, '');
+    const addWbSuffix = (value: string) => (value.endsWith('-1') ? value : `${value}-1`);
+
+    let vendorIndex: Map<string, string> | null = null;
+    const candidatesWithVendorCode = candidates.filter((c) => !!c.vendorCode).length;
+    if (candidatesWithVendorCode >= 20) {
+      try {
+        wbApiCalls++;
+        const wbProducts = await adapter.getProductsFromWb();
+        vendorIndex = new Map<string, string>();
+        for (const p of wbProducts) {
+          const raw = normalizeVendorCode(String(p.vendorCode ?? ''));
+          if (!raw) continue;
+          const base = stripWbSuffix(raw);
+          const nmId = String(p.nmId);
+          if (!vendorIndex.has(raw)) vendorIndex.set(raw, nmId);
+          if (!vendorIndex.has(base)) vendorIndex.set(base, nmId);
+          const withSuffix = addWbSuffix(base);
+          if (!vendorIndex.has(withSuffix)) vendorIndex.set(withSuffix, nmId);
+        }
+        strategy = 'catalog_index';
+      } catch (e) {
+        this.logger.warn(
+          `[WB repair] Не удалось построить индекс каталога, fallback к per-item lookup: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
+    }
+
+    const FALLBACK_LOOKUP_LIMIT = 20;
+    let fallbackLookupsUsed = 0;
+
+    for (const candidate of candidates) {
+      if (!candidate.vendorCode) {
+        skippedNoVendorCode++;
+        items.push({
+          productId: candidate.productId,
+          displayId: candidate.displayId,
+          vendorCode: null,
+          status: 'skipped',
+          reason: 'Нет article/vendorCode для поиска на WB',
+        });
+        continue;
+      }
+
+      processed++;
+      try {
+        const normalizedVendorCode = normalizeVendorCode(candidate.vendorCode);
+        let foundNmId: number | undefined;
+
+        if (vendorIndex) {
+          const base = stripWbSuffix(normalizedVendorCode);
+          foundNmId = Number(
+            vendorIndex.get(normalizedVendorCode) ??
+              vendorIndex.get(base) ??
+              vendorIndex.get(addWbSuffix(base)),
+          );
+          if (!Number.isFinite(foundNmId) || foundNmId <= 0) foundNmId = undefined;
+        }
+
+        // Ограниченный fallback к точечному WB lookup для случаев, когда индекс не нашёл совпадение.
+        if (!foundNmId && (!vendorIndex || fallbackLookupsUsed < FALLBACK_LOOKUP_LIMIT)) {
+          wbApiCalls++;
+          fallbackLookupsUsed++;
+          foundNmId = await adapter.findNmIdByVendorCode(candidate.vendorCode);
+          await new Promise((r) => setTimeout(r, 200));
+        }
+
+        if (!foundNmId) {
+          notFoundOnWb++;
+          items.push({
+            productId: candidate.productId,
+            displayId: candidate.displayId,
+            vendorCode: candidate.vendorCode,
+            status: 'not_found',
+            reason: 'Карточка не найдена на WB',
+          });
+        } else if (dryRun) {
+          wouldFix++;
+          items.push({
+            productId: candidate.productId,
+            displayId: candidate.displayId,
+            vendorCode: candidate.vendorCode,
+            status: 'would_fix',
+            nmId: String(foundNmId),
+          });
+        } else {
+          const nmId = String(foundNmId);
+          const updated = await this.productMappingService.updateMappingForUserIds(
+            candidate.productId,
+            ids,
+            'WILDBERRIES',
+            nmId,
+            { externalArticle: candidate.vendorCode },
+          );
+          if (!updated) {
+            await this.productMappingService.upsertMapping(
+              candidate.productId,
+              userId,
+              'WILDBERRIES',
+              nmId,
+              { externalArticle: candidate.vendorCode },
+            );
+          }
+          fixed++;
+          items.push({
+            productId: candidate.productId,
+            displayId: candidate.displayId,
+            vendorCode: candidate.vendorCode,
+            status: 'fixed',
+            nmId,
+          });
+        }
+      } catch (e) {
+        failed++;
+        items.push({
+          productId: candidate.productId,
+          displayId: candidate.displayId,
+          vendorCode: candidate.vendorCode,
+          status: 'error',
+          reason: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
+
+    return {
+      dryRun,
+      strategy,
+      summary: {
+        considered: candidates.length,
+        processed,
+        fixed,
+        wouldFix,
+        notFoundOnWb,
+        skippedNoVendorCode,
+        failed,
+        wbApiCalls,
+        durationMs: Date.now() - startedAt,
+      },
+      items: items.slice(0, 500),
+    };
+  }
+
+  /**
    * Принудительно отправить остаток на Ozon (при расхождении).
    * POST /api/marketplaces/ozon-stock/:article/sync
    */
@@ -2852,14 +3392,26 @@ export class MarketplacesService {
     }
 
     const wbProducts = await withRetry(() => adapter.getProductsFromWb(), 'getProductsFromWb');
+    const userIds = await this.getEffectiveUserIds(userId);
     let imported = 0;
     let skipped = 0;
     let articlesUpdated = 0;
     const errors: string[] = [];
 
     for (const p of wbProducts) {
+      const wbExternalId = String(p.nmId);
+      const vendorCode = (p.vendorCode ?? '').toString().trim();
       const sku = `WB-${userId.slice(0, 8)}-${p.nmId}`;
-      const existing = await this.productsService.findBySku(userId, sku);
+      // WB delta import (no duplicates):
+      // 1) exact mapping by nmId, 2) mapping by externalArticle/vendorCode,
+      // 3) local product by article, 4) legacy sku fallback.
+      const existing =
+        (await this.productMappingService.findProductByExternalIdForUserIds(userIds, 'WILDBERRIES', wbExternalId)) ??
+        (vendorCode
+          ? await this.productMappingService.findProductByExternalArticle(userIds, 'WILDBERRIES', vendorCode)
+          : null) ??
+        (vendorCode ? await this.productsService.findByArticleForUserIds(userIds, vendorCode) : null) ??
+        (await this.productsService.findBySku(userId, sku));
       if (existing) {
         // Обновить артикул, наименование и остальные поля для уже импортированных товаров
         const newTitle = (p.name || `Товар ${p.nmId}`).trim().slice(0, 500);
@@ -2912,8 +3464,8 @@ export class MarketplacesService {
           });
           articlesUpdated++;
         }
-        await this.productMappingService.upsertMapping(existing.id, userId, 'WILDBERRIES', String(p.nmId), {
-          externalArticle: p.vendorCode || undefined,
+        await this.productMappingService.upsertMapping(existing.id, userId, 'WILDBERRIES', wbExternalId, {
+          externalArticle: vendorCode || undefined,
         });
         skipped++;
         continue;
@@ -2946,7 +3498,7 @@ export class MarketplacesService {
           barcodeWb: p.barcode,
         });
         await this.productMappingService.upsertMapping(created.id, userId, 'WILDBERRIES', String(p.nmId), {
-          externalArticle: p.vendorCode || undefined,
+          externalArticle: vendorCode || undefined,
         });
         imported++;
       } catch (err) {

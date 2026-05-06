@@ -21,6 +21,11 @@ const LINKS: { href: string; label: string; match: (p: string) => boolean }[] = 
     match: (p) => p === "/dashboard/wms/operations" || p.startsWith("/dashboard/wms/operations/"),
   },
   {
+    href: "/dashboard/wms/analytics/transfers",
+    label: "Аналитика",
+    match: (p) => p === "/dashboard/wms/analytics" || p.startsWith("/dashboard/wms/analytics/"),
+  },
+  {
     href: "/dashboard/wms/settings",
     label: "Настройки",
     match: (p) => p === "/dashboard/wms/settings" || p.startsWith("/dashboard/wms/settings/"),

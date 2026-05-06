@@ -152,6 +152,25 @@ export class ProductMappingService {
     return true;
   }
 
+  /**
+   * Обновить маппинг по productId и userId in userIds для любого маркетплейса.
+   * Используется для восстановления связки (например, WB nmId по артикулу).
+   */
+  async updateMappingForUserIds(
+    productId: string,
+    userIds: string[],
+    marketplace: MarketplaceType,
+    newExternalSystemId: string,
+    options?: { externalArticle?: string },
+  ): Promise<boolean> {
+    const existing = await this.prisma.productMarketplaceMapping.findFirst({
+      where: { productId, userId: { in: userIds }, marketplace, isActive: true },
+    });
+    if (!existing) return false;
+    await this.doUpdateExternalId(existing, newExternalSystemId, options);
+    return true;
+  }
+
   private async doUpdateExternalId(
     existing: { id: string; productId: string; userId: string; marketplace: string; externalSystemId: string; externalArticle?: string | null; externalGroupId?: string | null; syncStock: boolean; isActive: boolean },
     newExternalSystemId: string,

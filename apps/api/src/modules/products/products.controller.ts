@@ -25,6 +25,7 @@ export class ProductsController {
     @Query('search') search?: string,
     @Query('sortBy') sortBy?: 'stockFbs' | 'reservedFbs' | 'reservedFbo' | 'cost' | 'createdAt',
     @Query('sortDirection') sortDirection?: 'asc' | 'desc',
+    @Query('marketplaceFilter') marketplaceFilter?: 'WILDBERRIES' | 'OZON' | 'YANDEX' | 'AVITO' | 'WB_OZON_BOTH',
   ) {
     return this.productsService.findPaged(userId, {
       limit: limit ? parseInt(limit, 10) : undefined,
@@ -32,6 +33,7 @@ export class ProductsController {
       search,
       sortBy,
       sortDirection,
+      marketplaceFilter,
     });
   }
 

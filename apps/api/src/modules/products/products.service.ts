@@ -55,6 +55,7 @@ export class ProductsService {
       sortBy?: 'stockFbs' | 'reservedFbs' | 'reservedFbo' | 'cost' | 'createdAt';
       sortDirection?: 'asc' | 'desc';
       archived?: boolean;
+      marketplaceFilter?: 'WILDBERRIES' | 'OZON' | 'YANDEX' | 'AVITO' | 'WB_OZON_BOTH';
     },
   ) {
     const limit = Math.min(Math.max(params.limit ?? 20, 1), 100);
@@ -63,10 +64,25 @@ export class ProductsService {
     const sortBy = params.sortBy ?? 'stockFbs';
     const sortDirection = params.sortDirection ?? 'desc';
     const archived = params.archived ?? false;
+    const marketplaceFilter = params.marketplaceFilter;
 
     const where = {
       userId,
       ...(archived ? { archivedAt: { not: null } } : { archivedAt: null }),
+      ...(marketplaceFilter === 'WB_OZON_BOTH'
+        ? {
+            AND: [
+              { marketplaceMappings: { some: { isActive: true, marketplace: 'WILDBERRIES' } } },
+              { marketplaceMappings: { some: { isActive: true, marketplace: 'OZON' } } },
+            ],
+          }
+        : marketplaceFilter
+          ? {
+              marketplaceMappings: {
+                some: { isActive: true, marketplace: marketplaceFilter },
+              },
+            }
+          : {}),
       ...(search
         ? {
             OR: [

@@ -1,4 +1,4 @@
-import type { WmsLocationRecord } from '@handyseller/wms-sdk';
+import type { WmsBiTransferOrderKind, WmsLocationRecord } from '@handyseller/wms-sdk';
 
 /** 11 цифр счётчика (0 … 99_999_999_999). */
 const MOD_11 = 100_000_000_000;
@@ -47,4 +47,115 @@ export function rankPutawayLocations(locations: WmsLocationRecord[]): WmsLocatio
   return [...locations]
     .filter((location) => location.status === 'ACTIVE')
     .sort((a, b) => a.path.localeCompare(b.path));
+}
+
+/**
+ * Ключ заказа в смысле исходного Excel: один **Номер** и одна **календарная дата** (дата без времени).
+ * Строки с одним номером и одной датой схлопываются в одну сущность «заказ» для классификации.
+ */
+export function transferOrderGroupKey(orderNumber: string, orderDateIso: string): string {
+  const num = orderNumber.trim();
+  const day = orderDateIso.trim().slice(0, 10);
+  return `${num}\t${day}`;
+}
+
+/**
+ * Число строк в группе (Номер + календарная дата), начиная с которого можно применять эвристику
+ * «массовое пополнение» для пустых Назначение/ДокументОснование (по умолчанию **строго больше трёх**).
+ */
+export const WMS_BI_BULK_TRANSFER_MIN_LINES = 4;
+
+function normalizeWarehouseName(s: string): string {
+  return s.toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Разрешённые **склады-отправители** для типа «Пополнение»: только хабы **Елино** и **Балашиха**
+ * (по подстроке в наименовании из 1С, без жёсткого полного совпадения).
+ */
+export function isAllowedReplenishmentOriginSender(senderWarehouse: string): boolean {
+  const s = normalizeWarehouseName(senderWarehouse);
+  return s.includes('елино') || s.includes('балаших');
+}
+
+/**
+ * Для эвристики «многострочное пополнение»: отправитель уже в Елино/Балашиха и это склад **запчастей**
+ * (длинные перемещения с пустыми Назначение/ДокументОснование).
+ */
+export function isBulkSparePartsRouteSender(senderWarehouse: string): boolean {
+  const s = normalizeWarehouseName(senderWarehouse);
+  if (!isAllowedReplenishmentOriginSender(senderWarehouse)) return false;
+  return s.includes('запчаст');
+}
+
+export type TransferOrderLineKindInput = {
+  orderNumber: string;
+  orderDate: string;
+  purpose: string | null;
+  baseDocument: string | null;
+};
+
+/**
+ * Из полного текста колонки «ДокументОснование» / «Назначение» выделяет номер пополнения вида **`LM`** + блоки через дефис
+ * (пример из выгрузки: `LM00-022106`). Возвращает **первое** совпадение или `null`.
+ */
+export function extractLmReplenishmentOrderRef(text: string | null | undefined): string | null {
+  const s = typeof text === 'string' ? text.trim() : '';
+  if (!s) return null;
+  const re = /\bLM[0-9A-Za-z]{2}-[0-9A-Za-z]+\b/;
+  const m = s.match(re);
+  return m ? m[0].toUpperCase() : null;
+}
+
+export type TransferOrderLineKindClassifyInput = {
+  /** Полный текст «Назначение» из файла (как в Excel). */
+  purpose: string | null;
+  /** Полный текст «ДокументОснование» из файла до нормализации. */
+  baseDocumentRaw: string | null;
+  senderWarehouse: string;
+};
+
+/**
+ * Классификация **одной строки** Excel «Заказы на перемещение».
+ * Пополнение возможно только при отправке **с Елино или Балашиха** ({@link isAllowedReplenishmentOriginSender}):
+ * - если **хотя бы одно** из «Назначение» / «ДокументОснование» непусто: Пополнение только при наличии в тексте номера вида {@link extractLmReplenishmentOrderRef}
+ *   и разрешённом отправителе; иначе Турист;
+ * - если **оба** пусты → Турист, кроме: в группе (Номер + дата) ≥ `bulkMinLines` строк и отправитель под
+ *   {@link isBulkSparePartsRouteSender} (Елино/Балашиха + склад запчастей) → Пополнение.
+ */
+export function classifyTransferOrderLineKind(
+  line: TransferOrderLineKindClassifyInput,
+  groupLineCount: number,
+  opts?: { bulkMinLines?: number },
+): WmsBiTransferOrderKind {
+  const purpose = line.purpose?.trim() ?? '';
+  const baseDocumentRaw = line.baseDocumentRaw?.trim() ?? '';
+  if (purpose || baseDocumentRaw) {
+    const hasLm =
+      extractLmReplenishmentOrderRef(purpose) !== null || extractLmReplenishmentOrderRef(baseDocumentRaw) !== null;
+    if (!hasLm) return 'TOURIST';
+    return isAllowedReplenishmentOriginSender(line.senderWarehouse) ? 'REPLENISHMENT' : 'TOURIST';
+  }
+
+  const minLines = opts?.bulkMinLines ?? WMS_BI_BULK_TRANSFER_MIN_LINES;
+  if (groupLineCount >= minLines && isBulkSparePartsRouteSender(line.senderWarehouse)) {
+    return 'REPLENISHMENT';
+  }
+  return 'TOURIST';
+}
+
+/**
+ * Упрощённая классификация только по полям строки (без учёта группы и склада).
+ * @deprecated Для импорта BI используйте {@link classifyTransferOrderLineKind} с размером группы и отправителем.
+ */
+export function classifyTransferOrderLine(input: {
+  purpose?: string | null;
+  baseDocument?: string | null;
+}): WmsBiTransferOrderKind {
+  const purpose = input.purpose?.trim() ?? '';
+  const baseDocument = input.baseDocument?.trim() ?? '';
+  if (!purpose && !baseDocument) return 'TOURIST';
+  const hasLm =
+    extractLmReplenishmentOrderRef(purpose) !== null || extractLmReplenishmentOrderRef(baseDocument) !== null;
+  return hasLm ? 'REPLENISHMENT' : 'TOURIST';
 }

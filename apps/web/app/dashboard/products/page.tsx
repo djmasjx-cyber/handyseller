@@ -136,8 +136,10 @@ export default function ProductsPage() {
   const [searchQuery, setSearchQuery] = useState("") // Поиск по артикулу или наименованию
   type ProductsSortKey = "stockFbs" | "stockFbo" | "reservedFbs" | "reservedFbo" | "cost"
   type SortDirection = "asc" | "desc"
+  type WarehouseFilter = "local" | "WILDBERRIES" | "OZON" | "YANDEX" | "AVITO"
   const [sortKey, setSortKey] = useState<ProductsSortKey>("stockFbs")
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc")
+  const [warehouseFilter, setWarehouseFilter] = useState<WarehouseFilter>("local")
 
   const token = typeof window !== "undefined" ? localStorage.getItem("accessToken") : null
 
@@ -162,6 +164,8 @@ export default function ProductsPage() {
       sortBy: sortKey === "stockFbo" ? "createdAt" : sortKey,
       sortDirection,
     })
+    if (warehouseFilter === "local") params.set("marketplaceFilter", "WB_OZON_BOTH")
+    else params.set("marketplaceFilter", warehouseFilter)
     if (searchQuery.trim()) params.set("search", searchQuery.trim())
     const res = await fetch(`/api/products/paged?${params.toString()}`, { headers: { Authorization: `Bearer ${token}` } })
     const data = await res.json().catch(() => ({}))
@@ -172,7 +176,7 @@ export default function ProductsPage() {
     setOffset(newOffset)
     offsetRef.current = newOffset
     setProductsTotal(typeof data?.total === "number" ? data.total : 0)
-  }, [token, sortKey, sortDirection, searchQuery])
+  }, [token, sortKey, sortDirection, searchQuery, warehouseFilter])
 
   const fetchWbStockFbo = () => {
     if (!token || !isWbConnected) return
@@ -263,8 +267,6 @@ export default function ProductsPage() {
   const atProductLimit = limits ? productsTotal >= limits.maxProducts : false
 
   // Селектор склада: local | WILDBERRIES | OZON | YANDEX | AVITO — горизонтальные вкладки
-  type WarehouseFilter = "local" | "WILDBERRIES" | "OZON" | "YANDEX" | "AVITO"
-  const [warehouseFilter, setWarehouseFilter] = useState<WarehouseFilter>("local")
 
   // Отмена редактирования при переключении с Мой склад + загрузка остатков FBO
   useEffect(() => {
@@ -308,12 +310,7 @@ export default function ProductsPage() {
 
   const filteredProducts = (() => {
     let list = products
-    if (warehouseFilter !== "local") {
-      // Фильтр по связкам: показываем товары с маппингом на выбранный маркетплейс
-      list = list.filter((p) =>
-        (p.marketplaceMappings ?? []).some((m) => m.marketplace === warehouseFilter)
-      )
-    }
+    // Фильтрация по маркетплейс-связкам уже применяется на сервере через marketplaceFilter.
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase()
       list = list.filter(
@@ -1325,7 +1322,7 @@ export default function ProductsPage() {
               {products.length === 0
                 ? "Подключите Wildberries и нажмите «Импорт с Wildberries», чтобы загрузить товары в каталог."
                 : warehouseFilter === "local"
-                  ? "Добавьте товары в каталог."
+                  ? "Нет товаров с одновременными связками WB и Ozon."
                   : `Нет товаров со связкой на ${warehouseTabs.find((o) => o.value === warehouseFilter)?.label ?? ""}. Выгрузите товары на маркетплейс из карточки.`}
             </p>
             {products.length === 0 && !isWbConnected && (

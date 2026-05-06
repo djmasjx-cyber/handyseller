@@ -14,6 +14,11 @@ export interface ImportJobResult {
   message: string;
 }
 
+export interface WbRepairJobResult {
+  jobId: string;
+  message: string;
+}
+
 @Injectable()
 export class SyncQueueService {
   constructor(
@@ -41,6 +46,33 @@ export class SyncQueueService {
     return {
       jobId: job.id ?? String(job),
       message: `Импорт запущен в фоне. jobId=${job.id}`,
+    };
+  }
+
+  async addWbRepairJob(
+    userId: string,
+    options?: { limit?: number; dryRun?: boolean },
+  ): Promise<WbRepairJobResult> {
+    const lockJobId = `wb-repair:${userId}`;
+    const existing = await this.syncQueue.getJob(lockJobId);
+    if (existing) {
+      const state = await existing.getState();
+      if (state === 'active' || state === 'waiting' || state === 'delayed' || state === 'prioritized') {
+        return {
+          jobId: String(existing.id ?? lockJobId),
+          message: `Восстановление WB-связок уже выполняется. jobId=${existing.id ?? lockJobId}`,
+        };
+      }
+    }
+
+    const job = await this.syncQueue.add(
+      'wb-repair',
+      { userId, options: { limit: options?.limit, dryRun: !!options?.dryRun } },
+      { removeOnComplete: 100, jobId: lockJobId },
+    );
+    return {
+      jobId: job.id ?? String(job),
+      message: `Восстановление WB-связок запущено в фоне. jobId=${job.id}`,
     };
   }
 

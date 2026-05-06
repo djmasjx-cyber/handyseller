@@ -258,3 +258,13 @@ export class MoveInventoryDto {
   @IsBoolean()
   archiveTemporaryContainer?: boolean;
 }
+
+export class ImportTransferOrdersDto {
+  @IsString()
+  @IsNotEmpty()
+  fileName!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  contentBase64!: string;
+}

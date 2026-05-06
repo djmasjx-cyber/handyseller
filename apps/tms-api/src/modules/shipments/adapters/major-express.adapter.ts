@@ -41,11 +41,11 @@ function majorSoapEndpoint(serviceType: MajorServiceType): string {
 
 function escapeXml(value: string): string {
   return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&apos;');
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
 }
 
 function extractTag(xml: string, tag: string): string | null {
@@ -396,8 +396,8 @@ export class MajorExpressAdapter implements CarrierAdapter {
       return done([], 'city_resolve_failed');
     }
 
-    const quotes: CarrierQuote[] = [];
-    for (const { serviceType, credentials } of credentialsByType) {
+    const quoteResults = await Promise.all(
+      credentialsByType.map(async ({ serviceType, credentials }): Promise<CarrierQuote | null> => {
       const calculatorStartedAt = Date.now();
       const result = await this.callCalculator(
         input,
@@ -411,13 +411,13 @@ export class MajorExpressAdapter implements CarrierAdapter {
         this.logger.warn(
           `Major quote skipped: calculator returned empty; requestId=${requestId}; serviceType=${serviceType}; shipperCity=${shipperCity.code}; consigneeCity=${consigneeCity.code}`,
         );
-        continue;
+        return null;
       }
       const serviceFlags = serviceType === 'LTL' ? (['CONSOLIDATED'] as const) : (['EXPRESS'] as const);
       const computedPrice = result.total > 0 ? result.total : result.tariff + result.insurance;
       const totalSource = result.total > 0 ? 'итог из ответа Major' : 'tariff + insurance';
       const serviceLabel = serviceType === 'LTL' ? 'сборный груз' : 'экспресс';
-      quotes.push({
+      return {
         id: `${requestId}:${this.descriptor.id}:${serviceType.toLowerCase()}`,
         requestId,
         carrierId: this.descriptor.id,
@@ -437,8 +437,10 @@ export class MajorExpressAdapter implements CarrierAdapter {
           comment: `Major SOAP Calculator/Calculator1 (${serviceType})`,
         },
         score: Math.round((100000 / Math.max(computedPrice, 1)) * 100) / 100,
-      });
-    }
+      };
+      }),
+    );
+    const quotes = quoteResults.filter((quote): quote is CarrierQuote => Boolean(quote));
     if (!quotes.length) return done([], 'calculator_empty');
     return done(quotes);
   }

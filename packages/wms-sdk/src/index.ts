@@ -34,6 +34,9 @@ export type WmsInventoryUnitStatus =
 export type WmsReceiptStatus = 'DRAFT' | 'EXPECTED' | 'RECEIVING' | 'RECEIVED' | 'CLOSED' | 'CANCELLED';
 export type WmsTaskType = 'RECEIVE' | 'PUTAWAY' | 'MOVE' | 'PICK' | 'PACK' | 'COUNT' | 'SHIP';
 export type WmsTaskStatus = 'OPEN' | 'ASSIGNED' | 'IN_PROGRESS' | 'DONE' | 'CANCELLED';
+export type WmsBiImportSourceType = 'FILE' | 'INTEGRATION';
+export type WmsBiImportBatchStatus = 'IMPORTED' | 'FAILED';
+export type WmsBiTransferOrderKind = 'REPLENISHMENT' | 'TOURIST';
 export type WmsInventoryEventType =
   | 'WAREHOUSE_CREATED'
   | 'LOCATION_CREATED'
@@ -164,6 +167,237 @@ export interface WmsInventoryEventRecord {
   referenceType: string | null;
   referenceId: string | null;
   payload: Record<string, unknown>;
+}
+
+export interface WmsBiImportBatchRecord {
+  id: string;
+  userId: string;
+  sourceType: WmsBiImportSourceType;
+  sourceName: string;
+  fileName: string | null;
+  checksum: string | null;
+  status: WmsBiImportBatchStatus;
+  rawRowCount: number;
+  importedRowCount: number;
+  errorCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WmsBiRawRowRecord {
+  id: string;
+  userId: string;
+  batchId: string;
+  rowNumber: number;
+  payload: Record<string, unknown>;
+  errors: string[];
+  createdAt: string;
+}
+
+export interface WmsBiTransferOrderLineRecord {
+  id: string;
+  userId: string;
+  batchId: string;
+  rowNumber: number;
+  orderRef: string | null;
+  orderNumber: string;
+  orderDate: string;
+  senderWarehouse: string;
+  senderWarehouseType: string;
+  senderOp: string;
+  receiverWarehouse: string;
+  receiverWarehouseType: string;
+  receiverOp: string;
+  itemName: string;
+  itemArticle: string | null;
+  itemCode: string;
+  purpose: string | null;
+  baseDocument: string | null;
+  isRetailPrice: boolean | null;
+  /** Количество (шт.) */
+  quantity: number;
+  /** Розничная цена за единицу, ₽ (целые рубли, округление вверх при импорте). */
+  retailPrice: number | null;
+  /** Себестоимость за единицу, ₽ (целые рубли, округление вверх при импорте). */
+  costPrice: number | null;
+  /** Маржа за строку (розничная цена - себестоимость), ₽. */
+  margin: number | null;
+  /** Стоимость доставки по строке/заказу, ₽ (может быть заполнена позже). */
+  delivery: number | null;
+  /** Разница = Маржа - Доставка, если доставка задана; иначе null. */
+  difference: number | null;
+  /** Контрагент (из файла). */
+  counterparty: string | null;
+  price: number;
+  kind: WmsBiTransferOrderKind;
+  createdAt: string;
+}
+
+export interface WmsBiTransferOrderLineInput {
+  rowNumber: number;
+  orderRef?: string | null;
+  orderNumber: string;
+  orderDate: string;
+  senderWarehouse: string;
+  receiverWarehouse: string;
+  itemName: string;
+  itemArticle?: string | null;
+  itemCode: string;
+  purpose?: string | null;
+  baseDocument?: string | null;
+  isRetailPrice?: boolean | null;
+  quantity?: number | null;
+  retailPrice?: number | null;
+  costPrice?: number | null;
+  margin?: number | null;
+  delivery?: number | null;
+  difference?: number | null;
+  counterparty?: string | null;
+  price?: number | null;
+}
+
+export interface WmsBiTransferFilters {
+  from?: string;
+  to?: string;
+  receiverWarehouse?: string;
+  senderWarehouse?: string;
+  receiverOps?: string[];
+  senderOps?: string[];
+  /** Тип склада **получателя** (`receiver_warehouse_type`). Отбор по отправителю — через «Отправитель». */
+  warehouseTypes?: string[];
+  /** Подстрочный поиск по названию / коду / артикулу (если не задан itemCodes). */
+  item?: string;
+  /** Фильтр по точным кодам номенклатуры (мультивыбор из каталога). */
+  itemCodes?: string[];
+  kind?: WmsBiTransferOrderKind;
+  batchId?: string;
+  /** Мультивыбор контрагентов (точное совпадение строки из файла). */
+  counterparties?: string[];
+  qtyMin?: number;
+  qtyMax?: number;
+  retailMin?: number;
+  retailMax?: number;
+  costMin?: number;
+  costMax?: number;
+  /** Пагинация таблицы «по ОП» (сервер обрезает после сортировки). */
+  byOpLimit?: number;
+  byOpOffset?: number;
+  /** Пагинация «туристы по маршрутам». */
+  touristsLimit?: number;
+  touristsOffset?: number;
+  /** Пагинация «риск пополнения». */
+  risksLimit?: number;
+  risksOffset?: number;
+}
+
+export interface WmsBiTransferFilterOptions {
+  warehouseTypes: string[];
+  receiverOps: string[];
+  senderOps: string[];
+  counterparties: string[];
+}
+
+/** Агрегация строк по полю НоменклатураКод (частота перемещений). */
+export interface WmsBiItemFrequencyRow {
+  itemCode: string;
+  itemArticle: string | null;
+  itemName: string;
+  rowCount: number;
+}
+
+export interface WmsBiTransferSummary {
+  rowsTotal: number;
+  ordersTotal: number;
+  replenishmentRows: number;
+  replenishmentOrders: number;
+  replenishmentValue: number;
+  touristRows: number;
+  touristOrders: number;
+  touristValue: number;
+  valueTotal: number;
+  minDate: string | null;
+  maxDate: string | null;
+}
+
+export interface WmsBiTransferByOpRow {
+  receiverWarehouse: string;
+  receiverWarehouseType: string;
+  receiverOp: string;
+  rows: number;
+  orders: number;
+  replenishmentRows: number;
+  touristRows: number;
+  valueTotal: number;
+  touristValue: number;
+  firstDate: string | null;
+  lastDate: string | null;
+}
+
+/** Строка сводки: один заказ (туристы), для таблицы на уровне заказа. */
+export interface WmsBiTouristOrderSummary {
+  /** Туристы: группировка по полю «Номер» перемещения. Пополнение по LM: группировка по `base_document` (номер из «ДокументОснование»). */
+  orderGroupKind: 'TOURIST' | 'REPLENISHMENT';
+  orderNumber: string;
+  senderOp: string;
+  receiverOp: string;
+  /** Тип/представление склада у получателя. */
+  receiverWarehouseType: string;
+  /** Число наименований (уникальных НоменклатураКод) в заказе. */
+  productCount: number;
+  /** Стоимость заказа: сумма РозничнойЦена (fallback: Цена) по туристским строкам. */
+  orderTotal: number;
+  /** Суммарная себестоимость по заказу. */
+  costTotal: number;
+  /** Суммарная маржа по заказу. */
+  marginTotal: number;
+  /** Суммарная доставка по заказу (может быть null/0 для незаполненных заказов). */
+  deliveryTotal: number;
+  /** Суммарная разница (маржа - доставка) по строкам с заполненной доставкой. */
+  differenceTotal: number | null;
+  orderDate: string;
+}
+
+/** Позиция в детализации заказа (по коду объединены строки Excel). */
+export interface WmsBiTouristOrderDetailLine {
+  itemCode: string;
+  itemName: string;
+  quantity: number;
+  /** Стоимость единицы, ₽. */
+  unitPrice: number;
+  /** Сумма = кол-во × стоимость единицы. */
+  sum: number;
+}
+
+export interface WmsBiTouristOrderDetail {
+  orderNumber: string;
+  senderOp: string;
+  receiverOp: string;
+  orderDate: string;
+  lines: WmsBiTouristOrderDetailLine[];
+}
+
+export interface WmsBiReplenishmentRiskRow {
+  receiverWarehouse: string;
+  receiverWarehouseType: string;
+  receiverOp: string;
+  itemCode: string;
+  itemArticle: string | null;
+  itemName: string;
+  replenishmentDate: string;
+  nextReplenishmentDate: string | null;
+  touristRowsUntilNextReplenishment: number;
+  touristOrdersUntilNextReplenishment: number;
+  touristValueUntilNextReplenishment: number;
+}
+
+export interface WmsBiTransferImportInput {
+  fileName: string;
+  contentBase64: string;
+}
+
+export interface WmsBiTransferImportResult {
+  batch: WmsBiImportBatchRecord;
+  summary: WmsBiTransferSummary;
 }
 
 export interface CreateWarehouseInput {

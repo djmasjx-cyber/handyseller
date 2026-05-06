@@ -26,7 +26,7 @@
     "quality:tms": "npm run lint --workspace=tms-api --if-present && npm run build --workspace=tms-api",
     "quality:web": "npm run lint --workspace=web && npm run build --workspace=web",
     "quality:contracts": "npm run build --workspace=@handyseller/tms-sdk && npm run build --workspace=@handyseller/tms-domain && npm run build --workspace=@handyseller/wms-sdk && npm run build --workspace=@handyseller/wms-domain",
-    "quality:wms": "npm run build --workspace=@handyseller/wms-sdk && npm run build --workspace=@handyseller/wms-domain && npm run build --workspace=wms-api",
+    "quality:wms": "npm run build --workspace=@handyseller/wms-sdk && npm run build --workspace=@handyseller/wms-domain && npm run test:analytics --workspace=wms-api && npm run build --workspace=wms-api",
     "quality:gate": "npm run quality:core && npm run quality:tms && npm run quality:web && npm run quality:contracts",
     "build:static": "node scripts/build-static.js",
     "deploy:storage": "yc storage s3 cp ./apps/web/out s3://handyseller-frontend-prod/static/ --recursive",
@@ -41,6 +41,7 @@
     "smoke:tms:nightly": "bash scripts/tms-nightly-smoke.sh",
     "smoke:tms:demo": "bash scripts/tms-demo-checkout-smoke.sh",
     "smoke:tms:registry": "bash scripts/tms-registry-smoke.sh",
+    "smoke:wb:mapping": "bash scripts/wb-mapping-smoke.sh",
     "slo:tms:check": "bash scripts/tms-slo-alert-check.sh"
   },
   "engines": {

@@ -12,16 +12,10 @@ function getToken(req: NextRequest): string | null {
 export async function GET(req: NextRequest) {
   const token = getToken(req)
   if (!token) return NextResponse.json({ error: "Не авторизован" }, { status: 401 })
-
-  const qs = new URLSearchParams()
-  for (const key of ["limit", "offset", "search", "sortBy", "sortDirection", "marketplaceFilter"]) {
-    const value = req.nextUrl.searchParams.get(key)
-    if (value) qs.set(key, value)
-  }
-
-  const url = `${API_BASE}/products/paged${qs.toString() ? `?${qs.toString()}` : ""}`
   try {
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+    const res = await fetch(`${API_BASE}/marketplaces/wb-mapping-audit`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
     const data = await res.json().catch(() => ({}))
     if (!res.ok) return NextResponse.json(data, { status: res.status })
     return NextResponse.json(data)

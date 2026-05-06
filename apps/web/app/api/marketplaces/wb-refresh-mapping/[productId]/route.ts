@@ -9,19 +9,23 @@ function getToken(req: NextRequest): string | null {
   return null
 }
 
-export async function GET(req: NextRequest) {
+export async function POST(
+  req: NextRequest,
+  { params }: { params: Promise<{ productId: string }> },
+) {
   const token = getToken(req)
   if (!token) return NextResponse.json({ error: "Не авторизован" }, { status: 401 })
-
-  const qs = new URLSearchParams()
-  for (const key of ["limit", "offset", "search", "sortBy", "sortDirection", "marketplaceFilter"]) {
-    const value = req.nextUrl.searchParams.get(key)
-    if (value) qs.set(key, value)
-  }
-
-  const url = `${API_BASE}/products/paged${qs.toString() ? `?${qs.toString()}` : ""}`
   try {
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+    const { productId } = await params
+    if (!productId?.trim()) {
+      return NextResponse.json({ error: "Не указан productId" }, { status: 400 })
+    }
+    const res = await fetch(`${API_BASE}/marketplaces/wb-refresh-mapping/${encodeURIComponent(productId)}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    })
     const data = await res.json().catch(() => ({}))
     if (!res.ok) return NextResponse.json(data, { status: res.status })
     return NextResponse.json(data)

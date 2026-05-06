@@ -38,11 +38,18 @@ const MAJOR_RULES: Array<{ id: string; match: RegExp; status: ShipmentStatus }> 
   { id: 'major_removed', match: /(NOT\s+FOUND|CANCELLED|CANCELED)/i, status: 'DELETED_EXTERNAL' },
 ];
 
+const DALLI_RULES: Array<{ id: string; match: RegExp; status: ShipmentStatus }> = [
+  { id: 'dalli_delivered', match: /(^|\b)COMPLETE(\b|$)/i, status: 'DELIVERED' },
+  { id: 'dalli_out_for_delivery', match: /(^|\b)DELIVERY(\b|$)|COURIERDELIVERED/i, status: 'OUT_FOR_DELIVERY' },
+  { id: 'dalli_confirmed', match: /(^|\b)(NEW|ACCEPTED|CONFIRM)(\b|$)/i, status: 'CONFIRMED' },
+  { id: 'dalli_canceled', match: /(^|\b)(CANCELED|RETURNED|LOST)(\b|$)/i, status: 'DELETED_EXTERNAL' },
+];
 function rulesForCarrier(carrier: string | undefined): Array<{ id: string; match: RegExp; status: ShipmentStatus }> {
   const id = (carrier ?? '').trim().toLowerCase();
   if (id === 'cdek') return CDEK_RULES;
   if (id === 'dellin') return DELLIN_RULES;
   if (id === 'major-express') return MAJOR_RULES;
+  if (id === 'dalli-service') return DALLI_RULES;
   return [];
 }
 

@@ -22,6 +22,7 @@ import { buildMockCarrierAdapters } from './adapters/mock-carrier.adapters';
 import { MajorExpressAdapter } from './adapters/major-express.adapter';
 import { DellinAdapter } from './adapters/dellin.adapter';
 import { CdekAdapter } from './adapters/cdek.adapter';
+import { DalliAdapter } from './adapters/dalli.adapter';
 import type { CarrierAdapter } from './adapters/base-carrier.adapter';
 import { TmsStoreService } from './storage/tms-store.service';
 import { ObjectStorageService } from './storage/object-storage.service';
@@ -276,7 +277,7 @@ export class ShipmentsService implements OnModuleInit {
   }
 
   private static buildCarrierAdapters(): CarrierAdapter[] {
-    const real: CarrierAdapter[] = [new MajorExpressAdapter(), new DellinAdapter(), new CdekAdapter()];
+    const real: CarrierAdapter[] = [new MajorExpressAdapter(), new DellinAdapter(), new CdekAdapter(), new DalliAdapter()];
     const includeMocks =
       process.env.TMS_INCLUDE_MOCK_CARRIERS === '1' ||
       process.env.TMS_INCLUDE_MOCK_CARRIERS === 'true' ||
@@ -287,7 +288,17 @@ export class ShipmentsService implements OnModuleInit {
 
   listRequests(userId: string): ShipmentRequestRecord[] {
     return [...this.requests.values()]
-      .filter((request) => request.userId === userId)
+      .filter(
+        (request): request is ShipmentRequestRecord =>
+          Boolean(
+            request &&
+              request.userId === userId &&
+              request.snapshot &&
+              typeof request.snapshot === 'object' &&
+              typeof request.snapshot.marketplace === 'string' &&
+              typeof request.snapshot.coreOrderId === 'string',
+          ),
+      )
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
@@ -312,8 +323,7 @@ export class ShipmentsService implements OnModuleInit {
   ): Promise<{ items: OrderRegistryItem[]; nextCursor: string | null }> {
     const safeLimit = Math.max(1, Math.min(100, filter?.limit ?? 25));
     const cursor = filter?.cursor?.trim();
-    const requestItems = [...this.requests.values()]
-      .filter((request) => request.userId === userId)
+    const requestItems = this.listRequests(userId)
       .filter((request) => !this.isMarketplaceOrder(request.snapshot.marketplace))
       .filter((request) => {
         if (request.integration?.fulfillmentMode === 'PARTNER_SELF_SERVE') {
@@ -838,6 +848,11 @@ export class ShipmentsService implements OnModuleInit {
     return (Number.isFinite(raw) ? Math.max(10, raw) : 120) * 1000;
   }
 
+  private adapterQuoteTimeoutMs(): number {
+    const raw = Number.parseInt(process.env.TMS_ADAPTER_QUOTE_TIMEOUT_MS ?? '900', 10);
+    return Number.isFinite(raw) ? Math.max(300, raw) : 900;
+  }
+
   private breakerFailureThreshold(): number {
     const raw = Number.parseInt(process.env.TMS_CARRIER_BREAKER_FAILURES ?? '3', 10);
     return Number.isFinite(raw) ? Math.max(1, raw) : 3;
@@ -1204,13 +1219,18 @@ export class ShipmentsService implements OnModuleInit {
     const adapterStartedAt = enabledAdapters.map(() => Date.now());
     const quoteResults = await Promise.allSettled(
       enabledAdapters.map((adapter) =>
-        adapter.quote(
-          {
-            snapshot: request.snapshot,
-            draft: request.draft,
-          },
-          requestId,
-          { userId, authToken, requestId: requestTraceId ?? requestId },
+        this.withQuoteSoftTimeout(
+          adapter.descriptor.id,
+          adapter.quote(
+            {
+              snapshot: request.snapshot,
+              draft: request.draft,
+            },
+            requestId,
+            { userId, authToken, requestId: requestTraceId ?? requestId },
+          ),
+          (lateQuotes) =>
+            this.mergeLateQuotes(userId, requestId, adapter.descriptor.id, lateQuotes, cacheKey),
         ),
       ),
     );
@@ -1264,6 +1284,71 @@ export class ShipmentsService implements OnModuleInit {
     void this.store.saveRequest(request);
     this.quotes.set(requestId, quotes);
     return quotes;
+  }
+
+  private withQuoteSoftTimeout(
+    carrierId: string,
+    promise: Promise<CarrierQuote[]>,
+    onLate: (quotes: CarrierQuote[]) => Promise<void>,
+  ): Promise<CarrierQuote[]> {
+    const timeoutMs = this.adapterQuoteTimeoutMs();
+    let timedOut = false;
+    let timer: NodeJS.Timeout | null = null;
+    const timeout = new Promise<CarrierQuote[]>((_, reject) => {
+      timer = setTimeout(() => {
+        timedOut = true;
+        reject(new Error(`quote timeout after ${timeoutMs}ms carrier=${carrierId}`));
+      }, timeoutMs);
+      timer.unref?.();
+    });
+    promise
+      .then((quotes) => {
+        if (!timedOut || quotes.length === 0) return;
+        return onLate(quotes).catch((error) => {
+          this.logger.warn(
+            `[quote-late] carrier=${carrierId} status=merge_failed reason=${error instanceof Error ? error.message : String(error)}`,
+          );
+        });
+      })
+      .catch((error) => {
+        if (!timedOut) return;
+        this.logger.warn(
+          `[quote-late] carrier=${carrierId} status=failed reason=${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
+    return Promise.race([promise, timeout]).finally(() => {
+      if (timer) clearTimeout(timer);
+    });
+  }
+
+  private async mergeLateQuotes(
+    userId: string,
+    requestId: string,
+    carrierId: string,
+    lateQuotes: CarrierQuote[],
+    cacheKey?: string,
+  ): Promise<void> {
+    const request = this.requests.get(requestId);
+    if (!request || request.userId !== userId || lateQuotes.length === 0) return;
+    const current = this.quotes.get(requestId) ?? [];
+    const merged = rankQuotes([
+      ...current.filter((quote) => quote.carrierId !== carrierId),
+      ...lateQuotes,
+    ]);
+    request.status = merged.length > 0 ? 'QUOTED' : request.status;
+    request.updatedAt = new Date().toISOString();
+    this.requests.set(requestId, request);
+    this.quotes.set(requestId, merged);
+    void this.store.saveRequest(request);
+    if (cacheKey) {
+      this.quoteCache.set(cacheKey, {
+        quotes: merged,
+        expiresAt: Date.now() + this.quoteCacheTtlMs(),
+      });
+    }
+    this.logger.log(
+      `[quote-late] requestId=${requestId} carrier=${carrierId} status=merged quotes=${lateQuotes.length} totalQuotes=${merged.length}`,
+    );
   }
 
   private logQuoteAudit(requestId: string, request: ShipmentRequestRecord, quotes: CarrierQuote[]): void {
