@@ -466,10 +466,21 @@ function WmsTransferAnalyticsPageContent() {
   })
 
   const searchParamsString = searchParams.toString()
-  const searchKey = useMemo(
-    () => filterSearchFromLocationSearch(searchParamsString),
-    [searchParamsString],
-  )
+  /**
+   * После history.back() с карточки заказа `useSearchParams()` иногда один тик отстаёт от `window.location`,
+   * `searchKey` оказывается пустым → фильтры сбрасываются к дефолту и срабатывает router.replace с «пресетом».
+   * Если адресная строка уже содержит query, берём его из location как запасной источник правды.
+   */
+  const searchKey = useMemo(() => {
+    const fromHook = filterSearchFromLocationSearch(searchParamsString)
+    if (fromHook.length > 0) return fromHook
+    if (typeof window === "undefined") return fromHook
+    if (pathname !== "/dashboard/wms/analytics/transfers") return fromHook
+    const loc = window.location.search
+    const raw = loc.startsWith("?") ? loc.slice(1) : loc
+    if (raw.length > 0) return filterSearchFromLocationSearch(raw)
+    return fromHook
+  }, [searchParamsString, pathname])
 
   useLayoutEffect(() => {
     const cs = canonicalQueryString(searchKey)

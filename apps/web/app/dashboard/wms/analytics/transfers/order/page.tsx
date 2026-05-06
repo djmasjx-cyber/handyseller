@@ -121,13 +121,13 @@ export default function WmsTouristOrderDetailPage() {
 
   const backHref = listHref(sp)
 
-  /** Возврат на сводку тем же URL, что был до входа в заказ (без повторной канонизации query). */
+  /**
+   * Всегда переход по вычисленному URL сводки (те же query, что на карточке заказа, без orderNumber).
+   * `router.back()` ненадёжен: стек может вести не на сводку (другая вкладка, общий layout, редирект),
+   * тогда на аналитике снова применяются дефолтные фильтры и уходит полный пересчёт.
+   */
   const goBackToSummary = () => {
-    if (typeof window !== "undefined" && window.history.length > 1) {
-      router.back()
-      return
-    }
-    router.push(backHref)
+    router.push(backHref, { scroll: false })
   }
 
   return (
