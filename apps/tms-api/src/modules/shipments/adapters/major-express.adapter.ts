@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type {
   CarrierDescriptor,
   CarrierQuote,
+  CoreOrderSnapshot,
   CreateShipmentRequestInput,
   InternalCarrierCredentials,
   ShipmentDocumentRecord,
@@ -86,6 +87,87 @@ function extractFirstNumberTag(xml: string, tags: string[]): number {
     if (n > 0) return n;
   }
   return 0;
+}
+
+function roundMajor2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+type MajorItemRow = CoreOrderSnapshot['itemSummary'][number];
+
+function majorLineDeclaredTotalRub(row: MajorItemRow): number | null {
+  if (row.declaredValueLineRub != null && Number.isFinite(row.declaredValueLineRub) && row.declaredValueLineRub >= 0) {
+    return roundMajor2(Number(row.declaredValueLineRub));
+  }
+  if (row.priceRub != null && Number.isFinite(row.priceRub) && row.priceRub >= 0) {
+    return roundMajor2(Number(row.priceRub));
+  }
+  return null;
+}
+
+/** Объявленная стоимость для Major Calculator/Cost: max(cargo, сумма строк). */
+function majorSnapshotDeclaredTotalRub(input: CreateShipmentRequestInput): number {
+  const c = roundMajor2(Number(input.snapshot.cargo.declaredValueRub) || 0);
+  const items = input.snapshot.itemSummary ?? [];
+  let lineSum = 0;
+  for (const it of items) {
+    const v = majorLineDeclaredTotalRub(it);
+    if (v != null) lineSum = roundMajor2(lineSum + v);
+  }
+  return Math.max(1, roundMajor2(Math.max(c, lineSum)));
+}
+
+function parseMajorCalculatorBreakdown(calc: string): {
+  tariff: number;
+  insurance: number;
+  total: number;
+  vat: number;
+  deliveryTime: number;
+} {
+  const tariff = extractFirstNumberTag(calc, ['Tariff']);
+  const insurance = extractFirstNumberTag(calc, ['Insurance']);
+  const vat = extractFirstNumberTag(calc, ['Vat', 'VAT', 'NDS', 'Nds', 'VatSum', 'Tax', 'TaxSum', 'НДС']);
+  const total = extractFirstNumberTag(calc, [
+    'TotalWithVat',
+    'TotalWithVAT',
+    'TotalCostWithVat',
+    'GrandTotal',
+    'Total',
+    'TotalSum',
+    'TotalCost',
+    'Price',
+    'Summ',
+    'Cost',
+  ]);
+  const deliveryTime = Math.max(1, Math.round(extractFirstNumberTag(calc, ['DeliveryTime', 'Days'])));
+  return { tariff, insurance, total, vat, deliveryTime };
+}
+
+/**
+ * Итог для клиента: как у СДЭК — учитываем явный Total из SOAP и отдельный НДС, если Total совпадает с нетто (тариф+страх).
+ */
+function majorQuoteInclusiveRub(b: ReturnType<typeof parseMajorCalculatorBreakdown>): {
+  priceRub: number;
+  totalSource: string;
+} {
+  const net = roundMajor2(b.tariff + b.insurance);
+  const vat = roundMajor2(b.vat);
+  const total = roundMajor2(b.total);
+
+  if (total > 0) {
+    const eps = Math.max(0.05, 0.001 * Math.max(net, 1));
+    if (vat > 0 && Math.abs(total - net) <= eps) {
+      return { priceRub: roundMajor2(net + vat), totalSource: 'tariff+insurance+НДС (Total без НДС в ответе Major)' };
+    }
+    return { priceRub: total, totalSource: 'итог из ответа Major' };
+  }
+  if (net > 0 && vat > 0) {
+    return { priceRub: roundMajor2(net + vat), totalSource: 'tariff+insurance+НДС' };
+  }
+  if (net > 0) {
+    return { priceRub: net, totalSource: 'tariff+insurance' };
+  }
+  return { priceRub: 0, totalSource: 'none' };
 }
 
 function parseMajorError(xml: string): string | null {
@@ -414,9 +496,9 @@ export class MajorExpressAdapter implements CarrierAdapter {
         return null;
       }
       const serviceFlags = serviceType === 'LTL' ? (['CONSOLIDATED'] as const) : (['EXPRESS'] as const);
-      const computedPrice = result.total > 0 ? result.total : result.tariff + result.insurance;
-      const totalSource = result.total > 0 ? 'итог из ответа Major' : 'tariff + insurance';
+      const computedPrice = result.customerPriceRub;
       const serviceLabel = serviceType === 'LTL' ? 'сборный груз' : 'экспресс';
+      const vatNote = result.vat > 0 ? `, НДС ${result.vat.toFixed(2)} ₽` : '';
       return {
         id: `${requestId}:${this.descriptor.id}:${serviceType.toLowerCase()}`,
         requestId,
@@ -426,15 +508,18 @@ export class MajorExpressAdapter implements CarrierAdapter {
         priceRub: computedPrice,
         etaDays: result.deliveryTime,
         serviceFlags: [...serviceFlags],
-        notes: `${credentials.accountLabel ?? 'Клиентский договор'} · ${serviceLabel} · ${shipperCity.name} -> ${consigneeCity.name} · итог ${computedPrice.toFixed(2)} ₽ (${totalSource}), тариф ${result.tariff.toFixed(2)} ₽, страх. ${result.insurance.toFixed(2)} ₽`,
+        notes: `${credentials.accountLabel ?? 'Клиентский договор'} · ${serviceLabel} · ${shipperCity.name} -> ${consigneeCity.name} · итог ${computedPrice.toFixed(2)} ₽ (${result.priceSource}), тариф ${result.tariff.toFixed(2)} ₽, страх. ${result.insurance.toFixed(2)} ₽${vatNote}`,
         priceDetails: {
-          source: result.total > 0 ? 'carrier_total' : 'computed',
+          source: result.priceSource.startsWith('итог') ? 'carrier_total' : 'computed',
           totalRub: computedPrice,
           tariffRub: result.tariff,
           insuranceRub: result.insurance,
-          extrasRub: Math.max(computedPrice - (result.tariff + result.insurance), 0),
+          extrasRub: Math.max(
+            roundMajor2(computedPrice - result.tariff - result.insurance - result.vat),
+            0,
+          ),
           currency: 'RUB',
-          comment: `Major SOAP Calculator/Calculator1 (${serviceType})`,
+          comment: `Major SOAP (${serviceType}) · ${result.priceSource}${result.vat > 0 ? ` · НДС ${result.vat.toFixed(2)} ₽` : ''}`,
         },
         score: Math.round((100000 / Math.max(computedPrice, 1)) * 100) / 100,
       };
@@ -821,7 +906,15 @@ export class MajorExpressAdapter implements CarrierAdapter {
     shipperCityCode: number,
     consigneeCityCode: number,
     serviceType: MajorServiceType,
-  ): Promise<{ tariff: number; insurance: number; total: number; deliveryTime: number } | null> {
+  ): Promise<{
+    tariff: number;
+    insurance: number;
+    total: number;
+    vat: number;
+    deliveryTime: number;
+    customerPriceRub: number;
+    priceSource: string;
+  } | null> {
     const cargo = input.snapshot.cargo;
     const hasDimensions =
       cargo.lengthMm != null && cargo.widthMm != null && cargo.heightMm != null && cargo.lengthMm > 0;
@@ -861,33 +954,32 @@ export class MajorExpressAdapter implements CarrierAdapter {
       if (!calc) {
         return null;
       }
-      const tariff = extractFirstNumberTag(calc, ['Tariff']);
-      const insurance = extractFirstNumberTag(calc, ['Insurance']);
-      const total = extractFirstNumberTag(calc, [
-        'Total',
-        'TotalSum',
-        'TotalCost',
-        'Price',
-        'Summ',
-        'Cost',
-      ]);
+      const b = parseMajorCalculatorBreakdown(calc);
+      const { priceRub, totalSource } = majorQuoteInclusiveRub(b);
+      if (!(priceRub > 0)) return null;
       return {
-        tariff,
-        insurance,
-        total,
-        deliveryTime: Math.max(1, Math.round(extractFirstNumberTag(calc, ['DeliveryTime', 'Days']))),
+        tariff: b.tariff,
+        insurance: b.insurance,
+        total: b.total,
+        vat: b.vat,
+        deliveryTime: b.deliveryTime,
+        customerPriceRub: priceRub,
+        priceSource: totalSource,
       };
     }
 
     const calc = extractTag(xml, 'CalculatorResult') ?? xml;
-    const tariff = extractFirstNumberTag(calc, ['Tariff']);
-    const insurance = extractFirstNumberTag(calc, ['Insurance']);
-    const total = extractFirstNumberTag(calc, ['Total', 'TotalSum', 'TotalCost', 'Price', 'Summ', 'Cost']);
+    const b = parseMajorCalculatorBreakdown(calc);
+    const { priceRub, totalSource } = majorQuoteInclusiveRub(b);
+    if (!(priceRub > 0)) return null;
     return {
-      tariff,
-      insurance,
-      total,
-      deliveryTime: Math.max(1, Math.round(extractFirstNumberTag(calc, ['DeliveryTime', 'Days']))),
+      tariff: b.tariff,
+      insurance: b.insurance,
+      total: b.total,
+      vat: b.vat,
+      deliveryTime: b.deliveryTime,
+      customerPriceRub: priceRub,
+      priceSource: totalSource,
     };
   }
 
@@ -1020,7 +1112,7 @@ export class MajorExpressAdapter implements CarrierAdapter {
     const description = (input.snapshot.itemSummary[0]?.title || 'Груз').trim().slice(0, 80);
     const weightKg = Math.max(cargo.weightGrams / 1000, 0.1).toFixed(3);
     const places = Math.max(Math.round(cargo.places || 1), 1);
-    const declaredCost = Math.max(cargo.declaredValueRub, 1).toFixed(2);
+    const declaredCost = majorSnapshotDeclaredTotalRub(input).toFixed(2);
     const lengthCm = Math.max(Math.round((cargo.lengthMm ?? 100) / 10), 1);
     const widthCm = Math.max(Math.round((cargo.widthMm ?? 100) / 10), 1);
     const heightCm = Math.max(Math.round((cargo.heightMm ?? 100) / 10), 1);
@@ -1099,7 +1191,7 @@ export class MajorExpressAdapter implements CarrierAdapter {
     const description = (input.snapshot.itemSummary[0]?.title || 'Груз').trim().slice(0, 80);
     const weightKg = Math.max(cargo.weightGrams / 1000, 0.1).toFixed(3);
     const places = Math.max(Math.round(cargo.places || 1), 1);
-    const declaredCost = Math.max(cargo.declaredValueRub, 1).toFixed(2);
+    const declaredCost = majorSnapshotDeclaredTotalRub(input).toFixed(2);
     const lengthCm = Math.max(Math.round((cargo.lengthMm ?? 100) / 10), 1);
     const widthCm = Math.max(Math.round((cargo.widthMm ?? 100) / 10), 1);
     const heightCm = Math.max(Math.round((cargo.heightMm ?? 100) / 10), 1);
@@ -1456,7 +1548,7 @@ export class MajorExpressAdapter implements CarrierAdapter {
     xmlns: string,
   ): string {
     const weightKg = Math.max(input.snapshot.cargo.weightGrams / 1000, 0.1).toFixed(3);
-    const cost = Math.max(input.snapshot.cargo.declaredValueRub, 1).toFixed(2);
+    const cost = majorSnapshotDeclaredTotalRub(input).toFixed(2);
     return `<?xml version="1.0" encoding="utf-8"?>
 <soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
   <soap:Body>
@@ -1484,7 +1576,7 @@ export class MajorExpressAdapter implements CarrierAdapter {
     const lengthCm = Math.max(Math.round((cargo.lengthMm ?? 100) / 10), 1);
     const widthCm = Math.max(Math.round((cargo.widthMm ?? 100) / 10), 1);
     const heightCm = Math.max(Math.round((cargo.heightMm ?? 100) / 10), 1);
-    const cost = Math.max(cargo.declaredValueRub, 1).toFixed(2);
+    const cost = majorSnapshotDeclaredTotalRub(input).toFixed(2);
     const packagesXml = Array.from({ length: places })
       .map(
         () => `        <EDCalculatorPackageType>
