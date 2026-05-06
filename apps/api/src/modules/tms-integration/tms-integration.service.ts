@@ -541,9 +541,15 @@ export class TmsIntegrationService {
       throw new BadRequestException('Для Dalli-Service укажите API token (в поле appKey или login).');
     }
     const base = (process.env.DALLI_API_BASE ?? 'https://api.dalli-service.com/v1').replace(/\/+$/, '');
+    const xmlEscapedToken = token
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&apos;');
     const payload = `<?xml version="1.0" encoding="UTF-8"?>
 <services>
-  <auth token="${token.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')}"/>
+  <auth token="${xmlEscapedToken}"/>
 </services>`;
     const res = await fetch(`${base}/`, {
       method: 'POST',
