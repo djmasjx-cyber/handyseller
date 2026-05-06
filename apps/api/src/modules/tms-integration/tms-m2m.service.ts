@@ -863,9 +863,15 @@ components:
           type: integer
           description: Количество штук.
           example: 1
+        declaredValueLineRub:
+          type: number
+          description: |
+            Объявленная стоимость всей строки заказа (все единицы), ₽. Для СДЭК задаёт распределение страхования по позициям.
+            Если не передано, используйте priceRub либо только cargo.declaredValueRub (равномерно по единицам).
+          example: 12140
         priceRub:
           type: number
-          description: Цена позиции в рублях.
+          description: Сумма строки в рублях (legacy-алиас; если не задано declaredValueLineRub).
           example: 6070
         weightGrams:
           type: number
@@ -1939,6 +1945,14 @@ components:
         quantity:
           type: integer
           example: 1
+        declaredValueLineRub:
+          type: number
+          description: Объявленная стоимость всей строки (все шт.), ₽
+          example: 10000
+        priceRub:
+          type: number
+          description: Сумма строки, ₽ (если не задано declaredValueLineRub)
+          example: 10000
         weightGrams:
           type: number
           description: Вес позиции в граммах (если известен)
