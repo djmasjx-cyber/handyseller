@@ -249,8 +249,8 @@ function extractDeliveryModeFromQuoteId(quoteId: string): number | null {
  */
 function getCdekOrderType(): 1 | 2 {
   const raw = process.env.CDEK_ORDER_TYPE?.trim();
-  if (raw === '1') return 1;
-  return 2;
+  if (raw === '2') return 2;
+  return 1;
 }
 
 function withRequestIdHeaders(
@@ -260,6 +260,10 @@ function withRequestIdHeaders(
   const trimmed = (requestId ?? '').trim();
   if (!trimmed) return headers;
   return { ...headers, 'x-request-id': trimmed };
+}
+
+function round2(value: number): number {
+  return Math.round(value * 100) / 100;
 }
 
 export class CdekAdapter implements CarrierAdapter {
@@ -595,26 +599,31 @@ export class CdekAdapter implements CarrierAdapter {
     }
 
     const cargo = input.snapshot.cargo;
-    const declaredTotal = Math.max(Math.round(cargo.declaredValueRub || 0), 0);
-    const orderItems =
-      input.snapshot.itemSummary
-        ?.map((it, idx) => {
-          const amount = Math.max(1, Math.round(Number(it.quantity) || 1));
-          const totalWeight = Math.max(Math.round(Number(it.weightGrams) || 100), 1);
-          const itemWeight = Math.max(Math.round(totalWeight / amount), 1);
-          const name = (it.title || `Товар ${idx + 1}`).toString().slice(0, 255);
-          const wareKey = (it.productId || `item-${idx + 1}`).toString().slice(0, 50);
-          const itemDeclared = declaredTotal > 0 ? Math.max(Math.round(declaredTotal / Math.max(amount, 1)), 1) : 1;
-          return {
-            name,
-            ware_key: wareKey,
-            payment: { value: 0 },
-            cost: itemDeclared,
-            weight: itemWeight,
-            amount,
-          };
-        })
-        .filter((x) => x.amount > 0) ?? [];
+    const declaredTotal = Math.max(round2(Number(cargo.declaredValueRub) || 0), 0);
+    const rawItems = input.snapshot.itemSummary ?? [];
+    const totalUnits = Math.max(
+      1,
+      rawItems.reduce((sum, it) => sum + Math.max(1, Math.round(Number(it.quantity) || 1)), 0),
+    );
+    const declaredPerUnit = declaredTotal > 0 ? round2(declaredTotal / totalUnits) : 0;
+    const orderItems = rawItems
+      .map((it, idx) => {
+        const amount = Math.max(1, Math.round(Number(it.quantity) || 1));
+        const totalWeight = Math.max(Math.round(Number(it.weightGrams) || 100), 1);
+        const itemWeight = Math.max(Math.round(totalWeight / amount), 1);
+        const name = (it.title || `Товар ${idx + 1}`).toString().slice(0, 255);
+        const wareKey = (it.productId || `item-${idx + 1}`).toString().slice(0, 50);
+        const itemDeclared = declaredTotal > 0 ? Math.max(0.01, declaredPerUnit) : 0.01;
+        return {
+          name,
+          ware_key: wareKey,
+          payment: { value: 0 },
+          cost: itemDeclared,
+          weight: itemWeight,
+          amount,
+        };
+      })
+      .filter((x) => x.amount > 0);
     const packageItems =
       orderItems.length > 0
         ? orderItems
@@ -641,17 +650,27 @@ export class CdekAdapter implements CarrierAdapter {
     }
 
     const orderType = getCdekOrderType();
-    const packagesPayload: Record<string, unknown>[] = [
-      {
-        number: '1',
-        comment: packageItems[0]?.name || 'Груз',
-        weight: packageWeightGrams,
-        length: Math.max(Math.round((cargo.lengthMm ?? 100) / 10), 1),
-        width: Math.max(Math.round((cargo.widthMm ?? 100) / 10), 1),
-        height: Math.max(Math.round((cargo.heightMm ?? 100) / 10), 1),
-        ...(orderType === 1 ? { items: packageItems } : {}),
-      },
-    ];
+    const places = Math.max(1, Math.round(Number(cargo.places) || 1));
+    const lengthCm = Math.max(Math.round((cargo.lengthMm ?? 100) / 10), 1);
+    const widthCm = Math.max(Math.round((cargo.widthMm ?? 100) / 10), 1);
+    const heightCm = Math.max(Math.round((cargo.heightMm ?? 100) / 10), 1);
+    const basePieceWeight = Math.floor(packageWeightGrams / places);
+    const weightRemainder = packageWeightGrams % places;
+    const packagesPayload: Record<string, unknown>[] = Array.from({ length: places }, (_, i) => {
+      const weight = Math.max(100, basePieceWeight + (i < weightRemainder ? 1 : 0));
+      const row: Record<string, unknown> = {
+        number: String(i + 1),
+        comment: i === 0 ? packageItems[0]?.name || 'Груз' : 'Груз',
+        weight,
+        length: lengthCm,
+        width: widthCm,
+        height: heightCm,
+      };
+      if (orderType === 1 && i === 0) {
+        row.items = packageItems;
+      }
+      return row;
+    });
 
     const deliveryMode = extractDeliveryModeFromQuoteId(quote.id);
     const pickupPointId = (input.draft.pickupPointId ?? '').trim();
