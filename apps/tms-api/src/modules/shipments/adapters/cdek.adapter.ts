@@ -249,7 +249,9 @@ function extractDeliveryModeFromQuoteId(quoteId: string): number | null {
  */
 function getCdekOrderType(): 1 | 2 {
   const raw = process.env.CDEK_ORDER_TYPE?.trim();
-  if (raw === '2') return 2;
+  // По умолчанию используем тип 1 (интернет-магазин), чтобы CDEK принимал состав товаров.
+  // legacy CDEK_ORDER_TYPE=2 разрешаем только при явном флаге совместимости.
+  if (raw === '2' && process.env.CDEK_ENABLE_LEGACY_TYPE2 === 'true') return 2;
   return 1;
 }
 
